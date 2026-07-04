@@ -1,6 +1,6 @@
 // Offline cache for the training plan PWA.
 // Bump CACHE when you republish updated pages so phones fetch the new version.
-const CACHE = 'trainer-2026-07-04';
+const CACHE = 'trainer-2026-07-04b';
 const ASSETS = [
   './', 'index.html', 'program.html', 'meals.html', 'nutrition.html', 'remote.html',
   'update.js', 'firebase-config.js',
