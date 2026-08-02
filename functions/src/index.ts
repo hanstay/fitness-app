@@ -6,4 +6,11 @@ import { initializeApp } from "firebase-admin/app";
 
 initializeApp();
 
-export {};
+export { onUserCreate } from "./auth/onUserCreate";
+export { parseHevyCsv } from "./integrations/parseHevyCsv";
+export { saveIntervalsIcuCredentials } from "./integrations/saveIntervalsIcuCredentials";
+export { syncIntervalsActivities } from "./integrations/syncIntervalsActivities";
+export { parseBodyScan } from "./scans/parseBodyScan";
+export { calculateTargets } from "./profile/calculateTargets";
+export { generateProgram } from "./generate/generateProgram";
+export { generateMealPlan } from "./generate/generateMealPlan";

@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="robots" content="noindex, nofollow">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Hybrid Plan">
+<meta name="theme-color" content="#0f1115">
+<title>Profile — Hybrid Training Plan</title>
+<link rel="stylesheet" href="styles/theme.css">
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap narrow">
+    <h1>Your profile</h1>
+    <p class="sub">Update your stats, training setup, and diet preferences.</p>
+  </div>
+</header>
+
+<div class="wrap narrow" style="padding:26px 0 60px">
+  <div id="errorBox" class="error-msg" style="display:none"></div>
+  <div id="successBox" class="success-msg" style="display:none"></div>
+
+  <div class="card">
+    <fieldset class="field-group">
+      <legend>Stats</legend>
+      <div class="field">
+        <label for="sex">Sex</label>
+        <select class="input" id="sex">
+          <option value="">Select…</option>
+          <option value="male">Male</option>
+          <option value="female">Female</option>
+        </select>
+      </div>
+      <div class="field"><label for="age">Age</label><input class="input" type="number" id="age"></div>
+      <div class="field"><label for="height_cm">Height (cm)</label><input class="input" type="number" id="height_cm"></div>
+      <div class="field"><label for="bodyweight_kg">Weight (kg)</label><input class="input" type="number" step="0.1" id="bodyweight_kg"></div>
+      <div class="field"><label for="body_fat_pct">Body fat % (optional)</label><input class="input" type="number" step="0.1" id="body_fat_pct"></div>
+    </fieldset>
+
+    <fieldset class="field-group">
+      <legend>Training</legend>
+      <div class="field">
+        <label for="activity_level">Daily activity level</label>
+        <select class="input" id="activity_level">
+          <option value="sedentary">Sedentary</option>
+          <option value="light">Light</option>
+          <option value="moderate">Moderate</option>
+          <option value="very_active">Very active</option>
+        </select>
+      </div>
+      <div class="field"><label for="training_days_per_week">Days/week available</label><input class="input" type="number" min="1" max="7" id="training_days_per_week"></div>
+      <div class="field"><label for="session_length_minutes">Session length (minutes)</label><input class="input" type="number" id="session_length_minutes"></div>
+      <div class="field"><label for="preferred_split">Preferred split (optional)</label><input class="input" type="text" id="preferred_split"></div>
+      <div class="field"><label for="training_experience_years">Years training</label><input class="input" type="number" step="0.5" id="training_experience_years"></div>
+      <div class="field"><label for="equipment">Equipment (comma-separated)</label><input class="input" type="text" id="equipment"></div>
+    </fieldset>
+
+    <fieldset class="field-group">
+      <legend>Goals &amp; constraints</legend>
+      <div class="field"><label for="goal">Goal</label><textarea class="input" id="goal"></textarea></div>
+      <div class="field"><label for="injuries_constraints">Injuries / constraints (optional)</label><textarea class="input" id="injuries_constraints"></textarea></div>
+    </fieldset>
+
+    <fieldset class="field-group">
+      <legend>Recovery</legend>
+      <div class="field"><label for="sleep_hours">Average sleep (hours)</label><input class="input" type="number" step="0.5" id="sleep_hours"></div>
+      <div class="field">
+        <label for="sleep_quality">Sleep quality</label>
+        <select class="input" id="sleep_quality">
+          <option value="">Select…</option>
+          <option value="poor">Poor</option>
+          <option value="fair">Fair</option>
+          <option value="good">Good</option>
+          <option value="excellent">Excellent</option>
+        </select>
+      </div>
+      <div class="field"><label for="stress_1_10">Stress level (1-10)</label><input class="input" type="number" min="1" max="10" id="stress_1_10"></div>
+    </fieldset>
+
+    <fieldset class="field-group">
+      <legend>Nutrition</legend>
+      <div class="field">
+        <label for="diet_style">Diet style</label>
+        <select class="input" id="diet_style">
+          <option value="">Select…</option>
+          <option value="omnivore">Omnivore</option>
+          <option value="pescatarian">Pescatarian</option>
+          <option value="vegetarian">Vegetarian</option>
+          <option value="vegan">Vegan</option>
+        </select>
+      </div>
+      <div class="field"><label for="allergies">Allergies (comma-separated)</label><input class="input" type="text" id="allergies"></div>
+      <div class="field"><label for="foods_to_avoid">Foods to avoid (comma-separated)</label><input class="input" type="text" id="foods_to_avoid"></div>
+      <div class="field"><label for="preferred_cuisines">Preferred cuisines (comma-separated)</label><input class="input" type="text" id="preferred_cuisines"></div>
+      <div class="field"><label for="meals_per_day">Meals/day</label><input class="input" type="number" id="meals_per_day"></div>
+      <div class="field">
+        <label for="cooking_time_preference">Cooking time preference</label>
+        <select class="input" id="cooking_time_preference">
+          <option value="">Select…</option>
+          <option value="cook_fresh_daily">Cook fresh daily</option>
+          <option value="meal_prep_weekly">Meal prep weekly</option>
+          <option value="mix">Mix</option>
+          <option value="eat_out_primarily">Eat out primarily</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="eat_out_frequency">Eat-out frequency</label>
+        <select class="input" id="eat_out_frequency">
+          <option value="">Select…</option>
+          <option value="rarely">Rarely</option>
+          <option value="sometimes">Sometimes</option>
+          <option value="often">Often</option>
+          <option value="mostly">Mostly</option>
+        </select>
+      </div>
+      <div class="field"><label for="budget_preference">Budget preference (optional)</label><input class="input" type="text" id="budget_preference"></div>
+      <div class="field"><label for="supplements">Supplements (comma-separated, optional)</label><input class="input" type="text" id="supplements"></div>
+    </fieldset>
+
+    <button class="btn full" id="saveBtn" type="button">Save changes</button>
+    <button class="btn secondary full" id="recalcBtn" type="button" style="margin-top:10px">Recalculate targets from these stats</button>
+  </div>
+
+  <div class="card" id="scanHistoryCard" style="display:none">
+    <h2 style="margin:0 0 12px; font-size:1.05rem">Body scan history</h2>
+    <div id="scanHistoryList"></div>
+  </div>
+</div>
+
+<footer class="wrap">
+  <a href="dashboard.html">← Back to dashboard</a> ·
+  Personal training plan · personal-trainer toolkit · General fitness coaching, not medical advice.
+</footer>
+
+<script src="update.js"></script>
+<script type="module">
+  import { doc, getDoc, updateDoc, collection, getDocs, orderBy, query } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+  import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
+  import { db, functions } from "./js/firebase-init.js";
+  import { requireOnboarded } from "./js/auth-guard.js";
+
+  const session = await requireOnboarded();
+  if (!session) throw new Error("redirecting");
+  const { user, profile } = session;
+
+  const errorBox = document.getElementById("errorBox");
+  const successBox = document.getElementById("successBox");
+  function showError(msg) { errorBox.textContent = msg; errorBox.style.display = "block"; successBox.style.display = "none"; }
+  function showSuccess(msg) { successBox.textContent = msg; successBox.style.display = "block"; errorBox.style.display = "none"; }
+
+  // Pre-fill from the current profile.
+  const a = profile.athlete || {};
+  const n = profile.nutrition || {};
+  const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v ?? ""; };
+  const setList = (id, arr) => setVal(id, (arr || []).join(", "));
+
+  setVal("sex", a.sex); setVal("age", a.age); setVal("height_cm", a.height_cm);
+  setVal("bodyweight_kg", a.bodyweight_kg); setVal("body_fat_pct", a.body_fat_pct);
+  setVal("activity_level", a.activity_level || "moderate");
+  setVal("training_days_per_week", a.training_days_per_week);
+  setVal("session_length_minutes", a.session_length_minutes);
+  setVal("preferred_split", a.preferred_split);
+  setVal("training_experience_years", a.training_experience_years);
+  setList("equipment", a.equipment);
+  setVal("goal", a.goal); setVal("injuries_constraints", a.injuries_constraints);
+  setVal("sleep_hours", a.recovery?.sleep_hours); setVal("sleep_quality", a.recovery?.sleep_quality);
+  setVal("stress_1_10", a.recovery?.stress_1_10);
+  setVal("diet_style", n.diet_style);
+  setList("allergies", n.allergies); setList("foods_to_avoid", n.foods_to_avoid); setList("preferred_cuisines", n.preferred_cuisines);
+  setVal("meals_per_day", n.meals_per_day); setVal("cooking_time_preference", n.cooking_time_preference);
+  setVal("eat_out_frequency", n.eat_out_frequency); setVal("budget_preference", n.budget_preference);
+  setList("supplements", n.supplements);
+
+  function splitList(id) {
+    const v = document.getElementById(id).value.trim();
+    return v ? v.split(",").map((s) => s.trim()).filter(Boolean) : [];
+  }
+  function numOrNull(id) { const v = document.getElementById(id).value; return v === "" ? null : Number(v); }
+  function strOrNull(id) { const v = document.getElementById(id).value.trim(); return v === "" ? null : v; }
+
+  document.getElementById("saveBtn").addEventListener("click", async () => {
+    const btn = document.getElementById("saveBtn");
+    btn.disabled = true;
+    try {
+      await updateDoc(doc(db, "users", user.uid), {
+        athlete: {
+          ...a,
+          sex: strOrNull("sex"), age: numOrNull("age"), height_cm: numOrNull("height_cm"),
+          bodyweight_kg: numOrNull("bodyweight_kg"), body_fat_pct: numOrNull("body_fat_pct"),
+          activity_level: strOrNull("activity_level"),
+          equipment: splitList("equipment"),
+          training_days_per_week: numOrNull("training_days_per_week"),
+          session_length_minutes: numOrNull("session_length_minutes"),
+          preferred_split: strOrNull("preferred_split"),
+          training_experience_years: numOrNull("training_experience_years"),
+          injuries_constraints: document.getElementById("injuries_constraints").value.trim().slice(0, 2000),
+          goal: document.getElementById("goal").value.trim().slice(0, 1000),
+          recovery: {
+            sleep_hours: numOrNull("sleep_hours"),
+            sleep_quality: strOrNull("sleep_quality"),
+            stress_1_10: numOrNull("stress_1_10"),
+          },
+        },
+        nutrition: {
+          diet_style: strOrNull("diet_style"),
+          allergies: splitList("allergies"),
+          foods_to_avoid: splitList("foods_to_avoid"),
+          preferred_cuisines: splitList("preferred_cuisines"),
+          meals_per_day: numOrNull("meals_per_day"),
+          cooking_time_preference: strOrNull("cooking_time_preference"),
+          eat_out_frequency: strOrNull("eat_out_frequency"),
+          budget_preference: strOrNull("budget_preference"),
+          supplements: splitList("supplements"),
+        },
+      });
+      showSuccess("Saved.");
+    } catch (err) {
+      showError(`Couldn't save: ${err.message || err}`);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById("recalcBtn").addEventListener("click", async () => {
+    const btn = document.getElementById("recalcBtn");
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Calculating…';
+    try {
+      const calc = httpsCallable(functions, "calculateTargets");
+      const result = await calc();
+      showSuccess(`Targets updated: ${result.data.target_calories} kcal · ${result.data.protein_g}g protein · ${result.data.carbs_g}g carbs · ${result.data.fat_g}g fat`);
+    } catch (err) {
+      showError(`Couldn't calculate targets: ${err.message || err}`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Recalculate targets from these stats";
+    }
+  });
+
+  // Body scan history
+  const scansSnap = await getDocs(query(collection(db, "users", user.uid, "bodyScans"), orderBy("extractedAt", "desc")));
+  if (!scansSnap.empty) {
+    document.getElementById("scanHistoryCard").style.display = "block";
+    const list = document.getElementById("scanHistoryList");
+    scansSnap.forEach((d) => {
+      const s = d.data();
+      const e = s.extracted || {};
+      const row = document.createElement("div");
+      row.className = "ex";
+      row.innerHTML = `
+        <div class="row"><span class="name">${s.date || "unknown date"}</span><span class="sets">${s.source}</span></div>
+        <div class="load">${e.weight_kg ?? "?"}kg · ${e.body_fat_pct ?? "?"}% BF${e.muscle_mass_kg ? ` · ${e.muscle_mass_kg}kg muscle` : ""}</div>
+        ${s.confirmedByUser ? "" : '<div class="note">Not yet confirmed</div>'}`;
+      list.appendChild(row);
+    });
+  }
+</script>
+</body>
+</html>

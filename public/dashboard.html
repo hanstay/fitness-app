@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="robots" content="noindex, nofollow">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Hybrid Plan">
+<meta name="theme-color" content="#0f1115">
+<title>Dashboard — Hybrid Training Plan</title>
+<link rel="stylesheet" href="styles/theme.css">
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <h1 id="greeting">Your plan</h1>
+    <p class="sub" id="targetsSub">Loading…</p>
+    <div class="badges" id="targetBadges"></div>
+  </div>
+</header>
+
+<div class="wrap" style="padding:26px 0 60px; max-width:720px">
+
+  <section id="trainingLoad" style="display:none">
+    <h2><span class="dot"></span>Training load</h2>
+    <div class="stats" id="loadStats"></div>
+    <p class="note" id="loadAsOf"></p>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>Your plan</h2>
+    <div class="btn-row" style="flex-wrap:wrap">
+      <a class="btn secondary" href="program.html">View program</a>
+      <a class="btn secondary" href="meals.html">View meal plan</a>
+      <a class="btn secondary" href="profile.html">Edit profile</a>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>Regenerate</h2>
+    <p class="small muted">Re-run generation any time your profile changes.</p>
+    <div class="btn-row" style="flex-wrap:wrap">
+      <button class="btn secondary" id="regenProgramBtn" type="button">Regenerate program</button>
+      <button class="btn secondary" id="regenMealsBtn" type="button">Regenerate meal plan</button>
+      <button class="btn secondary" id="syncNowBtn" type="button">Sync intervals.icu</button>
+    </div>
+    <p class="note" id="actionStatus"></p>
+  </section>
+
+  <section>
+    <button class="btn secondary full" id="signOutBtn" type="button">Sign out</button>
+  </section>
+
+</div>
+
+<footer class="wrap">
+  Personal training plan · personal-trainer toolkit ·
+  General fitness coaching, not medical advice.
+</footer>
+
+<script src="update.js"></script>
+<script type="module">
+  import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+  import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
+  import { db, functions } from "./js/firebase-init.js";
+  import { requireOnboarded, signOut } from "./js/auth-guard.js";
+
+  const session = await requireOnboarded();
+  if (!session) throw new Error("redirecting"); // requireOnboarded already redirected
+  const { user, profile } = session;
+
+  document.getElementById("greeting").textContent = profile.displayName
+    ? `Hi ${profile.displayName}`
+    : "Your plan";
+
+  async function loadSummary() {
+    const snap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
+    return snap.exists() ? snap.data() : null;
+  }
+
+  function renderTargets(summary) {
+    const t = summary?.currentTargets;
+    const badgesEl = document.getElementById("targetBadges");
+    const subEl = document.getElementById("targetsSub");
+    if (!t) {
+      subEl.textContent = "No targets calculated yet — visit your profile to generate them.";
+      return;
+    }
+    subEl.textContent = `Updated ${t.calculated_at?.toDate ? t.calculated_at.toDate().toLocaleDateString() : "recently"}`;
+    badgesEl.innerHTML = `
+      <span class="badge"><b>${t.target_calories}</b> kcal</span>
+      <span class="badge"><b>${t.protein_g}g</b> protein</span>
+      <span class="badge"><b>${t.carbs_g}g</b> carbs</span>
+      <span class="badge"><b>${t.fat_g}g</b> fat</span>`;
+  }
+
+  function renderTrainingLoad(summary) {
+    const w = summary?.wellness;
+    if (!w) return;
+    document.getElementById("trainingLoad").style.display = "block";
+    document.getElementById("loadStats").innerHTML = `
+      <div class="stat"><div class="k">Fitness (CTL)</div><div class="v">${w.ctl}</div></div>
+      <div class="stat"><div class="k">Fatigue (ATL)</div><div class="v">${w.atl}</div></div>
+      <div class="stat"><div class="k">Form (TSB)</div><div class="v ${w.tsb < -10 ? "warn" : ""}">${w.tsb}</div></div>`;
+    document.getElementById("loadAsOf").textContent = `as of ${w.asOf} · synced from intervals.icu`;
+  }
+
+  let summary = await loadSummary();
+  renderTargets(summary);
+  renderTrainingLoad(summary);
+
+  function setStatus(msg) {
+    document.getElementById("actionStatus").textContent = msg;
+  }
+
+  async function withButtonBusy(btn, fn, busyLabel) {
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spinner"></span> ${busyLabel}`;
+    try {
+      await fn();
+    } catch (err) {
+      setStatus(`Error: ${err.message || err}`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  }
+
+  document.getElementById("regenProgramBtn").addEventListener("click", (e) => {
+    withButtonBusy(e.target, async () => {
+      setStatus("Generating a new program — this can take up to 30 seconds…");
+      await httpsCallable(functions, "generateProgram")();
+      setStatus("Program regenerated.");
+    }, "Generating…");
+  });
+
+  document.getElementById("regenMealsBtn").addEventListener("click", (e) => {
+    withButtonBusy(e.target, async () => {
+      setStatus("Generating a new meal plan — this can take up to 30 seconds…");
+      await httpsCallable(functions, "generateMealPlan")();
+      setStatus("Meal plan regenerated.");
+    }, "Generating…");
+  });
+
+  document.getElementById("syncNowBtn").addEventListener("click", (e) => {
+    withButtonBusy(e.target, async () => {
+      setStatus("Syncing intervals.icu…");
+      const result = await httpsCallable(functions, "syncIntervalsActivities")();
+      setStatus(`Synced ${result.data.activitiesSynced ?? 0} activities.`);
+      summary = await loadSummary();
+      renderTrainingLoad(summary);
+    }, "Syncing…");
+  });
+
+  document.getElementById("signOutBtn").addEventListener("click", () => signOut());
+</script>
+</body>
+</html>
