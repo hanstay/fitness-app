@@ -1,0 +1,18 @@
+# Node / npm
+node_modules/
+npm-debug.log*
+
+# Functions build output
+functions/lib/
+
+# Firebase local state
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+firestore-debug.log
+ui-debug.log
+*.local
+
+# Env / secrets — never commit
+.env
+.env.local

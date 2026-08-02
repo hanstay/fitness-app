@@ -1,0 +1,32 @@
+{
+  "name": "functions",
+  "description": "Cloud Functions for hj-2t3of5 multi-user Phase 1",
+  "engines": {
+    "node": "22"
+  },
+  "main": "lib/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:rules": "vitest run test/rules.test.ts",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "firebase-admin": "^12.7.0",
+    "firebase-functions": "^6.3.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^3.0.4",
+    "@types/node": "^22.10.5",
+    "firebase": "^11.1.0",
+    "firebase-functions-test": "^3.4.0",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  },
+  "private": true
+}

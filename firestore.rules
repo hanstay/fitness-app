@@ -1,0 +1,36 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow update: if isOwner(uid) && request.resource.data.uid == uid;
+      allow create: if false;   // seeded server-side by onUserCreate only
+      allow delete: if false;
+
+      match /state/summary       { allow read: if isOwner(uid); allow write: if false; }
+      match /targetHistory/{id}  { allow read: if isOwner(uid); allow write: if false; }
+      match /programs/{id}       { allow read: if isOwner(uid); allow write: if false; }
+      match /mealPlans/{id}      { allow read: if isOwner(uid); allow write: if false; }
+
+      match /bodyScans/{id} {
+        allow read: if isOwner(uid);
+        allow create: if false;                     // Functions-only (tied to parse+Storage)
+        allow update: if isOwner(uid);               // user corrects extracted values
+        allow delete: if false;
+      }
+
+      match /activities/{id}     { allow read: if isOwner(uid); allow write: if false; }  // Phase 1, Functions-only (intervals.icu sync)
+
+      // Phase 2 seams
+      match /workouts/{id}       { allow read, create, update, delete: if isOwner(uid); }
+      match /nutritionDays/{d}   { allow read, create, update, delete: if isOwner(uid); }
+      match /checkins/{id}       { allow read: if isOwner(uid); allow write: if false; }
+    }
+
+    match /credentials/{uid} { allow read, write: if false; }   // Admin SDK only, always
+    match /{document=**}     { allow read, write: if false; }   // default-deny
+  }
+}
