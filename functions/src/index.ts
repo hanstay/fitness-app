@@ -2,7 +2,10 @@
 // Individual functions are implemented and exported here as each is built out
 // (see .claude/plans/2026-08-02-multiuser-firebase-phase1.md for the full list).
 
+import dotenv from "dotenv";
 import { initializeApp } from "firebase-admin/app";
+
+dotenv.config();
 
 initializeApp();
 

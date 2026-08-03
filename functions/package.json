@@ -17,17 +17,18 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
     "csv-parse": "^5.6.0",
-    "firebase-admin": "^12.7.0",
+    "dotenv": "^17.4.2",
+    "firebase-admin": "^14.2.0",
     "firebase-functions": "^6.3.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^3.0.4",
     "@types/node": "^22.10.5",
-    "firebase": "^10.14.1",
-    "firebase-functions-test": "^3.4.0",
+    "firebase": "^12.17.0",
+    "firebase-functions-test": "^0.3.3",
     "typescript": "^5.7.3",
-    "vitest": "^2.1.8"
+    "vitest": "^4.1.10"
   },
   "private": true
 }
