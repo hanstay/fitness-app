@@ -61,6 +61,8 @@
   const main = document.getElementById("mainContent");
   const tocLinks = document.getElementById("tocLinks");
 
+  const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
   if (!programId) {
     main.innerHTML = `<section><p class="muted">No program generated yet. Go to your <a href="dashboard.html">dashboard</a> and generate one.</p></section>`;
     document.getElementById("pageSub").textContent = "No program yet";
@@ -68,41 +70,79 @@
     const programSnap = await getDoc(doc(db, "users", user.uid, "programs", programId));
     const p = programSnap.data();
 
-    document.getElementById("pageTitle").textContent = `${p.split} Program`;
-    document.getElementById("pageSub").textContent = `${p.daysPerWeek} days/week · generated ${
+    document.getElementById("pageTitle").textContent = p.title || `${p.split} Program`;
+    document.getElementById("pageSub").textContent = `${p.goalSummary || p.split} · ${p.daysPerWeek} days/week · generated ${
       p.createdAt?.toDate ? p.createdAt.toDate().toLocaleDateString() : "recently"
     }`;
-    document.getElementById("headerBadges").innerHTML = `<span class="badge">🏋️ <b>${p.split}</b></span><span class="badge"><b>${p.daysPerWeek}</b> days/week</span>`;
+    const eventBadges = (p.events || []).map((e) => `<span class="badge">📅 <b>${esc(e.name)}</b>${e.date ? ` · ${esc(e.date)}` : ""}</span>`).join("");
+    document.getElementById("headerBadges").innerHTML =
+      `<span class="badge">🏋️ <b>${esc(p.split)}</b></span><span class="badge"><b>${p.daysPerWeek}</b> days/week</span>${eventBadges}`;
 
     const sections = [];
+    const add = (id, label, html) => { sections.push({ id, label }); main.insertAdjacentHTML("beforeend", `<section id="${id}">${html}</section>`); };
 
-    p.sessions.forEach((session, i) => {
-      const sectionId = `session${i}`;
-      sections.push({ id: sectionId, label: `${session.day} — ${session.label}` });
-      const exercisesHtml = session.exercises.map((ex) => `
+    // Where you are now — data-grounded snapshot
+    if (p.currentState) {
+      const cs = p.currentState;
+      const load = cs.trainingLoad
+        ? `<div class="stats">
+             <div class="stat"><div class="k">Fitness (CTL)</div><div class="v">${cs.trainingLoad.ctl}</div></div>
+             <div class="stat"><div class="k">Fatigue (ATL)</div><div class="v">${cs.trainingLoad.atl}</div></div>
+             <div class="stat"><div class="k">Form (TSB)</div><div class="v ${cs.trainingLoad.tsb < -10 ? "warn" : ""}">${cs.trainingLoad.tsb}</div></div>
+           </div>` : "";
+      const highlights = (cs.highlights || []).length ? `<ul>${cs.highlights.map((h) => `<li>${esc(h)}</li>`).join("")}</ul>` : "";
+      add("current", "Where you are now", `<h2><span class="dot"></span>Where you are now</h2>${load}<p>${esc(cs.summary)}</p>${highlights}`);
+    }
+
+    // Target events
+    if ((p.events || []).length) {
+      const rows = p.events.map((e) => `<tr><td><b>${esc(e.name)}</b></td><td>${esc(e.date || "—")}</td><td>${esc(e.weeksOut || "—")}</td><td>${esc(e.goal)}</td></tr>`).join("");
+      add("events", "Target events", `<h2><span class="dot"></span>Target events</h2>
+        <div class="tablescroll"><table><thead><tr><th>Event</th><th>Date</th><th>Out</th><th>Goal</th></tr></thead><tbody>${rows}</tbody></table></div>`);
+    }
+
+    // Periodized roadmap
+    if ((p.roadmap || []).length) {
+      const rows = p.roadmap.map((ph) => `<tr>
+        <td><b>${esc(ph.phase)}</b><br><span class="muted small">${esc(ph.dates)}</span></td>
+        <td>${esc(ph.focus)}</td><td>${esc(ph.lifting)}</td><td>${esc(ph.running || "—")}</td><td>${esc(ph.nutrition || "—")}</td></tr>`).join("");
+      add("roadmap", "Roadmap", `<h2><span class="dot"></span>Periodized roadmap</h2>
+        <div class="tablescroll"><table><thead><tr><th>Phase</th><th>Focus</th><th>Lifting</th><th>Running</th><th>Nutrition</th></tr></thead><tbody>${rows}</tbody></table></div>`);
+    }
+
+    // Weekly structure
+    if ((p.weeklyStructure || []).length) {
+      const rows = p.weeklyStructure.map((d) => `<div class="ex">
+        <div class="row"><span class="name">${esc(d.day)}</span><span class="sets">${esc(d.focus)}</span></div>
+        ${d.note ? `<div class="note">${esc(d.note)}</div>` : ""}</div>`).join("");
+      add("weekly", "Weekly structure", `<h2><span class="dot"></span>Weekly structure</h2>${rows}`);
+    }
+
+    // Sessions
+    p.sessions.forEach((s, i) => {
+      const exercisesHtml = s.exercises.map((ex) => `
         <div class="ex">
-          <div class="row"><span class="name">${ex.name}</span><span class="sets">${ex.sets} × ${ex.reps}</span></div>
-          <div class="load">RIR ${ex.rir} · rest ${ex.rest_seconds}s${ex.load_note ? ` · ${ex.load_note}` : ""}</div>
-          ${ex.substitution_note ? `<div class="note">Sub: ${ex.substitution_note}</div>` : ""}
+          <div class="row"><span class="name">${esc(ex.name)}</span><span class="sets">${ex.sets} × ${esc(ex.reps)}</span></div>
+          <div class="load">RIR ${esc(ex.rir)} · rest ${ex.rest_seconds}s${ex.load_note ? ` · ${esc(ex.load_note)}` : ""}</div>
+          ${ex.substitution_note ? `<div class="note">Sub: ${esc(ex.substitution_note)}</div>` : ""}
         </div>`).join("");
-      main.insertAdjacentHTML("beforeend", `
-        <section id="${sectionId}">
-          <h2><span class="dot"></span>${session.day} — ${session.label}</h2>
-          ${exercisesHtml}
-        </section>`);
+      add(`session${i}`, `${s.day} — ${s.label}`, `<h2><span class="dot"></span>${esc(s.day)} — ${esc(s.label)}</h2>
+        ${s.focus_note ? `<p class="muted small">${esc(s.focus_note)}</p>` : ""}${exercisesHtml}`);
     });
 
-    sections.push({ id: "warmup", label: "Warm-up" });
-    main.insertAdjacentHTML("beforeend", `
-      <section id="warmup"><h2><span class="dot"></span>Warm-up</h2><p>${p.warmupNotes}</p></section>`);
+    // Running
+    if (p.running) {
+      const runSessions = (p.running.sessions || []).map((r) => `<div class="ex">
+        <div class="row"><span class="name">${esc(r.name)}</span></div><div class="note">${esc(r.detail)}</div></div>`).join("");
+      add("running", "Running", `<h2><span class="dot"></span>Running</h2><p class="muted small">${esc(p.running.pacesNote)}</p>${runSessions}`);
+    }
 
-    sections.push({ id: "progression", label: "Progression" });
-    main.insertAdjacentHTML("beforeend", `
-      <section id="progression"><h2><span class="dot"></span>Progression</h2><p>${p.progressionRules}</p></section>`);
-
-    sections.push({ id: "deload", label: "Deload" });
-    main.insertAdjacentHTML("beforeend", `
-      <section id="deload"><h2><span class="dot"></span>Deload guidance</h2><div class="callout">${p.deloadGuidance}</div></section>`);
+    add("warmup", "Warm-up", `<h2><span class="dot"></span>Warm-up</h2><p>${esc(p.warmupNotes)}</p>`);
+    add("progression", "Progression", `<h2><span class="dot"></span>Progression</h2><p>${esc(p.progressionRules)}</p>`);
+    add("deload", "Deload", `<h2><span class="dot"></span>Deload guidance</h2><div class="callout">${esc(p.deloadGuidance)}</div>`);
+    if (p.coachNotes) add("coach", "Recovery & mobility", `<h2><span class="dot"></span>Recovery &amp; mobility</h2><div class="callout warn">${esc(p.coachNotes)}</div>`);
+    if (p.sportNotes) add("sport", "Event strategy", `<h2><span class="dot"></span>Event strategy</h2><div class="callout">${esc(p.sportNotes)}</div>`);
+    if (p.nutritionNote) add("nutrition", "Fueling", `<h2><span class="dot"></span>Fueling</h2><p>${esc(p.nutritionNote)}</p>`);
 
     document.getElementById("loading").remove();
     tocLinks.insertAdjacentHTML("beforeend", sections.map((s) => `<a href="#${s.id}">${s.label}</a>`).join(""));
