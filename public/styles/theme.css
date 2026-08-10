@@ -29,6 +29,9 @@ header.hero{
 }
 .hero h1{margin:0 0 6px; font-size:1.5rem; font-weight:700; color:var(--text-primary)}
 .hero .sub{color:var(--text-secondary); font-size:.95rem; margin:0 0 14px}
+.backlink{display:inline-flex; align-items:center; gap:5px; font-size:.82rem; font-weight:600; color:var(--text-secondary); margin:0 0 12px}
+.backlink:hover{color:var(--accent-dark)}
+.btn.ok{background:#1c7a3e}
 .badges{display:flex; flex-wrap:wrap; gap:8px}
 .badge{
   background:var(--bg-tint); border:1px solid var(--border); color:var(--text-primary);

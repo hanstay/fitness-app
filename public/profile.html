@@ -19,6 +19,7 @@
 
 <header class="hero">
   <div class="wrap narrow">
+    <a class="backlink" href="dashboard.html">← Dashboard</a>
     <h1>Your profile</h1>
     <p class="sub">Update your stats, training setup, and diet preferences.</p>
   </div>
@@ -189,6 +190,7 @@
   document.getElementById("saveBtn").addEventListener("click", async () => {
     const btn = document.getElementById("saveBtn");
     btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Saving…';
     try {
       await updateDoc(doc(db, "users", user.uid), {
         athlete: {
@@ -221,10 +223,13 @@
           supplements: splitList("supplements"),
         },
       });
-      showSuccess("Saved.");
+      showSuccess("Changes saved.");
+      btn.classList.add("ok");
+      btn.textContent = "Saved ✓";
+      setTimeout(() => { btn.classList.remove("ok"); btn.textContent = "Save changes"; btn.disabled = false; }, 1800);
     } catch (err) {
       showError(`Couldn't save: ${err.message || err}`);
-    } finally {
+      btn.textContent = "Save changes";
       btn.disabled = false;
     }
   });
