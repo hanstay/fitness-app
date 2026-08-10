@@ -12,7 +12,6 @@ let uploadedScanId = null;
 
 const errorBox = document.getElementById("errorBox");
 const successBox = document.getElementById("successBox");
-const stepSub = document.getElementById("stepSub");
 
 function showError(msg) {
   errorBox.textContent = msg;
@@ -34,18 +33,6 @@ function goToStep(n) {
   for (let i = 1; i <= 4; i++) {
     document.getElementById(`step${i}`).style.display = i === n ? "block" : "none";
   }
-  document.querySelectorAll(".step-indicator .step").forEach((el, idx) => {
-    const stepNum = idx + 1;
-    el.classList.toggle("done", stepNum < n);
-    el.classList.toggle("active", stepNum === n);
-  });
-  const labels = {
-    1: "Step 1 of 4 — Body scan (optional)",
-    2: "Step 2 of 4 — Connect your data (optional)",
-    3: "Step 3 of 4 — Your profile",
-    4: "Step 4 of 4 — Review & generate",
-  };
-  stepSub.textContent = labels[n];
   clearMessages();
   updateDoc(doc(db, "users", user.uid), { "onboarding.step": ["scan", "integrations", "profile", "review"][n - 1] }).catch(() => {});
 }

@@ -9,7 +9,9 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Hybrid Plan">
-<meta name="theme-color" content="#0f1115">
+<meta name="theme-color" content="#ffffff">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <title>Set Up Your Profile — Hybrid Training Plan</title>
 <link rel="stylesheet" href="styles/theme.css">
 </head>
@@ -18,87 +20,107 @@
 <header class="hero">
   <div class="wrap narrow">
     <h1>Let's set up your plan</h1>
-    <p class="sub" id="stepSub">Step 1 of 4 — Body scan (optional)</p>
+    <p class="sub">A few quick steps and your program is ready.</p>
   </div>
 </header>
 
 <div class="wrap narrow" style="padding:26px 0 60px">
-  <div class="step-indicator">
-    <div class="step" data-step="1"></div>
-    <div class="step" data-step="2"></div>
-    <div class="step" data-step="3"></div>
-    <div class="step" data-step="4"></div>
-  </div>
-
   <div id="errorBox" class="error-msg" style="display:none"></div>
   <div id="successBox" class="success-msg" style="display:none"></div>
 
   <!-- Step 1: Body scan -->
-  <section id="step1" class="card">
-    <h2><span class="dot"></span>Upload a body scan</h2>
-    <p class="small muted">Visbody, Evolt, or similar. We'll pull your weight and body fat % straight from the report so you don't have to re-type them — you'll get a chance to review before anything is saved.</p>
-
-    <div class="field">
-      <label for="scanFile">Scan PDF</label>
-      <input class="input" type="file" id="scanFile" accept="application/pdf">
+  <section id="step1" class="wizard-card">
+    <div class="wizard-head">
+      <div>
+        <p class="wizard-step-label">Step 1 of 4</p>
+        <p class="wizard-title">Body scan (optional)</p>
+      </div>
+      <div class="progress-track"><div class="progress-fill" style="width:25%"></div></div>
     </div>
-    <button class="btn" id="scanUploadBtn" type="button">Upload &amp; extract</button>
+    <div class="wizard-body">
+      <h3>Upload a body scan</h3>
+      <p class="lead">Visbody, Evolt, or similar. We'll pull your weight and body fat % straight from the report so you don't have to re-type them — you'll review before anything is saved.</p>
 
-    <div id="scanReview" style="display:none; margin-top:18px">
-      <fieldset class="field-group">
-        <legend>Review extracted values</legend>
-        <div class="field">
-          <label for="scanWeight">Weight (kg)</label>
-          <input class="input" type="number" step="0.1" id="scanWeight">
-        </div>
-        <div class="field">
-          <label for="scanBodyFat">Body fat %</label>
-          <input class="input" type="number" step="0.1" id="scanBodyFat">
-        </div>
-        <p class="note" id="scanExtra"></p>
-      </fieldset>
-      <button class="btn" id="scanConfirmBtn" type="button">Looks right, continue</button>
+      <div class="field">
+        <label for="scanFile">Scan PDF</label>
+        <input class="input" type="file" id="scanFile" accept="application/pdf">
+      </div>
+      <button class="btn full" id="scanUploadBtn" type="button">Upload &amp; extract</button>
+
+      <div id="scanReview" style="display:none; margin-top:18px">
+        <fieldset class="field-group">
+          <legend>Review extracted values</legend>
+          <div class="field">
+            <label for="scanWeight">Weight (kg)</label>
+            <input class="input" type="number" step="0.1" id="scanWeight">
+          </div>
+          <div class="field">
+            <label for="scanBodyFat">Body fat %</label>
+            <input class="input" type="number" step="0.1" id="scanBodyFat">
+          </div>
+          <p class="note" id="scanExtra"></p>
+        </fieldset>
+        <button class="btn full" id="scanConfirmBtn" type="button">Looks right, continue</button>
+      </div>
+
+      <p class="skip-link"><a href="#" id="skipScan">Skip — I'll enter my stats manually</a></p>
     </div>
-
-    <p class="skip-link"><a href="#" id="skipScan">Skip — I'll enter my stats manually</a></p>
   </section>
 
   <!-- Step 2: Connect data sources -->
-  <section id="step2" class="card" style="display:none">
-    <h2><span class="dot"></span>Connect your data</h2>
-    <p class="small muted">Optional. This gives your program a head start with real training history.</p>
-
-    <fieldset class="field-group">
-      <legend>intervals.icu</legend>
-      <div class="field">
-        <label for="icuAthleteId">Athlete ID</label>
-        <input class="input" type="text" id="icuAthleteId" placeholder="i123456">
+  <section id="step2" class="wizard-card" style="display:none">
+    <div class="wizard-head">
+      <div>
+        <p class="wizard-step-label">Step 2 of 4</p>
+        <p class="wizard-title">Connect your data (optional)</p>
       </div>
-      <div class="field">
-        <label for="icuApiKey">API Key</label>
-        <input class="input" type="password" id="icuApiKey">
-        <p class="hint">Find both at intervals.icu → Settings → Developer Settings.</p>
-      </div>
-      <button class="btn secondary" id="icuConnectBtn" type="button">Connect &amp; sync</button>
-      <p class="note" id="icuStatus"></p>
-    </fieldset>
+      <div class="progress-track"><div class="progress-fill" style="width:50%"></div></div>
+    </div>
+    <div class="wizard-body">
+      <h3>Connect your data</h3>
+      <p class="lead">Optional. This gives your program a head start with real training history.</p>
 
-    <fieldset class="field-group">
-      <legend>Hevy</legend>
-      <div class="field">
-        <label for="hevyFile">Workout export CSV</label>
-        <input class="input" type="file" id="hevyFile" accept=".csv">
-      </div>
-      <button class="btn secondary" id="hevyUploadBtn" type="button">Upload &amp; import lifts</button>
-      <p class="note" id="hevyStatus"></p>
-    </fieldset>
+      <fieldset class="field-group">
+        <legend>intervals.icu</legend>
+        <div class="field">
+          <label for="icuAthleteId">Athlete ID</label>
+          <input class="input" type="text" id="icuAthleteId" placeholder="i123456">
+        </div>
+        <div class="field">
+          <label for="icuApiKey">API Key</label>
+          <input class="input" type="password" id="icuApiKey">
+          <p class="hint">Find both at intervals.icu → Settings → Developer Settings.</p>
+        </div>
+        <button class="btn secondary" id="icuConnectBtn" type="button">Connect &amp; sync</button>
+        <p class="note" id="icuStatus"></p>
+      </fieldset>
 
-    <button class="btn" id="step2ContinueBtn" type="button">Continue</button>
+      <fieldset class="field-group">
+        <legend>Hevy</legend>
+        <div class="field">
+          <label for="hevyFile">Workout export CSV</label>
+          <input class="input" type="file" id="hevyFile" accept=".csv">
+        </div>
+        <button class="btn secondary" id="hevyUploadBtn" type="button">Upload &amp; import lifts</button>
+        <p class="note" id="hevyStatus"></p>
+      </fieldset>
+
+      <button class="btn full" id="step2ContinueBtn" type="button">Continue</button>
+    </div>
   </section>
 
   <!-- Step 3: Profile form -->
-  <section id="step3" class="card" style="display:none">
-    <h2><span class="dot"></span>Your profile</h2>
+  <section id="step3" class="wizard-card" style="display:none">
+    <div class="wizard-head">
+      <div>
+        <p class="wizard-step-label">Step 3 of 4</p>
+        <p class="wizard-title">Your profile</p>
+      </div>
+      <div class="progress-track"><div class="progress-fill" style="width:75%"></div></div>
+    </div>
+    <div class="wizard-body">
+      <h3>Your profile</h3>
+      <p class="lead">The essentials so we can tailor your program and targets.</p>
 
     <fieldset class="field-group">
       <legend>Stats</legend>
@@ -198,28 +220,38 @@
       <div class="field"><label for="supplements">Supplements (comma-separated, optional)</label><input class="input" type="text" id="supplements"></div>
     </fieldset>
 
-    <button class="btn" id="step3ContinueBtn" type="button">Save &amp; continue</button>
+    <button class="btn full" id="step3ContinueBtn" type="button">Save &amp; continue</button>
+    </div>
   </section>
 
   <!-- Step 4: Review & generate -->
-  <section id="step4" class="card" style="display:none">
-    <h2><span class="dot"></span>Review &amp; generate</h2>
-
-    <div id="targetsBlock">
-      <p class="small muted">Calculate your calorie and macro targets from the profile you just filled in.</p>
-      <button class="btn secondary" id="calcTargetsBtn" type="button">Calculate targets</button>
-      <div id="targetsResult" style="display:none; margin-top:14px" class="badges"></div>
-    </div>
-
-    <div id="generateBlock" style="display:none; margin-top:20px">
-      <div class="btn-row">
-        <button class="btn secondary" id="genProgramBtn" type="button">Generate program</button>
-        <button class="btn secondary" id="genMealsBtn" type="button">Generate meal plan</button>
+  <section id="step4" class="wizard-card" style="display:none">
+    <div class="wizard-head">
+      <div>
+        <p class="wizard-step-label">Step 4 of 4</p>
+        <p class="wizard-title">Review &amp; generate</p>
       </div>
-      <p class="note" id="genStatus"></p>
+      <div class="progress-track"><div class="progress-fill" style="width:100%"></div></div>
     </div>
+    <div class="wizard-body">
+      <h3>Review &amp; generate</h3>
+      <p class="lead">Set your targets, then generate your program and meal plan.</p>
 
-    <button class="btn full" id="finishBtn" type="button" style="margin-top:22px" disabled>Finish &amp; go to dashboard</button>
+      <div id="targetsBlock">
+        <button class="btn secondary full" id="calcTargetsBtn" type="button">Calculate targets</button>
+        <div id="targetsResult" style="display:none; margin-top:14px" class="badges"></div>
+      </div>
+
+      <div id="generateBlock" style="display:none; margin-top:20px">
+        <div class="btn-row">
+          <button class="btn secondary" id="genProgramBtn" type="button">Generate program</button>
+          <button class="btn secondary" id="genMealsBtn" type="button">Generate meal plan</button>
+        </div>
+        <p class="note" id="genStatus"></p>
+      </div>
+
+      <button class="btn full" id="finishBtn" type="button" style="margin-top:22px" disabled>Finish &amp; go to dashboard</button>
+    </div>
   </section>
 </div>
 
