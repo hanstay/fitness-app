@@ -7,8 +7,12 @@ import { requireAuth } from "./auth-guard.js";
 const user = await requireAuth();
 if (!user) throw new Error("not authenticated"); // requireAuth already redirected
 
-let currentStep = 1;
 let uploadedScanId = null;
+
+// Generations kicked off as the user completes optional cards. Each is a
+// promise that resolves/rejects on its own; we wait for all of them on the
+// finishing screen so the user isn't blocked mid-flow.
+const pendingGenerations = []; // { label, promise }
 
 const errorBox = document.getElementById("errorBox");
 const successBox = document.getElementById("successBox");
@@ -28,81 +32,57 @@ function clearMessages() {
   successBox.style.display = "none";
 }
 
+const STEP_KEYS = { 1: "basics", 2: "training", 3: "nutrition" };
+
 function goToStep(n) {
-  currentStep = n;
-  for (let i = 1; i <= 4; i++) {
+  for (let i = 1; i <= 3; i++) {
     document.getElementById(`step${i}`).style.display = i === n ? "block" : "none";
   }
+  document.getElementById("finishing").style.display = "none";
   clearMessages();
-  updateDoc(doc(db, "users", user.uid), { "onboarding.step": ["scan", "integrations", "profile", "review"][n - 1] }).catch(() => {});
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  updateDoc(doc(db, "users", user.uid), { "onboarding.step": STEP_KEYS[n] }).catch(() => {});
 }
 
-/* ---------- Step 1: Body scan ---------- */
+/* ---------- field helpers ---------- */
 
-document.getElementById("scanUploadBtn").addEventListener("click", async () => {
-  const fileInput = document.getElementById("scanFile");
-  const file = fileInput.files[0];
-  if (!file) return showError("Choose a PDF file first.");
+function splitList(id) {
+  const v = document.getElementById(id).value.trim();
+  return v ? v.split(",").map((s) => s.trim()).filter(Boolean) : [];
+}
+function numOrNull(id) {
+  const v = document.getElementById(id).value;
+  return v === "" ? null : Number(v);
+}
+function strOrNull(id) {
+  const v = document.getElementById(id).value.trim();
+  return v === "" ? null : v;
+}
+
+/* ---------- Card 1: About you (mandatory) ---------- */
+
+document.getElementById("step1ContinueBtn").addEventListener("click", async () => {
   clearMessages();
-  const btn = document.getElementById("scanUploadBtn");
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Uploading…';
-  try {
-    const scanId = crypto.randomUUID();
-    const path = `users/${user.uid}/bodyscans/${scanId}.pdf`;
-    await uploadBytes(storageRef(storage, path), file);
-    btn.innerHTML = '<span class="spinner"></span> Extracting…';
-    const parseBodyScan = httpsCallable(functions, "parseBodyScan");
-    const result = await parseBodyScan({ scanId, storagePath: path });
-    const extracted = result.data.extracted;
-    uploadedScanId = scanId;
-    document.getElementById("scanWeight").value = extracted.weight_kg ?? "";
-    document.getElementById("scanBodyFat").value = extracted.body_fat_pct ?? "";
-    const extras = [];
-    if (extracted.muscle_mass_kg) extras.push(`Muscle mass: ${extracted.muscle_mass_kg}kg`);
-    if (extracted.bmr_kcal) extras.push(`BMR: ${extracted.bmr_kcal}kcal`);
-    if (extracted.visceral_fat_level) extras.push(`Visceral fat: ${extracted.visceral_fat_level}`);
-    document.getElementById("scanExtra").textContent = extras.join(" · ");
-    document.getElementById("scanReview").style.display = "block";
-    showSuccess("Extracted — review and confirm below.");
-  } catch (err) {
-    showError(`Couldn't process that scan: ${err.message || err}`);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Upload & extract";
-  }
-});
+  const sex = strOrNull("sex");
+  const age = numOrNull("age");
+  if (!sex || !age) return showError("Sex and age are required to continue.");
 
-document.getElementById("scanConfirmBtn").addEventListener("click", async () => {
-  if (!uploadedScanId) return;
-  const weight_kg = parseFloat(document.getElementById("scanWeight").value) || null;
-  const body_fat_pct = parseFloat(document.getElementById("scanBodyFat").value) || null;
+  const btn = document.getElementById("step1ContinueBtn");
+  btn.disabled = true;
   try {
-    await updateDoc(doc(db, "users", user.uid, "bodyScans", uploadedScanId), {
-      "extracted.weight_kg": weight_kg,
-      "extracted.body_fat_pct": body_fat_pct,
-      confirmedByUser: true,
-    });
-    await updateDoc(doc(db, "users", user.uid), {
-      "athlete.bodyweight_kg": weight_kg,
-      "athlete.bodyweight_date": new Date().toISOString().slice(0, 10),
-      "athlete.body_fat_pct": body_fat_pct,
-    });
-    // Pre-fill step 3 fields for when the user gets there.
-    document.getElementById("bodyweight_kg").value = weight_kg ?? "";
-    document.getElementById("body_fat_pct").value = body_fat_pct ?? "";
+    await updateDoc(doc(db, "users", user.uid), { "athlete.sex": sex, "athlete.age": age });
     goToStep(2);
   } catch (err) {
-    showError(`Couldn't save that: ${err.message || err}`);
+    showError(`Couldn't save: ${err.message || err}`);
+  } finally {
+    btn.disabled = false;
   }
 });
 
-document.getElementById("skipScan").addEventListener("click", (e) => {
-  e.preventDefault();
-  goToStep(2);
-});
+/* ---------- Card 2: Training (optional) ---------- */
 
-/* ---------- Step 2: Connect data ---------- */
+document.getElementById("step2BackBtn").addEventListener("click", () => goToStep(1));
+document.getElementById("step2SkipBtn").addEventListener("click", () => goToStep(3));
 
 document.getElementById("icuConnectBtn").addEventListener("click", async () => {
   const athleteId = document.getElementById("icuAthleteId").value.trim();
@@ -148,191 +128,204 @@ document.getElementById("hevyUploadBtn").addEventListener("click", async () => {
   }
 });
 
-document.getElementById("step2ContinueBtn").addEventListener("click", () => goToStep(3));
-
-/* ---------- Step 3: Profile form ---------- */
-
-function splitList(id) {
-  const v = document.getElementById(id).value.trim();
-  return v ? v.split(",").map((s) => s.trim()).filter(Boolean) : [];
+// Save training fields with dot-paths so we never clobber nutrition or
+// Hevy-imported current_lifts. Returns whether the program can be generated.
+async function saveTrainingFields() {
+  const days = numOrNull("training_days_per_week");
+  const session = numOrNull("session_length_minutes");
+  await updateDoc(doc(db, "users", user.uid), {
+    "athlete.training_days_per_week": days,
+    "athlete.session_length_minutes": session,
+    "athlete.training_experience_years": numOrNull("training_experience_years"),
+    "athlete.preferred_split": strOrNull("preferred_split"),
+    "athlete.equipment": splitList("equipment"),
+    "athlete.goal": document.getElementById("goal").value.trim().slice(0, 1000) || null,
+    "athlete.injuries_constraints": document.getElementById("injuries_constraints").value.trim().slice(0, 2000) || null,
+  });
+  return Boolean(days && session);
 }
-function numOrNull(id) {
-  const v = document.getElementById(id).value;
-  return v === "" ? null : Number(v);
-}
-function strOrNull(id) {
-  const v = document.getElementById(id).value.trim();
-  return v === "" ? null : v;
-}
 
-let eventRowCount = 0;
-document.getElementById("addEventBtn").addEventListener("click", () => {
-  eventRowCount++;
-  const row = document.createElement("div");
-  row.className = "field";
-  row.dataset.eventRow = eventRowCount;
-  row.innerHTML = `
-    <div style="display:flex; gap:8px; align-items:center">
-      <input class="input" type="text" placeholder="Event name" style="flex:2" data-event-name>
-      <input class="input" type="date" style="flex:1" data-event-date>
-      <button type="button" class="btn secondary" data-remove-event style="padding:8px 12px">×</button>
-    </div>`;
-  row.querySelector("[data-remove-event]").addEventListener("click", () => row.remove());
-  document.getElementById("eventsList").appendChild(row);
+document.getElementById("step2ContinueBtn").addEventListener("click", async () => {
+  clearMessages();
+  const btn = document.getElementById("step2ContinueBtn");
+  btn.disabled = true;
+  try {
+    const canGenerate = await saveTrainingFields();
+    if (canGenerate) {
+      pendingGenerations.push({
+        label: "training program",
+        promise: httpsCallable(functions, "generateProgram")(),
+      });
+    }
+    goToStep(3);
+  } catch (err) {
+    showError(`Couldn't save your training details: ${err.message || err}`);
+  } finally {
+    btn.disabled = false;
+  }
 });
 
-document.getElementById("step3ContinueBtn").addEventListener("click", async () => {
-  clearMessages();
-  const events = Array.from(document.querySelectorAll("#eventsList [data-event-row]"))
-    .map((row) => ({
-      name: row.querySelector("[data-event-name]").value.trim(),
-      date: row.querySelector("[data-event-date]").value,
-    }))
-    .filter((e) => e.name && e.date);
+/* ---------- Card 3: Nutrition (optional) ---------- */
 
-  const update = {
-    athlete: {
-      sex: strOrNull("sex"),
-      age: numOrNull("age"),
-      height_cm: numOrNull("height_cm"),
-      bodyweight_kg: numOrNull("bodyweight_kg"),
-      bodyweight_date: new Date().toISOString().slice(0, 10),
-      body_fat_pct: numOrNull("body_fat_pct"),
-      activity_level: strOrNull("activity_level"),
-      equipment: splitList("equipment"),
-      training_days_per_week: numOrNull("training_days_per_week"),
-      session_length_minutes: numOrNull("session_length_minutes"),
-      preferred_split: strOrNull("preferred_split"),
-      training_experience_years: numOrNull("training_experience_years"),
-      injuries_constraints: document.getElementById("injuries_constraints").value.trim().slice(0, 2000),
-      events,
-      goal: document.getElementById("goal").value.trim().slice(0, 1000),
-      current_lifts: [],
-      recovery: {
-        sleep_hours: numOrNull("sleep_hours"),
-        sleep_quality: strOrNull("sleep_quality"),
-        stress_1_10: numOrNull("stress_1_10"),
-      },
-    },
+document.getElementById("step3BackBtn").addEventListener("click", () => goToStep(2));
+
+document.getElementById("scanUploadBtn").addEventListener("click", async () => {
+  const fileInput = document.getElementById("scanFile");
+  const file = fileInput.files[0];
+  if (!file) return showError("Choose a PDF file first.");
+  clearMessages();
+  const btn = document.getElementById("scanUploadBtn");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Uploading…';
+  try {
+    const scanId = crypto.randomUUID();
+    const path = `users/${user.uid}/bodyscans/${scanId}.pdf`;
+    await uploadBytes(storageRef(storage, path), file);
+    btn.innerHTML = '<span class="spinner"></span> Extracting…';
+    const parseBodyScan = httpsCallable(functions, "parseBodyScan");
+    const result = await parseBodyScan({ scanId, storagePath: path });
+    const extracted = result.data.extracted;
+    uploadedScanId = scanId;
+    document.getElementById("scanWeight").value = extracted.weight_kg ?? "";
+    document.getElementById("scanBodyFat").value = extracted.body_fat_pct ?? "";
+    const extras = [];
+    if (extracted.muscle_mass_kg) extras.push(`Muscle mass: ${extracted.muscle_mass_kg}kg`);
+    if (extracted.bmr_kcal) extras.push(`BMR: ${extracted.bmr_kcal}kcal`);
+    if (extracted.visceral_fat_level) extras.push(`Visceral fat: ${extracted.visceral_fat_level}`);
+    document.getElementById("scanExtra").textContent = extras.join(" · ");
+    document.getElementById("scanReview").style.display = "block";
+    showSuccess("Extracted — review and confirm below.");
+  } catch (err) {
+    showError(`Couldn't process that scan: ${err.message || err}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Upload & extract";
+  }
+});
+
+document.getElementById("scanConfirmBtn").addEventListener("click", async () => {
+  if (!uploadedScanId) return;
+  const weight_kg = parseFloat(document.getElementById("scanWeight").value) || null;
+  const body_fat_pct = parseFloat(document.getElementById("scanBodyFat").value) || null;
+  try {
+    await updateDoc(doc(db, "users", user.uid, "bodyScans", uploadedScanId), {
+      "extracted.weight_kg": weight_kg,
+      "extracted.body_fat_pct": body_fat_pct,
+      confirmedByUser: true,
+    });
+    // Pre-fill the stats fields so the user doesn't retype them.
+    document.getElementById("bodyweight_kg").value = weight_kg ?? "";
+    document.getElementById("body_fat_pct").value = body_fat_pct ?? "";
+    showSuccess("Values applied to your stats below.");
+  } catch (err) {
+    showError(`Couldn't save that: ${err.message || err}`);
+  }
+});
+
+// Save nutrition + stats with dot-paths (athlete stats) and a nutrition object.
+// Returns whether targets + meal plan can be generated.
+async function saveNutritionFields() {
+  const height = numOrNull("height_cm");
+  const weight = numOrNull("bodyweight_kg");
+  const meals = numOrNull("meals_per_day");
+  await updateDoc(doc(db, "users", user.uid), {
+    "athlete.height_cm": height,
+    "athlete.bodyweight_kg": weight,
+    "athlete.bodyweight_date": new Date().toISOString().slice(0, 10),
+    "athlete.body_fat_pct": numOrNull("body_fat_pct"),
+    "athlete.activity_level": strOrNull("activity_level") || "moderate",
     nutrition: {
       diet_style: strOrNull("diet_style"),
       allergies: splitList("allergies"),
       foods_to_avoid: splitList("foods_to_avoid"),
       preferred_cuisines: splitList("preferred_cuisines"),
-      meals_per_day: numOrNull("meals_per_day"),
+      meals_per_day: meals,
       cooking_time_preference: strOrNull("cooking_time_preference"),
       eat_out_frequency: strOrNull("eat_out_frequency"),
       budget_preference: strOrNull("budget_preference"),
       supplements: splitList("supplements"),
     },
-  };
-
-  if (!update.athlete.sex || !update.athlete.age || !update.athlete.height_cm || !update.athlete.bodyweight_kg) {
-    return showError("Sex, age, height, and weight are required to calculate your targets.");
-  }
-
-  const btn = document.getElementById("step3ContinueBtn");
-  btn.disabled = true;
-  try {
-    await updateDoc(doc(db, "users", user.uid), update);
-    goToStep(4);
-  } catch (err) {
-    showError(`Couldn't save your profile: ${err.message || err}`);
-  } finally {
-    btn.disabled = false;
-  }
-});
-
-/* ---------- Step 4: Review & generate ---------- */
-
-let targetsCalculated = false;
-let programGenerated = false;
-let mealsGenerated = false;
-
-function updateFinishButton() {
-  document.getElementById("finishBtn").disabled = !(targetsCalculated && programGenerated && mealsGenerated);
+  });
+  return Boolean(height && weight && meals);
 }
 
-document.getElementById("calcTargetsBtn").addEventListener("click", async () => {
+document.getElementById("step3FinishBtn").addEventListener("click", async () => {
   clearMessages();
-  const btn = document.getElementById("calcTargetsBtn");
+  const btn = document.getElementById("step3FinishBtn");
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Calculating…';
   try {
-    const calc = httpsCallable(functions, "calculateTargets");
-    const result = await calc();
-    const t = result.data;
-    const resultBox = document.getElementById("targetsResult");
-    resultBox.innerHTML = `
-      <span class="badge"><b>${t.target_calories}</b> kcal</span>
-      <span class="badge"><b>${t.protein_g}g</b> protein</span>
-      <span class="badge"><b>${t.carbs_g}g</b> carbs</span>
-      <span class="badge"><b>${t.fat_g}g</b> fat</span>`;
-    resultBox.style.display = "flex";
-    document.getElementById("generateBlock").style.display = "block";
-    targetsCalculated = true;
-    updateFinishButton();
+    const canGenerate = await saveNutritionFields();
+    if (canGenerate) {
+      pendingGenerations.push({
+        label: "meal plan",
+        // targets must be computed before the meal plan (which reads them).
+        promise: httpsCallable(functions, "calculateTargets")()
+          .then(() => httpsCallable(functions, "generateMealPlan")()),
+      });
+    }
+    await finishOnboarding();
   } catch (err) {
-    showError(`Couldn't calculate targets: ${err.message || err}`);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Calculate targets";
-  }
-});
-
-document.getElementById("genProgramBtn").addEventListener("click", async () => {
-  clearMessages();
-  const btn = document.getElementById("genProgramBtn");
-  const status = document.getElementById("genStatus");
-  btn.disabled = true;
-  status.textContent = "Generating your program — this can take up to 30 seconds…";
-  try {
-    const gen = httpsCallable(functions, "generateProgram");
-    await gen();
-    status.textContent = "Program generated.";
-    programGenerated = true;
-    updateFinishButton();
-  } catch (err) {
-    status.textContent = "";
-    showError(`Couldn't generate a program: ${err.message || err}`);
-  } finally {
+    showError(`Couldn't save your nutrition details: ${err.message || err}`);
     btn.disabled = false;
   }
 });
 
-document.getElementById("genMealsBtn").addEventListener("click", async () => {
-  clearMessages();
-  const btn = document.getElementById("genMealsBtn");
-  const status = document.getElementById("genStatus");
+document.getElementById("step3SkipBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("step3SkipBtn");
   btn.disabled = true;
-  status.textContent = "Generating your meal plan — this can take up to 30 seconds…";
   try {
-    const gen = httpsCallable(functions, "generateMealPlan");
-    await gen();
-    status.textContent = "Meal plan generated.";
-    mealsGenerated = true;
-    updateFinishButton();
+    await finishOnboarding();
   } catch (err) {
-    status.textContent = "";
-    showError(`Couldn't generate a meal plan: ${err.message || err}`);
-  } finally {
+    showError(`Couldn't finish: ${err.message || err}`);
     btn.disabled = false;
   }
 });
 
-document.getElementById("finishBtn").addEventListener("click", async () => {
+/* ---------- Finishing ---------- */
+
+async function finishOnboarding() {
+  // Show the finishing screen and wait for any queued generations.
+  for (let i = 1; i <= 3; i++) document.getElementById(`step${i}`).style.display = "none";
+  document.getElementById("finishing").style.display = "block";
+  clearMessages();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+
+  const finishTitle = document.getElementById("finishTitle");
+  const finishMsg = document.getElementById("finishMsg");
+  const finishSpinner = document.getElementById("finishSpinner");
+
+  if (pendingGenerations.length === 0) {
+    finishTitle.textContent = "All set";
+    finishMsg.textContent = "Taking you to your dashboard…";
+  } else {
+    const labels = pendingGenerations.map((g) => g.label).join(" and ");
+    finishMsg.textContent = `Building your ${labels} — this can take up to a minute.`;
+  }
+
+  const results = await Promise.allSettled(pendingGenerations.map((g) => g.promise));
+  const failed = pendingGenerations.filter((_, i) => results[i].status === "rejected").map((g) => g.label);
+
   await updateDoc(doc(db, "users", user.uid), {
     "onboarding.completed": true,
     "onboarding.step": "done",
   });
-  location.href = "dashboard.html";
-});
+
+  if (failed.length) {
+    // Don't block completion — the dashboard lets them retry generation.
+    finishSpinner.style.display = "none";
+    finishTitle.textContent = "Almost there";
+    finishMsg.innerHTML = `We couldn't build your ${failed.join(" and ")} just now — you can generate ${failed.length > 1 ? "them" : "it"} from your dashboard. Taking you there…`;
+    setTimeout(() => (location.href = "dashboard.html"), 2500);
+  } else {
+    location.href = "dashboard.html";
+  }
+}
 
 /* ---------- Resume where the user left off ---------- */
 (async function init() {
   const snap = await getDoc(doc(db, "users", user.uid));
   const profile = snap.exists() ? snap.data() : null;
   const step = profile?.onboarding?.step;
-  const startStep = { scan: 1, integrations: 2, profile: 3, review: 4 }[step] || 1;
+  const startStep = { basics: 1, training: 2, nutrition: 3 }[step] || 1;
   goToStep(startStep);
 })();
