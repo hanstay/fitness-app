@@ -142,7 +142,7 @@
       viewMeta: "View your current split",
       genLabel: "training program",
       missingHint: "Add your training details (days/week, session length) in your profile first.",
-      generate: () => httpsCallable(functions, "generateProgram")(),
+      generate: () => httpsCallable(functions, "generateProgram", { timeout: 300000 })(),
     }));
     el.appendChild(featureCard({
       icon: "🍱",
@@ -153,7 +153,7 @@
       viewMeta: "Meals that hit your macros",
       genLabel: "meal plan",
       missingHint: "Add your stats (height, weight, meals/day) in your profile first.",
-      generate: () => httpsCallable(functions, "calculateTargets")().then(() => httpsCallable(functions, "generateMealPlan")()),
+      generate: () => httpsCallable(functions, "calculateTargets")().then(() => httpsCallable(functions, "generateMealPlan", { timeout: 300000 })()),
     }));
   }
 

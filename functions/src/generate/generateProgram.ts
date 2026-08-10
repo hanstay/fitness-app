@@ -39,6 +39,24 @@ WORK IN THIS ORDER:
    heavy spinal-loading days away from long runs, place quality runs and long runs when the
    relevant muscles are fresh, and respect stated injuries/constraints (offer substitution
    notes on flagged movements).
+   DAY COUNT (hard constraint): weeklyStructure must contain EXACTLY training-days-per-week
+   training days — never more. The fixed weekly sessions count toward that number, so program
+   only (days/week − number of fixed sessions) additional sessions. Mark every remaining day of
+   the week as an explicit "Rest" entry (focus "Rest"/"Recovery") so the full 7-day week is
+   shown and the training-day count is unambiguous. Decide WHERE rest falls deliberately for
+   recovery — place it after the hardest sessions or to break up high-interference days (e.g. a
+   day off before a long run or a race-specific class), not arbitrarily — and say why in the
+   note. If the fixed sessions alone already meet or exceed the count, add no extra sessions and
+   flag the conflict in a note.
+   FIXED WEEKLY SESSIONS: if the athlete lists fixed sessions (e.g. group classes), treat each
+   as a COMMITTED session on its given day — place it in weeklyStructure on that day, do not
+   stack a conflicting hard session on top of it, and count its training stimulus toward the
+   week's volume and intensity. These classes are part of the stated days/week, NOT extra days.
+   Where a class already serves the goal (e.g. a Hyrox or CrossFit class for a hybrid/Hyrox
+   goal), build the surrounding days to COMPLEMENT it — fill the gaps it leaves rather than
+   duplicating its stimulus — and say so in the placement note. Infer the class's likely
+   demands (e.g. a Hyrox class ≈ mixed-modal conditioning + functional strength) when deciding
+   how to balance the rest of the week.
 
 5. Write the detailed "sessions" (lifting and conditioning). Express EVERY item — including
    runs and conditioning — as an exercise: e.g. name "Zone-2 run", sets 1, reps "30 min",
@@ -68,7 +86,7 @@ interface ActivityDoc {
   training_load?: number | null;
 }
 
-export const generateProgram = onCall({ secrets: ["ANTHROPIC_API_KEY"], timeoutSeconds: 120 }, async (request) => {
+export const generateProgram = onCall({ secrets: ["ANTHROPIC_API_KEY"], timeoutSeconds: 300 }, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
   const uid = request.auth.uid;
 
@@ -117,14 +135,22 @@ export const generateProgram = onCall({ secrets: ["ANTHROPIC_API_KEY"], timeoutS
     .map((e: { name: string; date?: string }) => `- ${e.name}${e.date ? ` on ${e.date}` : ""}`)
     .join("\n") || "none listed";
 
+  const fixedSessionLines = (athlete.fixed_sessions || [])
+    .map((s: { day: string; activity: string }) => `- ${s.day}: ${s.activity}`)
+    .join("\n") || "none";
+
   const profileText = [
     `Today's date: ${today}`,
     `Sex: ${athlete.sex ?? "unspecified"}`,
     `Age: ${athlete.age ?? "unspecified"}`,
     `Training experience: ${athlete.training_experience_years ?? "unspecified"} years`,
-    `Days available per week: ${athlete.training_days_per_week}`,
+    `Training days per week: ${athlete.training_days_per_week} — schedule EXACTLY this many training days; the fixed sessions below count toward it; mark every remaining weekday as Rest`,
     `Session length: ${athlete.session_length_minutes} minutes`,
     `Preferred split: ${athlete.preferred_split || "no preference"}`,
+    ``,
+    `Fixed weekly sessions — already committed and part of the ${athlete.training_days_per_week} training days above (e.g. group classes):`,
+    fixedSessionLines,
+    ``,
     `Equipment: ${(athlete.equipment || []).join(", ") || "assume standard commercial gym + functional kit"}`,
     `Goal: ${athlete.goal || "general fitness"}`,
     `Injuries/constraints: ${athlete.injuries_constraints || "none reported"}`,

@@ -3,6 +3,8 @@ import { ref as storageRef, uploadBytes } from "https://www.gstatic.com/firebase
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
 import { db, storage, functions } from "./firebase-init.js";
 import { requireAuth } from "./auth-guard.js";
+import { renderEventsEditor, collectEvents } from "./events-editor.js";
+import { renderCommitmentsEditor, collectCommitments } from "./commitments-editor.js";
 
 const user = await requireAuth();
 if (!user) throw new Error("not authenticated"); // requireAuth already redirected
@@ -58,6 +60,11 @@ function strOrNull(id) {
   const v = document.getElementById(id).value.trim();
   return v === "" ? null : v;
 }
+
+// Repeatable target-events editor (writes athlete.events[]). Starts blank in
+// onboarding; state persists in the DOM across Back/Continue within the wizard.
+renderEventsEditor(document.getElementById("eventsEditor"), []);
+renderCommitmentsEditor(document.getElementById("commitmentsEditor"), []);
 
 /* ---------- Card 1: About you (mandatory) ---------- */
 
@@ -139,6 +146,8 @@ async function saveTrainingFields() {
     "athlete.training_experience_years": numOrNull("training_experience_years"),
     "athlete.preferred_split": strOrNull("preferred_split"),
     "athlete.equipment": splitList("equipment"),
+    "athlete.events": collectEvents(document.getElementById("eventsEditor")),
+    "athlete.fixed_sessions": collectCommitments(document.getElementById("commitmentsEditor")),
     "athlete.goal": document.getElementById("goal").value.trim().slice(0, 1000) || null,
     "athlete.injuries_constraints": document.getElementById("injuries_constraints").value.trim().slice(0, 2000) || null,
   });
@@ -154,7 +163,7 @@ document.getElementById("step2ContinueBtn").addEventListener("click", async () =
     if (canGenerate) {
       pendingGenerations.push({
         label: "training program",
-        promise: httpsCallable(functions, "generateProgram")(),
+        promise: httpsCallable(functions, "generateProgram", { timeout: 300000 })(),
       });
     }
     goToStep(3);
@@ -260,7 +269,7 @@ document.getElementById("step3FinishBtn").addEventListener("click", async () => 
         label: "meal plan",
         // targets must be computed before the meal plan (which reads them).
         promise: httpsCallable(functions, "calculateTargets")()
-          .then(() => httpsCallable(functions, "generateMealPlan")()),
+          .then(() => httpsCallable(functions, "generateMealPlan", { timeout: 300000 })()),
       });
     }
     await finishOnboarding();

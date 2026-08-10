@@ -33,6 +33,7 @@ export const onUserCreate = functionsV1.auth.user().onCreate(async (user) => {
       training_experience_years: null,
       injuries_constraints: "",
       events: [],
+      fixed_sessions: [],
       goal: "",
       current_lifts: [],
       recovery: { sleep_hours: null, sleep_quality: null, stress_1_10: null },

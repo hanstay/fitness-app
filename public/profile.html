@@ -65,8 +65,20 @@
     </fieldset>
 
     <fieldset class="field-group">
+      <legend>Group classes / fixed sessions</legend>
+      <p class="hint" style="margin:0 0 12px">Regular classes that are already part of your week (these count toward your days/week). Your program anchors these on their day and builds the rest of the week around them.</p>
+      <div id="commitmentsEditor"></div>
+    </fieldset>
+
+    <fieldset class="field-group">
+      <legend>Target events</legend>
+      <p class="hint" style="margin:0 0 12px">Races or competitions you're training for, with dates — your program periodizes toward these.</p>
+      <div id="eventsEditor"></div>
+    </fieldset>
+
+    <fieldset class="field-group">
       <legend>Goals &amp; constraints</legend>
-      <div class="field"><label for="goal">Goal</label><textarea class="input" id="goal"></textarea></div>
+      <div class="field"><label for="goal">Overall goal</label><textarea class="input" id="goal" placeholder="Your general focus — e.g. build strength while improving conditioning. Add specific races above."></textarea></div>
       <div class="field"><label for="injuries_constraints">Injuries / constraints (optional)</label><textarea class="input" id="injuries_constraints"></textarea></div>
     </fieldset>
 
@@ -147,6 +159,8 @@
   import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
   import { db, functions } from "./js/firebase-init.js";
   import { requireOnboarded } from "./js/auth-guard.js";
+  import { renderEventsEditor, collectEvents } from "./js/events-editor.js";
+  import { renderCommitmentsEditor, collectCommitments } from "./js/commitments-editor.js";
 
   const session = await requireOnboarded();
   if (!session) throw new Error("redirecting");
@@ -172,6 +186,8 @@
   setVal("training_experience_years", a.training_experience_years);
   setList("equipment", a.equipment);
   setVal("goal", a.goal); setVal("injuries_constraints", a.injuries_constraints);
+  renderEventsEditor(document.getElementById("eventsEditor"), a.events || []);
+  renderCommitmentsEditor(document.getElementById("commitmentsEditor"), a.fixed_sessions || []);
   setVal("sleep_hours", a.recovery?.sleep_hours); setVal("sleep_quality", a.recovery?.sleep_quality);
   setVal("stress_1_10", a.recovery?.stress_1_10);
   setVal("diet_style", n.diet_style);
@@ -205,6 +221,8 @@
           training_experience_years: numOrNull("training_experience_years"),
           injuries_constraints: document.getElementById("injuries_constraints").value.trim().slice(0, 2000),
           goal: document.getElementById("goal").value.trim().slice(0, 1000),
+          events: collectEvents(document.getElementById("eventsEditor")),
+          fixed_sessions: collectCommitments(document.getElementById("commitmentsEditor")),
           recovery: {
             sleep_hours: numOrNull("sleep_hours"),
             sleep_quality: strOrNull("sleep_quality"),
