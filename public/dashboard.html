@@ -9,7 +9,9 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Hybrid Plan">
-<meta name="theme-color" content="#0f1115">
+<meta name="theme-color" content="#ffffff">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <title>Dashboard — Hybrid Training Plan</title>
 <link rel="stylesheet" href="styles/theme.css">
 </head>
@@ -33,11 +35,21 @@
 
   <section>
     <h2><span class="dot"></span>Your plan</h2>
-    <div class="btn-row" style="flex-wrap:wrap">
-      <a class="btn secondary" href="program.html">View program</a>
-      <a class="btn secondary" href="meals.html">View meal plan</a>
-      <a class="btn secondary" href="profile.html">Edit profile</a>
-    </div>
+    <a class="item-card" href="program.html">
+      <span class="item-thumb">🏋️</span>
+      <span class="item-info"><span class="item-title">Training program</span><span class="item-meta">View your current split</span></span>
+      <span class="item-val">→</span>
+    </a>
+    <a class="item-card" href="meals.html">
+      <span class="item-thumb">🍱</span>
+      <span class="item-info"><span class="item-title">Meal plan</span><span class="item-meta">Meals that hit your macros</span></span>
+      <span class="item-val">→</span>
+    </a>
+    <a class="item-card" href="profile.html">
+      <span class="item-thumb">⚙️</span>
+      <span class="item-info"><span class="item-title">Profile</span><span class="item-meta">Stats, training, diet prefs</span></span>
+      <span class="item-val">→</span>
+    </a>
   </section>
 
   <section>
