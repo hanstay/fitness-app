@@ -67,11 +67,9 @@ function expandSection(sectionId) {
 
 const TREND_CLASS = { "↑": "trend-up", "→": "trend-flat", "↓": "trend-down" };
 
-function renderProgression(container, progression, sessionsImported) {
+function progressionHtml(progression, sessionsImported) {
   if (!progression) {
-    container.innerHTML = `<p class="muted small">Imported ${sessionsImported} session${sessionsImported === 1 ? "" : "s"}. Not enough data yet to chart progression.</p>`;
-    container.style.display = "block";
-    return;
+    return `<p class="muted small">Imported ${sessionsImported} session${sessionsImported === 1 ? "" : "s"}. Not enough data yet to chart progression.</p>`;
   }
   const { dateRange, frequencyPerWeek, keyLifts } = progression;
   const rangeStr = dateRange ? `${esc(dateRange.first)} — ${esc(dateRange.last)}` : "";
@@ -90,7 +88,7 @@ function renderProgression(container, progression, sessionsImported) {
     </tr>`;
   }).join("");
 
-  container.innerHTML = `
+  return `
     <div class="stats">
       <div class="stat"><div class="k">Sessions imported</div><div class="v">${sessionsImported}</div></div>
       <div class="stat"><div class="k">Frequency</div><div class="v">${frequencyPerWeek}/wk</div></div>
@@ -103,6 +101,30 @@ function renderProgression(container, progression, sessionsImported) {
       </table></div>
       <p class="note">e1RM = estimated 1-rep max (Epley). Trend compares your oldest vs newest lift in the last 6 weeks.</p>`
       : `<p class="muted small">No scorable barbell/weighted lifts found to chart yet.</p>`}`;
+}
+
+// Adherence to the athlete's current program: which prescribed lifts were hit,
+// missed, or swapped for something else since the plan was generated.
+function adherenceHtml(adherence) {
+  if (!adherence) return "";
+  const line = (arr, cls, icon, label) =>
+    arr && arr.length
+      ? `<p class="small" style="margin:4px 0"><span class="${cls}">${icon} ${label}</span>: ${arr.map(esc).join(", ")}</p>`
+      : "";
+  const title = adherence.programTitle ? `“${esc(adherence.programTitle)}”` : "your current plan";
+  const sinceStr = adherence.since ? ` since ${esc(adherence.since)}` : "";
+  const anything = (adherence.hit?.length || adherence.missed?.length || adherence.added?.length);
+  return `
+    <h3>Adherence to your current plan</h3>
+    <p class="muted small">Comparing ${adherence.sessionsLogged} session${adherence.sessionsLogged === 1 ? "" : "s"} logged${sinceStr} against ${title}.</p>
+    ${line(adherence.hit, "trend-up", "✓", "Hit")}
+    ${line(adherence.missed, "trend-down", "⚠", "Missed")}
+    ${line(adherence.added, "trend-flat", "+", "Added")}
+    ${anything ? "" : '<p class="muted small">No overlap to report yet — log a few sessions from this plan.</p>'}`;
+}
+
+function renderImportSummary(container, { sessionsImported, progression, adherence }) {
+  container.innerHTML = progressionHtml(progression, sessionsImported) + adherenceHtml(adherence);
   container.style.display = "block";
 }
 
@@ -117,9 +139,9 @@ document.getElementById("hevyUploadBtn").addEventListener("click", (e) => {
     await uploadBytes(storageRef(storage, path), file);
     const parseHevy = httpsCallable(functions, "parseHevyCsv");
     const result = await parseHevy({ storagePath: path });
-    const { sessionsImported, progression } = result.data;
+    const { sessionsImported, progression, adherence } = result.data;
     setStatus("hevyStatus", "");
-    renderProgression(document.getElementById("hevyResults"), progression, sessionsImported ?? 0);
+    renderImportSummary(document.getElementById("hevyResults"), { sessionsImported: sessionsImported ?? 0, progression, adherence });
     showSuccess(`Imported ${sessionsImported ?? 0} training session${sessionsImported === 1 ? "" : "s"}.`);
     document.getElementById("hevyResults").scrollIntoView({ behavior: "smooth", block: "nearest" });
   }).catch((err) => {
@@ -238,8 +260,8 @@ function renderPlanUpdated(program) {
 document.getElementById("regenBtn").addEventListener("click", (e) => {
   clearMessages();
   document.getElementById("planUpdatedContainer").innerHTML = "";
-  setStatus("regenStatus", "Rebuilding your program — this can take a couple of minutes…");
-  withButtonBusy(e.currentTarget, "Rebuilding…", async () => {
+  setStatus("regenStatus", "Updating your program — this can take a couple of minutes…");
+  withButtonBusy(e.currentTarget, "Updating…", async () => {
     const result = await httpsCallable(functions, "generateProgram", { timeout: 300000 })();
     setStatus("regenStatus", "");
     showSuccess("Your program is ready.");
@@ -250,7 +272,7 @@ document.getElementById("regenBtn").addEventListener("click", (e) => {
     setStatus("regenStatus", "");
     showError(isPrecondition
       ? "Add your training details (days/week, session length) in your profile first."
-      : `Couldn't rebuild your program: ${msg}`);
+      : `Couldn't update your program: ${msg}`);
   });
 });
 

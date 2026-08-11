@@ -1,5 +1,5 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { getFirestore, FieldValue, Firestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { parseHevyCsvToCurrentLifts } from "../lib/hevyParser";
 import { parseHevyCsvToSessions, StrengthSession } from "../lib/hevyAnalyzer";
@@ -44,6 +44,84 @@ function buildProgressionSummary(sessions: StrengthSession[]) {
     const frequencyPerWeek = Math.round((sessions.length / weeksSpanned) * 10) / 10;
 
     return { dateRange, frequencyPerWeek, keyLifts };
+  } catch {
+    return null;
+  }
+}
+
+// Normalize an exercise name for cross-source matching: lowercase and drop the
+// equipment parenthetical, so the program's "Bench Press (Barbell)" matches
+// Hevy's "Bench Press" (or vice versa).
+function normalizeExercise(name: string): string {
+  return name.toLowerCase().replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Compare the just-imported sessions against the athlete's ACTIVE program to
+ * show plan adherence — which prescribed lifts were hit, missed, or swapped for
+ * something else — over the current block (sessions logged since the program was
+ * generated). Gives the import screen context about the user's current plan.
+ * Never throws: returns null when there's no active program or no planned lifts.
+ */
+async function buildAdherenceSummary(db: Firestore, uid: string, sessions: StrengthSession[]) {
+  try {
+    // Compare against the program the app actually shows (summary.currentProgramId),
+    // not just any active doc, so the adherence matches the user's current plan.
+    const summarySnap = await db.doc(`users/${uid}/state/summary`).get();
+    const currentProgramId = summarySnap.data()?.currentProgramId;
+    if (!currentProgramId) return null;
+    const progSnap = await db.doc(`users/${uid}/programs/${currentProgramId}`).get();
+    if (!progSnap.exists) return null;
+    const program = progSnap.data()!;
+
+    // Classes / fixed sessions (e.g. a weekly Hyrox or CrossFit class) aren't
+    // logged in Hevy, so they must not count as "planned" work — otherwise they
+    // would always read as missed. Exclude any program session whose label
+    // matches one of the athlete's fixed sessions (from the program's own
+    // profile snapshot, so it reflects the classes at generation time).
+    const fixedActivities = new Set(
+      ((program.profileSnapshot?.fixed_sessions ?? []) as Array<{ activity?: string }>)
+        .map((f) => normalizeExercise(f.activity || ""))
+        .filter(Boolean)
+    );
+
+    // Planned exercises come from the program's detailed workout sessions only.
+    const plannedDisplay = new Map<string, string>(); // normalized -> display name
+    for (const s of program.sessions ?? []) {
+      if (s?.label && fixedActivities.has(normalizeExercise(s.label))) continue; // skip class sessions
+      for (const ex of s.exercises ?? []) {
+        if (ex?.name) plannedDisplay.set(normalizeExercise(ex.name), ex.name);
+      }
+    }
+    if (plannedDisplay.size === 0) return null;
+
+    // Actual = the most recent training block: sessions within 14 days of the
+    // latest logged session. Anchoring to the latest session (not "now" or the
+    // program's creation date) keeps this populated for a weekly check-in even
+    // when the plan was just generated or the export is a little stale.
+    const latest = sessions.reduce((m, s) => (s.date > m ? s.date : m), sessions[0].date);
+    const since = new Date(new Date(latest).getTime() - 14 * 86400000).toISOString().slice(0, 10);
+    const windowSessions = sessions.filter((s) => s.date >= since);
+
+    const actualDisplay = new Map<string, string>();
+    for (const s of windowSessions) {
+      for (const ex of s.exercises ?? []) {
+        if (ex?.name) actualDisplay.set(normalizeExercise(ex.name), ex.name);
+      }
+    }
+
+    const plannedKeys = [...plannedDisplay.keys()];
+    const plannedSet = new Set(plannedKeys);
+    const actualKeys = new Set(actualDisplay.keys());
+
+    return {
+      programTitle: (program.title as string) ?? null,
+      since,
+      sessionsLogged: windowSessions.length,
+      hit: plannedKeys.filter((k) => actualKeys.has(k)).map((k) => plannedDisplay.get(k)!),
+      missed: plannedKeys.filter((k) => !actualKeys.has(k)).map((k) => plannedDisplay.get(k)!),
+      added: [...actualKeys].filter((k) => !plannedSet.has(k)).map((k) => actualDisplay.get(k)!),
+    };
   } catch {
     return null;
   }
@@ -114,7 +192,8 @@ export const parseHevyCsv = onCall<Input>(async (request) => {
     await batch.commit();
 
     const progression = buildProgressionSummary(sessions);
-    return { sessionsImported: sessions.length, liftsImported: lifts.length, lifts, progression };
+    const adherence = await buildAdherenceSummary(db, uid, sessions);
+    return { sessionsImported: sessions.length, liftsImported: lifts.length, lifts, progression, adherence };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await db.doc(`users/${uid}/state/summary`).update({
