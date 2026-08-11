@@ -1,0 +1,49 @@
+name: CI
+
+# Runs the functions build + test suites on every PR and on pushes to main.
+# The web app (public/**) is static — no build step — so it is not built here.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  functions:
+    name: functions build + tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: functions
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      # The Firestore rules test suite drives the Firestore emulator, which is a
+      # Java process. Temurin 21 matches the local dev setup.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # @firebase/rules-unit-testing pins firebase@10 while package.json pins 12;
+      # the peer conflict is expected and known-safe, hence --legacy-peer-deps.
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Typecheck / build
+        run: npm run build
+
+      # Everything except the emulator-dependent rules suite.
+      - name: Unit tests
+        run: npx vitest run --exclude "**/test/rules.test.ts"
+
+      # Rules suite needs a live Firestore emulator; emulators:exec boots a
+      # throwaway one, runs the tests, and tears it down. A demo-* project id
+      # keeps the CLI fully offline (no auth / production calls).
+      - name: Firestore rules tests
+        run: npx firebase-tools emulators:exec --only firestore --project demo-ci "npx vitest run test/rules.test.ts"

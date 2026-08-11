@@ -32,16 +32,25 @@ function clearMessages() {
 const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 const setStatus = (id, msg) => { document.getElementById(id).textContent = msg; };
 
-// Run an async op with a spinner + disabled button, restoring on completion.
+// Guards a control that fires a side-effectful / costly API call. The control is
+// clickable ONLY before its first send (idle) or after a failed attempt (retry).
+// While the request is in flight — and after it succeeds — the control stays
+// disabled, so an expensive call (generateProgram, parseHevyCsv, credential
+// writes) can't be double-fired or spammed. Reload the page to run it again
+// after a success.
 async function withButtonBusy(btn, busyLabel, fn) {
+  if (btn.disabled) return; // already in flight, or completed successfully
   const original = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = `<span class="spinner"></span> ${busyLabel}`;
   try {
-    return await fn();
-  } finally {
-    btn.disabled = false;
+    const result = await fn();
+    btn.innerHTML = original; // success → leave DISABLED (not clickable again)
+    return result;
+  } catch (err) {
+    btn.disabled = false;     // failed to complete → clickable again to retry
     btn.innerHTML = original;
+    throw err;
   }
 }
 
@@ -175,6 +184,9 @@ document.getElementById("icuUpdateKeysBtn").addEventListener("click", () => {
   form.style.display = "block";
   if (icu?.athleteId) document.getElementById("icuAthleteId").value = icu.athleteId;
   document.getElementById("icuApiKey").value = "";
+  // Deliberately re-opening the form is a fresh "not sent yet" — clear any
+  // disabled state left by an earlier successful connect so keys can be resent.
+  document.getElementById("icuConnectBtn").disabled = false;
   document.getElementById("icuApiKey").focus();
   form.scrollIntoView({ behavior: "smooth", block: "nearest" });
 });

@@ -16,3 +16,8 @@ ui-debug.log
 # Env / secrets — never commit
 .env
 .env.local
+
+# Local emulator snapshot for offline testing (may contain real credentials
+# like an intervals.icu API key) + throwaway seed script — never commit
+emulator-data/
+functions/seed-checkin.mjs

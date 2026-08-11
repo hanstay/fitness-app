@@ -55,7 +55,6 @@
 
   <section>
     <div class="btn-row" style="flex-wrap:wrap">
-      <button class="btn secondary" id="syncNowBtn" type="button">Sync intervals.icu</button>
       <button class="btn secondary" id="signOutBtn" type="button">Sign out</button>
     </div>
   </section>
@@ -123,20 +122,6 @@
     document.getElementById("actionStatus").textContent = msg;
   }
 
-  async function withButtonBusy(btn, fn, busyLabel) {
-    const original = btn.textContent;
-    btn.disabled = true;
-    btn.innerHTML = `<span class="spinner"></span> ${busyLabel}`;
-    try {
-      await fn();
-    } catch (err) {
-      setStatus(`Error: ${err.message || err}`);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = original;
-    }
-  }
-
   // Renders the program + meal-plan cards from summary state. Each feature is
   // either "set up" (view + regenerate) or "not set up" (generate prompt).
   function renderPlanCards() {
@@ -152,6 +137,7 @@
       genLabel: "training program",
       missingHint: "Add your training details (days/week, session length) in your profile first.",
       generate: () => httpsCallable(functions, "generateProgram", { timeout: 300000 })(),
+      showRegen: false, // rebuilding lives in the Weekly check-in now
     }));
     el.appendChild(featureCard({
       icon: "🍱",
@@ -175,14 +161,16 @@
       a.innerHTML = `<span class="item-thumb">${cfg.icon}</span>
         <span class="item-info"><span class="item-title">${cfg.title}</span><span class="item-meta">${cfg.viewMeta}</span></span>
         <span class="item-val">→</span>`;
-      const regen = document.createElement("button");
-      regen.className = "btn secondary small-btn";
-      regen.type = "button";
-      regen.textContent = "Regenerate";
-      regen.style.cssText = "margin:0 0 12px; padding:8px 14px; font-size:.82rem";
-      regen.addEventListener("click", () => runGenerate(cfg, regen, "Regenerating"));
       wrap.appendChild(a);
-      wrap.appendChild(regen);
+      if (cfg.showRegen !== false) {
+        const regen = document.createElement("button");
+        regen.className = "btn secondary small-btn";
+        regen.type = "button";
+        regen.textContent = "Regenerate";
+        regen.style.cssText = "margin:0 0 12px; padding:8px 14px; font-size:.82rem";
+        regen.addEventListener("click", () => runGenerate(cfg, regen, "Regenerating"));
+        wrap.appendChild(regen);
+      }
     } else {
       const card = document.createElement("button");
       card.type = "button";
@@ -197,6 +185,7 @@
   }
 
   async function runGenerate(cfg, btn, verb) {
+    if (btn.disabled) return; // guard against re-firing a generation already in flight
     btn.disabled = true;
     const original = btn.innerHTML;
     btn.style.opacity = ".6";
@@ -218,16 +207,6 @@
   }
 
   renderPlanCards();
-
-  document.getElementById("syncNowBtn").addEventListener("click", (e) => {
-    withButtonBusy(e.target, async () => {
-      setStatus("Syncing intervals.icu…");
-      const result = await httpsCallable(functions, "syncIntervalsActivities")();
-      setStatus(`Synced ${result.data.activitiesSynced ?? 0} activities.`);
-      summary = await loadSummary();
-      renderTrainingLoad(summary);
-    }, "Syncing…");
-  });
 
   document.getElementById("signOutBtn").addEventListener("click", () => signOut());
 </script>
