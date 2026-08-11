@@ -2,6 +2,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { extractStructuredJson } from "../lib/claude";
 import { programJsonSchema, programSchema } from "../lib/schemas";
+import { identifyKeyLifts, computeLiftProgression, PROGRESSION_CONFIG } from "../lib/hevyDerivedData";
 
 const SYSTEM_PROMPT = `You are an expert strength & conditioning coach writing a periodized, data-grounded
 training program for one athlete, then calling the tool with it. Aim for the depth a good human
@@ -28,6 +29,18 @@ WORK IN THIS ORDER:
    base from CTL, and gaps (e.g. "no long run logged in 3 weeks"). Set trainingLoad to the
    given CTL/ATL/TSB when provided, else null. If there is genuinely no data, currentState may
    be null — but use whatever you're given.
+
+   When progression data is available (e1RM trends, tonnage, frequency), use it to decide:
+   - Push: e1RM ↑ and adherence good → increase load/volume
+   - Hold: e1RM → and adherence good → maintain, refine technique
+   - Deload: e1RM ↓ or adherence poor → reduce volume, recover
+
+   When adherence data is available, use deviations to inform next block:
+   - If user consistently swaps exercises (e.g., RDL→Hip Thrust), consider adopting
+   - If user skips sessions, program fewer but higher-quality days
+   - If user adds volume, acknowledge and structure it
+
+   Never penalize missing history — if Hevy is not connected, generate as today.
 
 3. PERIODIZE toward the events. Populate "events" from the athlete's listed events (compute a
    rough weeksOut from today's date when a date is given). Build a "roadmap" of phases
@@ -112,6 +125,132 @@ export const generateProgram = onCall({ secrets: ["ANTHROPIC_API_KEY"], timeoutS
     .catch(() => null);
   const activities: ActivityDoc[] = activitiesSnap ? activitiesSnap.docs.map((d) => d.data() as ActivityDoc) : [];
 
+  // Query Hevy strengthSessions for progression analysis
+  let progressionBlock = "";
+  let adherenceBlock = "";
+
+  try {
+    const sessionsSnap = await db
+      .collection(`users/${uid}/strengthSessions`)
+      .orderBy("date", "desc")
+      .limit(500)
+      .get()
+      .catch(() => null);
+
+    const sessions = sessionsSnap
+      ? sessionsSnap.docs.map((d) => ({
+          id: d.id,
+          date: d.data().date as string,
+          title: d.data().title ?? "",
+          start_time: d.data().start_time ?? "",
+          end_time: d.data().end_time ?? "",
+          exercises: d.data().exercises ?? [],
+          source: "hevy",
+        } as any))
+      : [];
+
+    // Build progression block if sessions exist
+    if (sessions.length > 0) {
+      const keyLifts = identifyKeyLifts(sessions, PROGRESSION_CONFIG);
+
+      if (keyLifts.length > 0) {
+        const progressionLines: string[] = ["Performance & progression (from Hevy):"];
+
+        for (const exercise of keyLifts) {
+          try {
+            const prog = computeLiftProgression(exercise, sessions, PROGRESSION_CONFIG);
+            const lines: string[] = [exercise];
+
+            if (prog.e1RM.current) {
+              lines.push(`Current ${Math.round(prog.e1RM.current)}kg e1RM`);
+            }
+            if (prog.e1RM.pr) {
+              lines.push(`PR ${Math.round(prog.e1RM.pr.weight_kg)}kg (${prog.e1RM.pr.date})`);
+            }
+            if (prog.e1RM.trend_6w) {
+              lines.push(`6w trend ${prog.e1RM.trend_6w.direction} ${prog.e1RM.trend_6w.percent_change > 0 ? '+' : ''}${prog.e1RM.trend_6w.percent_change}%`);
+            }
+            if (prog.frequency.last_trained) {
+              lines.push(`last trained ${prog.frequency.last_trained}`);
+            }
+
+            progressionLines.push(`- ${lines.join(", ")}`);
+          } catch {
+            // Skip this exercise if computation fails
+            progressionLines.push(`- ${exercise} (incomplete data)`);
+          }
+        }
+
+        if (sessions.length > 0) {
+          const weeksInData = Math.max(1, Math.round((Date.now() - new Date(sessions[sessions.length - 1].date).getTime()) / (7 * 86400000)));
+          const freqPerWeek = (sessions.length / Math.max(weeksInData, 1)).toFixed(1);
+          progressionLines.push(`Frequency: ${freqPerWeek} sessions/week`);
+        }
+
+        progressionBlock = progressionLines.join("\n");
+      } else {
+        progressionBlock = "Performance & progression: No key lifts identified yet.";
+      }
+    } else {
+      progressionBlock = "Performance & progression: No Hevy data connected yet.";
+    }
+
+    // Build adherence block: compare last program to recent Hevy data
+    const existingPrograms = await db
+      .collection(`users/${uid}/programs`)
+      .where("status", "==", "active")
+      .get()
+      .catch(() => null);
+
+    if (existingPrograms && existingPrograms.docs.length > 0 && sessions.length > 0) {
+      const lastProgram = existingPrograms.docs[0].data();
+      const lastWeekDate = new Date();
+      lastWeekDate.setDate(lastWeekDate.getDate() - 7);
+      const lastWeekDateStr = lastWeekDate.toISOString().slice(0, 10);
+
+      const recentSessions = sessions.filter((s) => s.date >= lastWeekDateStr);
+      const plannedExercises = new Set<string>();
+      if (lastProgram.sessions) {
+        for (const session of lastProgram.sessions) {
+          for (const ex of session.exercises || []) {
+            plannedExercises.add(ex.name?.toLowerCase() || "");
+          }
+        }
+      }
+
+      const actualExercises = new Set<string>();
+      for (const session of recentSessions) {
+        // Sessions are stored nested (exercises[].sets[]); the exercise name
+        // lives on the exercise, not the set.
+        for (const ex of session.exercises || []) {
+          if (ex.name) actualExercises.add(ex.name.toLowerCase());
+        }
+      }
+
+      const plannedStr = plannedExercises.size > 0
+        ? Array.from(plannedExercises).slice(0, 5).join(", ")
+        : "N/A";
+      const actualStr = actualExercises.size > 0
+        ? Array.from(actualExercises).slice(0, 5).join(", ")
+        : "N/A";
+
+      adherenceBlock = [
+        "Adherence & deviations (vs last block):",
+        `PLANNED: ${lastProgram.title || "last program"} — key exercises: ${plannedStr}`,
+        `ACTUAL (last 7 days Hevy): ${recentSessions.length} sessions — exercises: ${actualStr}`,
+        recentSessions.length >= 3
+          ? "Status: Good adherence — keeping most planned exercises."
+          : "Status: Below plan — fewer sessions, consider recovery or adjust load.",
+      ].join("\n");
+    } else {
+      adherenceBlock = "Adherence & deviations: No previous program or Hevy data to compare against.";
+    }
+  } catch (err) {
+    // Graceful failure: Hevy data is optional
+    progressionBlock = "Performance & progression: Unable to load Hevy data (continue without it).";
+    adherenceBlock = "Adherence & deviations: Unable to load history (will generate fresh plan).";
+  }
+
   const today = new Date().toISOString().slice(0, 10);
 
   const activitySummary = activities.length
@@ -166,6 +305,10 @@ export const generateProgram = onCall({ secrets: ["ANTHROPIC_API_KEY"], timeoutS
     ``,
     `Current lifts (most recent working sets):`,
     liftLines,
+    ``,
+    progressionBlock,
+    ``,
+    adherenceBlock,
     ``,
     `Current macro targets: ${
       currentTargets ? `${currentTargets.target_calories} kcal, ${currentTargets.protein_g}P/${currentTargets.carbs_g}C/${currentTargets.fat_g}F` : "not calculated"

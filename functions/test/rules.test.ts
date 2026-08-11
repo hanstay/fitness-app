@@ -121,6 +121,7 @@ describe("Functions-only collections reject client writes, even for the owner", 
     ["programs/p1", { status: "active" }],
     ["mealPlans/m1", { status: "active" }],
     ["activities/a1", { type: "Run" }],
+    ["strengthSessions/s1", { date: "2026-08-10" }],
     ["checkins/c1", { summary: "..." }],
   ])("owner cannot write users/{uid}/%s", async (subpath) => {
     const owner = testEnv.authenticatedContext(OWNER_UID);
@@ -133,6 +134,7 @@ describe("Functions-only collections reject client writes, even for the owner", 
     "programs/p1",
     "mealPlans/m1",
     "activities/a1",
+    "strengthSessions/s1",
     "checkins/c1",
   ])("owner CAN read users/{uid}/%s once seeded", async (subpath) => {
     await seedAsAdmin(`users/${OWNER_UID}/${subpath}`, { x: 1 });

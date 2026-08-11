@@ -2,14 +2,14 @@ import { readFileSync } from "fs";
 import { describe, it, expect } from "vitest";
 import { parseHevyCsvToCurrentLifts } from "../src/lib/hevyParser";
 
-// Real Hevy export from this session (users/maoledies), used as a fixture —
-// per the plan's guidance to verify against real data, not synthetic rows.
-const REAL_CSV_PATH =
-  "C:/Users/js301/OneDrive/Documents/code/fitnesss-app/personal-trainer/users/maoledies/imports/workouts.csv";
+// A representative Hevy export committed alongside the tests (resolved relative
+// to this file so it works on any machine). Its most recent session is dated
+// within the parser's recency window relative to the fixed test date.
+const SAMPLE_CSV_PATH = new URL("./fixtures/hevy-sample.csv", import.meta.url);
 
 describe("parseHevyCsvToCurrentLifts", () => {
   it("extracts a plausible current-lifts snapshot from a real export", () => {
-    const csv = readFileSync(REAL_CSV_PATH, "utf8");
+    const csv = readFileSync(SAMPLE_CSV_PATH, "utf8");
     const lifts = parseHevyCsvToCurrentLifts(csv);
 
     expect(lifts.length).toBeGreaterThan(0);
@@ -33,13 +33,13 @@ describe("parseHevyCsvToCurrentLifts", () => {
       }
     }
 
-    // Known real entry from the transcript: Squat (Barbell) 90kg x6 on 2026-07-21
-    // was the most recent normal working set logged for that exercise.
+    // From the fixture: Squat (Barbell)'s most recent session is 2026-08-10,
+    // whose last working set (warmups skipped, last normal row wins) is 95kg × 4.
     const squat = lifts.find((l) => l.exercise === "Squat (Barbell)");
     expect(squat).toBeDefined();
-    expect(squat?.weight_kg).toBe(90);
-    expect(squat?.reps).toBe(6);
-    expect(squat?.date).toBe("2026-07-21");
+    expect(squat?.weight_kg).toBe(95);
+    expect(squat?.reps).toBe(4);
+    expect(squat?.date).toBe("2026-08-10");
   });
 
   it("skips warmup sets when picking the most recent working set", () => {

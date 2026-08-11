@@ -23,6 +23,7 @@ service cloud.firestore {
       }
 
       match /activities/{id}     { allow read: if isOwner(uid); allow write: if false; }  // Phase 1, Functions-only (intervals.icu sync)
+      match /strengthSessions/{id} { allow read: if isOwner(uid); allow write: if false; }  // Phase 1, Functions-only (Hevy strength session history)
 
       // Phase 2 seams
       match /workouts/{id}       { allow read, create, update, delete: if isOwner(uid); }

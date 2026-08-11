@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="robots" content="noindex, nofollow">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Hybrid Plan">
+<meta name="theme-color" content="#ffffff">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<title>Weekly check-in — Hybrid Training Plan</title>
+<link rel="stylesheet" href="styles/theme.css">
+<style>
+  /* Collapsible section chrome — local to the check-in page. */
+  section.collapsible > .sec-head{
+    cursor:pointer; user-select:none; justify-content:space-between; width:100%;
+  }
+  section.collapsible > .sec-head .caret{
+    margin-left:auto; color:var(--text-secondary); font-size:.9rem; transition:transform .2s;
+  }
+  section.collapsible.collapsed > .sec-head .caret{transform:rotate(-90deg)}
+  section.collapsible.collapsed > .sec-body{display:none}
+  .sec-head .lead-in{display:flex; align-items:center; gap:9px}
+  .status-line{font-size:.86rem; color:var(--text-secondary); margin:8px 0 0; min-height:1.1em}
+  .trend-up{color:#1c7a3e; font-weight:700}
+  .trend-flat{color:var(--text-secondary); font-weight:700}
+  .trend-down{color:var(--accent-dark); font-weight:700}
+  .conn-badge{display:inline-flex; align-items:center; gap:6px; font-weight:600; color:#1c7a3e; font-size:.9rem}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <a class="backlink" href="dashboard.html">← Dashboard</a>
+    <h1>Weekly check-in</h1>
+    <p class="sub">Import your latest training, sync your load, then rebuild your plan around it.</p>
+  </div>
+</header>
+
+<div class="wrap" style="padding:26px 0 60px; max-width:720px">
+
+  <div id="errorBox" class="error-msg" style="display:none"></div>
+  <div id="successBox" class="success-msg" style="display:none"></div>
+
+  <!-- Section 1: Hevy import -->
+  <section id="hevySection" class="collapsible">
+    <h2 class="sec-head"><span class="lead-in"><span class="dot"></span>Import Hevy training</span><span class="caret">▾</span></h2>
+    <div class="sec-body">
+      <p class="muted small">Export your recent workouts from Hevy (Settings → Export Data) and upload the CSV here.</p>
+      <div class="field">
+        <label for="hevyFile">Hevy CSV export</label>
+        <input class="input" type="file" id="hevyFile" accept=".csv">
+      </div>
+      <button class="btn" id="hevyUploadBtn" type="button">Upload &amp; analyze</button>
+      <p class="status-line" id="hevyStatus"></p>
+      <div id="hevyResults" style="display:none; margin-top:16px"></div>
+    </div>
+  </section>
+
+  <!-- Section 2: intervals.icu sync -->
+  <section id="icuSection" class="collapsible collapsed">
+    <h2 class="sec-head"><span class="lead-in"><span class="dot"></span>Training load (intervals.icu)</span><span class="caret">▾</span></h2>
+    <div class="sec-body">
+      <!-- Connected state -->
+      <div id="icuConnected" style="display:none">
+        <p><span class="conn-badge">✓ Connected</span> <span class="muted small" id="icuLastSync"></span></p>
+        <div class="stats" id="icuWellness"></div>
+        <div class="btn-row" style="margin-top:0">
+          <button class="btn secondary" id="icuSyncBtn" type="button">Sync now</button>
+          <button class="btn secondary" id="icuUpdateKeysBtn" type="button">Update keys</button>
+        </div>
+        <p class="status-line" id="icuStatus"></p>
+      </div>
+      <!-- Not-connected state (also reused to re-enter keys when connected) -->
+      <div id="icuDisconnected" style="display:none">
+        <p class="muted small">Connect intervals.icu to fold your training load (fitness, fatigue, form) and recent
+          activities into your plan. You'll need your athlete ID and an API key from your intervals.icu settings.</p>
+        <div class="field">
+          <label for="icuAthleteId">Athlete ID</label>
+          <input class="input" type="text" id="icuAthleteId" placeholder="i123456" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="icuApiKey">API key</label>
+          <input class="input" type="password" id="icuApiKey" placeholder="Your intervals.icu API key" autocomplete="off">
+        </div>
+        <button class="btn secondary" id="icuConnectBtn" type="button">Connect &amp; sync</button>
+        <p class="status-line" id="icuConnectStatus"></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 3: Regenerate plan -->
+  <section id="regenSection">
+    <h2><span class="dot"></span>Rebuild your plan</h2>
+    <p class="muted small">Generates a fresh program grounded in your Hevy progression, adherence, and training load.</p>
+    <button class="btn full" id="regenBtn" type="button">Regenerate program</button>
+    <p class="status-line" id="regenStatus"></p>
+  </section>
+
+  <!-- Updated-plan result card is appended here -->
+  <div id="planUpdatedContainer"></div>
+
+</div>
+
+<footer class="wrap">
+  <a href="dashboard.html">← Back to dashboard</a> ·
+  Personal training plan · General fitness coaching, not medical advice.
+</footer>
+
+<script src="update.js"></script>
+<script type="module" src="js/checkin.js"></script>
+</body>
+</html>
