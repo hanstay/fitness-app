@@ -235,8 +235,9 @@ function renderPlanUpdated(program) {
   const weekly = (program.weeklyStructure || []).map((d) =>
     `<div class="ex"><div class="row"><span class="name">${esc(d.day)}</span><span class="sets">${esc(d.focus)}</span></div>${d.note ? `<div class="note">${esc(d.note)}</div>` : ""}</div>`
   ).join("");
-  const highlights = (cs?.highlights || []).length
-    ? `<h3>What changed</h3><ul>${cs.highlights.map((h) => `<li>${esc(h)}</li>`).join("")}</ul>`
+  const changeItems = (program.changeSummary || []).length ? program.changeSummary : (cs?.highlights || []);
+  const highlights = changeItems.length
+    ? `<h3>What changed</h3><ul>${changeItems.map((h) => `<li>${esc(h)}</li>`).join("")}</ul>`
     : "";
   const summaryLine = cs?.summary ? `<p>${esc(cs.summary)}</p>` : "";
   const coach = program.coachNotes ? `<div class="callout warn">${esc(program.coachNotes)}</div>` : "";

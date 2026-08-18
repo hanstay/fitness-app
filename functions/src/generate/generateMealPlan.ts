@@ -27,8 +27,22 @@ Call the tool with the complete plan; do not respond in prose.`;
 
 export const generateMealPlan = onCall({ secrets: ["ANTHROPIC_API_KEY"], timeoutSeconds: 300 }, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
-  const uid = request.auth.uid;
+  try {
+    return await runGenerateMealPlan(request.auth.uid);
+  } catch (err) {
+    if (err instanceof HttpsError) throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    throw new HttpsError("internal", `Couldn't generate a meal plan: ${message}`);
+  }
+});
 
+/**
+ * Does the actual generation + Firestore write for one athlete. Called
+ * synchronously from the `generateMealPlan` onCall above (dashboard
+ * "Regenerate") and from the background trigger that runs queued onboarding
+ * generations (onMealPlanGenerationRequested.ts) — same logic either way.
+ */
+export async function runGenerateMealPlan(uid: string) {
   const db = getFirestore();
   const userSnap = await db.doc(`users/${uid}`).get();
   const data = userSnap.data();
@@ -61,49 +75,43 @@ export const generateMealPlan = onCall({ secrets: ["ANTHROPIC_API_KEY"], timeout
     `Budget preference: ${nutrition.budget_preference || "no constraint"}`,
   ].join("\n");
 
-  try {
-    const plan = await extractStructuredJson({
-      system: SYSTEM_PROMPT,
-      userText: `Athlete nutrition profile:\n${profileText}\n\nGenerate their meal plan.`,
-      toolName: "record_meal_plan",
-      toolDescription: "Record the generated meal plan.",
-      inputSchema: mealPlanJsonSchema,
-      validator: mealPlanSchema,
-      maxTokens: 8192,
-    });
+  const plan = await extractStructuredJson({
+    system: SYSTEM_PROMPT,
+    userText: `Athlete nutrition profile:\n${profileText}\n\nGenerate their meal plan.`,
+    toolName: "record_meal_plan",
+    toolDescription: "Record the generated meal plan.",
+    inputSchema: mealPlanJsonSchema,
+    validator: mealPlanSchema,
+    maxTokens: 8192,
+  });
 
-    // Mechanical verification (per the plan's automated bar): hard-excluded
-    // foods must never appear in the generated plan.
-    const planText = JSON.stringify(plan).toLowerCase();
-    const violation = excluded.find((food) => food.trim() && planText.includes(food.trim().toLowerCase()));
-    if (violation) {
-      throw new HttpsError("internal", `Generated plan included an excluded food ("${violation}") — please retry.`);
-    }
-
-    const batch = db.batch();
-    const existingActive = await db.collection(`users/${uid}/mealPlans`).where("status", "==", "active").get();
-    existingActive.forEach((d) => batch.update(d.ref, { status: "archived" }));
-
-    const newRef = db.collection(`users/${uid}/mealPlans`).doc();
-    batch.set(newRef, {
-      createdAt: FieldValue.serverTimestamp(),
-      status: "active",
-      model: "claude-sonnet-4-5-20250929",
-      targetsSnapshot: {
-        kcal: currentTargets.target_calories,
-        p: currentTargets.protein_g,
-        c: currentTargets.carbs_g,
-        f: currentTargets.fat_g,
-      },
-      ...plan,
-    });
-    batch.update(db.doc(`users/${uid}/state/summary`), { currentMealPlanId: newRef.id });
-    await batch.commit();
-
-    return { mealPlanId: newRef.id, ...plan };
-  } catch (err) {
-    if (err instanceof HttpsError) throw err;
-    const message = err instanceof Error ? err.message : String(err);
-    throw new HttpsError("internal", `Couldn't generate a meal plan: ${message}`);
+  // Mechanical verification (per the plan's automated bar): hard-excluded
+  // foods must never appear in the generated plan.
+  const planText = JSON.stringify(plan).toLowerCase();
+  const violation = excluded.find((food) => food.trim() && planText.includes(food.trim().toLowerCase()));
+  if (violation) {
+    throw new HttpsError("internal", `Generated plan included an excluded food ("${violation}") — please retry.`);
   }
-});
+
+  const batch = db.batch();
+  const existingActive = await db.collection(`users/${uid}/mealPlans`).where("status", "==", "active").get();
+  existingActive.forEach((d) => batch.update(d.ref, { status: "archived" }));
+
+  const newRef = db.collection(`users/${uid}/mealPlans`).doc();
+  batch.set(newRef, {
+    createdAt: FieldValue.serverTimestamp(),
+    status: "active",
+    model: "claude-sonnet-4-5-20250929",
+    targetsSnapshot: {
+      kcal: currentTargets.target_calories,
+      p: currentTargets.protein_g,
+      c: currentTargets.carbs_g,
+      f: currentTargets.fat_g,
+    },
+    ...plan,
+  });
+  batch.update(db.doc(`users/${uid}/state/summary`), { currentMealPlanId: newRef.id, mealPlanGenerationStatus: FieldValue.delete() });
+  await batch.commit();
+
+  return { mealPlanId: newRef.id, ...plan };
+}

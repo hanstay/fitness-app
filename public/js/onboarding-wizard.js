@@ -11,11 +11,6 @@ if (!user) throw new Error("not authenticated"); // requireAuth already redirect
 
 let uploadedScanId = null;
 
-// Generations kicked off as the user completes optional cards. Each is a
-// promise that resolves/rejects on its own; we wait for all of them on the
-// finishing screen so the user isn't blocked mid-flow.
-const pendingGenerations = []; // { label, promise }
-
 const errorBox = document.getElementById("errorBox");
 const successBox = document.getElementById("successBox");
 
@@ -161,10 +156,15 @@ document.getElementById("step2ContinueBtn").addEventListener("click", async () =
   try {
     const canGenerate = await saveTrainingFields();
     if (canGenerate) {
-      pendingGenerations.push({
-        label: "training program",
-        promise: httpsCallable(functions, "generateProgram", { timeout: 300000 })(),
-      });
+      // Queues the generation and returns immediately — the actual (multi-
+      // minute) LLM call runs in the background so onboarding isn't blocked
+      // on it; the dashboard shows "generating" until it lands.
+      try {
+        await httpsCallable(functions, "queueProgramGeneration")();
+      } catch (err) {
+        showError(`Couldn't start building your training program: ${err.message || err}`);
+        return;
+      }
     }
     goToStep(3);
   } catch (err) {
@@ -265,12 +265,17 @@ document.getElementById("step3FinishBtn").addEventListener("click", async () => 
   try {
     const canGenerate = await saveNutritionFields();
     if (canGenerate) {
-      pendingGenerations.push({
-        label: "meal plan",
-        // targets must be computed before the meal plan (which reads them).
-        promise: httpsCallable(functions, "calculateTargets")()
-          .then(() => httpsCallable(functions, "generateMealPlan", { timeout: 300000 })()),
-      });
+      try {
+        // targets must be computed before the meal plan (which reads them);
+        // queueing (like the training program) returns immediately and the
+        // actual generation runs in the background.
+        await httpsCallable(functions, "calculateTargets")();
+        await httpsCallable(functions, "queueMealPlanGeneration")();
+      } catch (err) {
+        showError(`Couldn't start building your meal plan: ${err.message || err}`);
+        btn.disabled = false;
+        return;
+      }
     }
     await finishOnboarding();
   } catch (err) {
@@ -293,41 +298,25 @@ document.getElementById("step3SkipBtn").addEventListener("click", async () => {
 /* ---------- Finishing ---------- */
 
 async function finishOnboarding() {
-  // Show the finishing screen and wait for any queued generations.
+  // Any generation the user asked for was already queued (and runs in the
+  // background) by the step 2/3 handlers above, so there's nothing left to
+  // wait on here — just mark onboarding done and head to the dashboard,
+  // which shows "generating" on the relevant card until the background work
+  // lands.
   for (let i = 1; i <= 3; i++) document.getElementById(`step${i}`).style.display = "none";
   document.getElementById("finishing").style.display = "block";
   clearMessages();
   window.scrollTo({ top: 0, behavior: "smooth" });
 
-  const finishTitle = document.getElementById("finishTitle");
-  const finishMsg = document.getElementById("finishMsg");
-  const finishSpinner = document.getElementById("finishSpinner");
-
-  if (pendingGenerations.length === 0) {
-    finishTitle.textContent = "All set";
-    finishMsg.textContent = "Taking you to your dashboard…";
-  } else {
-    const labels = pendingGenerations.map((g) => g.label).join(" and ");
-    finishMsg.textContent = `Building your ${labels} — this can take up to a minute.`;
-  }
-
-  const results = await Promise.allSettled(pendingGenerations.map((g) => g.promise));
-  const failed = pendingGenerations.filter((_, i) => results[i].status === "rejected").map((g) => g.label);
+  document.getElementById("finishTitle").textContent = "All set";
+  document.getElementById("finishMsg").textContent = "Taking you to your dashboard…";
 
   await updateDoc(doc(db, "users", user.uid), {
     "onboarding.completed": true,
     "onboarding.step": "done",
   });
 
-  if (failed.length) {
-    // Don't block completion — the dashboard lets them retry generation.
-    finishSpinner.style.display = "none";
-    finishTitle.textContent = "Almost there";
-    finishMsg.innerHTML = `We couldn't build your ${failed.join(" and ")} just now — you can generate ${failed.length > 1 ? "them" : "it"} from your dashboard. Taking you there…`;
-    setTimeout(() => (location.href = "dashboard.html"), 2500);
-  } else {
-    location.href = "dashboard.html";
-  }
+  location.href = "dashboard.html";
 }
 
 /* ---------- Resume where the user left off ---------- */

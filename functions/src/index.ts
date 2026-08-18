@@ -24,3 +24,7 @@ export { parseBodyScan } from "./scans/parseBodyScan";
 export { calculateTargets } from "./profile/calculateTargets";
 export { generateProgram } from "./generate/generateProgram";
 export { generateMealPlan } from "./generate/generateMealPlan";
+export { queueProgramGeneration } from "./generate/queueProgramGeneration";
+export { onProgramGenerationRequested } from "./generate/onProgramGenerationRequested";
+export { queueMealPlanGeneration } from "./generate/queueMealPlanGeneration";
+export { onMealPlanGenerationRequested } from "./generate/onMealPlanGenerationRequested";

@@ -28,6 +28,8 @@ interface ExtractJsonParams<T> {
   /** Zod schema used to validate the model's output server-side before trusting it. */
   validator: ZodSchema<T>;
   maxTokens?: number;
+  /** Overrides the default model (e.g. to try a faster/cheaper tier for a lower-stakes call). */
+  model?: string;
 }
 
 /**
@@ -67,7 +69,7 @@ export async function extractStructuredJson<T>(params: ExtractJsonParams<T>): Pr
     }
 
     const response = await anthropic.messages.create({
-      model: MODEL,
+      model: params.model ?? MODEL,
       max_tokens: params.maxTokens ?? 4096,
       system: params.system,
       tools: [tool],

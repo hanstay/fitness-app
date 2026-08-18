@@ -68,7 +68,7 @@
 
 <script src="update.js"></script>
 <script type="module">
-  import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+  import { doc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
   import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
   import { db, functions } from "./js/firebase-init.js";
   import { requireOnboarded, signOut } from "./js/auth-guard.js";
@@ -80,11 +80,6 @@
   document.getElementById("greeting").textContent = profile.displayName
     ? `Hi ${profile.displayName}`
     : "Your plan";
-
-  async function loadSummary() {
-    const snap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
-    return snap.exists() ? snap.data() : null;
-  }
 
   function renderTargets(summary) {
     const t = summary?.currentTargets;
@@ -114,16 +109,15 @@
     document.getElementById("loadAsOf").textContent = `as of ${w.asOf} · synced from intervals.icu`;
   }
 
-  let summary = await loadSummary();
-  renderTargets(summary);
-  renderTrainingLoad(summary);
+  let summary = null;
 
   function setStatus(msg) {
     document.getElementById("actionStatus").textContent = msg;
   }
 
   // Renders the program + meal-plan cards from summary state. Each feature is
-  // either "set up" (view + regenerate) or "not set up" (generate prompt).
+  // "generating" (background job in flight), "set up" (view + regenerate),
+  // or "not set up" (generate prompt).
   function renderPlanCards() {
     const el = document.getElementById("planCards");
     el.innerHTML = "";
@@ -132,6 +126,8 @@
       title: "Training program",
       href: "program.html",
       hasIt: Boolean(summary?.currentProgramId),
+      genStatus: summary?.programGenerationStatus,
+      genError: summary?.programGenerationError,
       setupMeta: "Generate from your training details",
       viewMeta: "View your current split",
       genLabel: "training program",
@@ -144,6 +140,8 @@
       title: "Meal plan",
       href: "meals.html",
       hasIt: Boolean(summary?.currentMealPlanId),
+      genStatus: summary?.mealPlanGenerationStatus,
+      genError: summary?.mealPlanGenerationError,
       setupMeta: "Generate targets and a meal plan",
       viewMeta: "Meals that hit your macros",
       genLabel: "meal plan",
@@ -154,7 +152,15 @@
 
   function featureCard(cfg) {
     const wrap = document.createElement("div");
-    if (cfg.hasIt) {
+    if (cfg.genStatus === "generating") {
+      const card = document.createElement("div");
+      card.className = "item-card setup";
+      card.style.opacity = ".7";
+      card.innerHTML = `<span class="item-thumb">${cfg.icon}</span>
+        <span class="item-info"><span class="item-title">Generating your ${cfg.genLabel}…</span><span class="item-meta">This can take a few minutes — feel free to browse elsewhere, it'll show up here.</span></span>
+        <span class="spinner"></span>`;
+      wrap.appendChild(card);
+    } else if (cfg.hasIt) {
       const a = document.createElement("a");
       a.className = "item-card";
       a.href = cfg.href;
@@ -175,8 +181,11 @@
       const card = document.createElement("button");
       card.type = "button";
       card.className = "item-card setup";
+      const meta = cfg.genStatus === "error" && cfg.genError
+        ? `Last attempt failed: ${cfg.genError}`
+        : cfg.setupMeta;
       card.innerHTML = `<span class="item-thumb">${cfg.icon}</span>
-        <span class="item-info"><span class="item-title">Set up your ${cfg.genLabel}</span><span class="item-meta">${cfg.setupMeta}</span></span>
+        <span class="item-info"><span class="item-title">Set up your ${cfg.genLabel}</span><span class="item-meta">${meta}</span></span>
         <span class="item-val">+</span>`;
       card.addEventListener("click", () => runGenerate(cfg, card, "Generating"));
       wrap.appendChild(card);
@@ -193,9 +202,8 @@
     try {
       await cfg.generate();
       setStatus(`Your ${cfg.genLabel} is ready.`);
-      summary = await loadSummary();
-      renderTargets(summary);
-      renderPlanCards();
+      // The onSnapshot listener below picks up the Firestore write this just
+      // made and re-renders the cards — no manual refresh needed here.
     } catch (err) {
       const msg = String(err?.message || err);
       const isPrecondition = /first|required|Complete/i.test(msg);
@@ -206,7 +214,15 @@
     }
   }
 
-  renderPlanCards();
+  // Realtime listener (rather than a one-shot fetch) so cards update live —
+  // in particular so a "generating" card flips to "view" the moment the
+  // background generation trigger finishes, with no manual refresh needed.
+  onSnapshot(doc(db, "users", user.uid, "state", "summary"), (snap) => {
+    summary = snap.exists() ? snap.data() : null;
+    renderTargets(summary);
+    renderTrainingLoad(summary);
+    renderPlanCards();
+  });
 
   document.getElementById("signOutBtn").addEventListener("click", () => signOut());
 </script>

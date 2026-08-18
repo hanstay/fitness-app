@@ -33,7 +33,14 @@ export const bodyScanExtractionJsonSchema = {
   required: ["weight_kg", "body_fat_pct", "muscle_mass_kg", "skeletal_muscle_mass_kg", "bmr_kcal", "visceral_fat_level", "bmi", "whr", "posture_findings", "scan_date", "source"],
 };
 
-const exerciseSchema = z.object({
+// ---------------------------------------------------------------------------
+// Program sub-shapes — shared across the full program schema and the split
+// overview/schedule/update schemas used by generateProgram's two generation
+// paths (full-parallel and incremental). Factored out so the split schemas
+// can't drift from the full one.
+// ---------------------------------------------------------------------------
+
+export const exerciseSchema = z.object({
   name: z.string(),
   sets: z.number().int().min(1).max(12),
   reps: z.string(), // e.g. "6-8", "12-15", "5 km", "30 min"
@@ -43,68 +50,7 @@ const exerciseSchema = z.object({
   substitution_note: z.string().nullable(),
 });
 
-export const programSchema = z.object({
-  title: z.string(),                 // e.g. "Hybrid Base Block → Hyrox"
-  goalSummary: z.string(),           // one-line framing tied to the athlete's goal
-  split: z.string(),
-  daysPerWeek: z.number().int().min(1).max(7),
-
-  // Data-grounded "where you are now" — populated from intervals.icu wellness,
-  // recent activities, and lift history when available; null when there's no data.
-  currentState: z.object({
-    summary: z.string(),
-    trainingLoad: z.object({ ctl: z.number(), atl: z.number(), tsb: z.number() }).nullable(),
-    highlights: z.array(z.string()), // progress / stalls / misses called out from the data
-  }).nullable(),
-
-  // Target events driving periodization (empty for open-ended goals).
-  events: z.array(z.object({
-    name: z.string(),
-    date: z.string().nullable(),
-    weeksOut: z.string().nullable(),
-    goal: z.string(),
-  })),
-
-  // Multi-phase periodized roadmap (empty for simple non-event goals).
-  roadmap: z.array(z.object({
-    phase: z.string(),
-    dates: z.string(),
-    focus: z.string(),
-    lifting: z.string(),
-    running: z.string().nullable(),
-    nutrition: z.string().nullable(),
-  })),
-
-  // Day-by-day weekly overview with placement rationale (empty allowed).
-  weeklyStructure: z.array(z.object({
-    day: z.string(),
-    focus: z.string(),
-    note: z.string().nullable(),
-  })),
-
-  sessions: z.array(z.object({
-    day: z.string(),
-    label: z.string(),
-    focus_note: z.string().nullable(),
-    exercises: z.array(exerciseSchema).min(1).max(14),
-  })).min(1).max(10),
-
-  // Running / endurance programming for hybrid & endurance goals; null otherwise.
-  running: z.object({
-    pacesNote: z.string(),
-    sessions: z.array(z.object({ name: z.string(), detail: z.string() })),
-  }).nullable(),
-
-  progressionRules: z.string(),
-  deloadGuidance: z.string(),
-  warmupNotes: z.string(),
-  coachNotes: z.string().nullable(),     // injury / mobility / recovery guidance
-  sportNotes: z.string().nullable(),     // event-specific strategy (e.g. Hyrox station splits)
-  nutritionNote: z.string().nullable(),  // program-side fueling guidance
-});
-export type ProgramOutput = z.infer<typeof programSchema>;
-
-const exerciseJsonSchema = {
+export const exerciseJsonSchema = {
   type: "object",
   properties: {
     name: { type: "string" },
@@ -118,6 +64,148 @@ const exerciseJsonSchema = {
   required: ["name", "sets", "reps", "rir", "rest_seconds", "load_note", "substitution_note"],
 };
 
+const currentStateSchema = z.object({
+  summary: z.string(),
+  trainingLoad: z.object({ ctl: z.number(), atl: z.number(), tsb: z.number() }).nullable(),
+  highlights: z.array(z.string()),
+}).nullable();
+
+const currentStateJsonSchema = {
+  type: ["object", "null"],
+  description: "Data-grounded snapshot of where the athlete is now, from their training-load, recent activities, and lift history. Null only if there is genuinely no data to ground it in.",
+  properties: {
+    summary: { type: "string" },
+    trainingLoad: {
+      type: ["object", "null"],
+      properties: { ctl: { type: "number" }, atl: { type: "number" }, tsb: { type: "number" } },
+      required: ["ctl", "atl", "tsb"],
+    },
+    highlights: { type: "array", items: { type: "string" }, description: "Specific progress, stalls, or misses read from the data." },
+  },
+  required: ["summary", "trainingLoad", "highlights"],
+};
+
+const eventSchema = z.object({
+  name: z.string(),
+  date: z.string().nullable(),
+  weeksOut: z.string().nullable(),
+  goal: z.string(),
+});
+
+const eventJsonSchema = {
+  type: "object",
+  properties: {
+    name: { type: "string" },
+    date: { type: ["string", "null"] },
+    weeksOut: { type: ["string", "null"] },
+    goal: { type: "string" },
+  },
+  required: ["name", "date", "weeksOut", "goal"],
+};
+
+const roadmapPhaseSchema = z.object({
+  phase: z.string(),
+  dates: z.string(),
+  focus: z.string(),
+  lifting: z.string(),
+  running: z.string().nullable(),
+  nutrition: z.string().nullable(),
+});
+
+const roadmapPhaseJsonSchema = {
+  type: "object",
+  properties: {
+    phase: { type: "string" },
+    dates: { type: "string" },
+    focus: { type: "string" },
+    lifting: { type: "string" },
+    running: { type: ["string", "null"] },
+    nutrition: { type: ["string", "null"] },
+  },
+  required: ["phase", "dates", "focus", "lifting", "running", "nutrition"],
+};
+
+const weeklyDaySchema = z.object({
+  day: z.string(),
+  focus: z.string(),
+  note: z.string().nullable(),
+});
+
+const weeklyDayJsonSchema = {
+  type: "object",
+  properties: {
+    day: { type: "string" },
+    focus: { type: "string" },
+    note: { type: ["string", "null"] },
+  },
+  required: ["day", "focus", "note"],
+};
+
+const sessionSchema = z.object({
+  day: z.string(),
+  label: z.string(),
+  focus_note: z.string().nullable(),
+  exercises: z.array(exerciseSchema).min(1).max(14),
+});
+
+const sessionJsonSchema = {
+  type: "object",
+  properties: {
+    day: { type: "string" },
+    label: { type: "string" },
+    focus_note: { type: ["string", "null"] },
+    exercises: { type: "array", items: exerciseJsonSchema },
+  },
+  required: ["day", "label", "focus_note", "exercises"],
+};
+
+const runningSchema = z.object({
+  pacesNote: z.string(),
+  sessions: z.array(z.object({ name: z.string(), detail: z.string() })),
+}).nullable();
+
+const runningJsonSchema = {
+  type: ["object", "null"],
+  description: "Running/endurance programming for hybrid & endurance goals; null for pure strength/physique goals.",
+  properties: {
+    pacesNote: { type: "string" },
+    sessions: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { name: { type: "string" }, detail: { type: "string" } },
+        required: ["name", "detail"],
+      },
+    },
+  },
+  required: ["pacesNote", "sessions"],
+};
+
+// ---------------------------------------------------------------------------
+// Full program — used as the canonical shape a written program document must
+// satisfy, and as the final merge-validation check for both generation paths.
+// ---------------------------------------------------------------------------
+
+export const programSchema = z.object({
+  title: z.string(),                 // e.g. "Hybrid Base Block → Hyrox"
+  goalSummary: z.string(),           // one-line framing tied to the athlete's goal
+  split: z.string(),
+  daysPerWeek: z.number().int().min(1).max(7),
+  currentState: currentStateSchema,
+  events: z.array(eventSchema),
+  roadmap: z.array(roadmapPhaseSchema),
+  weeklyStructure: z.array(weeklyDaySchema),
+  sessions: z.array(sessionSchema).min(1).max(10),
+  running: runningSchema,
+  progressionRules: z.string(),
+  deloadGuidance: z.string(),
+  warmupNotes: z.string(),
+  coachNotes: z.string().nullable(),     // injury / mobility / recovery guidance
+  sportNotes: z.string().nullable(),     // event-specific strategy (e.g. Hyrox station splits)
+  nutritionNote: z.string().nullable(),  // program-side fueling guidance
+});
+export type ProgramOutput = z.infer<typeof programSchema>;
+
 export const programJsonSchema = {
   type: "object",
   properties: {
@@ -125,92 +213,24 @@ export const programJsonSchema = {
     goalSummary: { type: "string", description: "One sentence framing how this program serves the athlete's stated goal." },
     split: { type: "string" },
     daysPerWeek: { type: "integer", minimum: 1, maximum: 7 },
-    currentState: {
-      type: ["object", "null"],
-      description: "Data-grounded snapshot of where the athlete is now, from their training-load, recent activities, and lift history. Null only if there is genuinely no data to ground it in.",
-      properties: {
-        summary: { type: "string" },
-        trainingLoad: {
-          type: ["object", "null"],
-          properties: { ctl: { type: "number" }, atl: { type: "number" }, tsb: { type: "number" } },
-          required: ["ctl", "atl", "tsb"],
-        },
-        highlights: { type: "array", items: { type: "string" }, description: "Specific progress, stalls, or misses read from the data." },
-      },
-      required: ["summary", "trainingLoad", "highlights"],
-    },
+    currentState: currentStateJsonSchema,
     events: {
       type: "array",
       description: "Target events driving periodization; empty array for open-ended goals.",
-      items: {
-        type: "object",
-        properties: {
-          name: { type: "string" },
-          date: { type: ["string", "null"] },
-          weeksOut: { type: ["string", "null"] },
-          goal: { type: "string" },
-        },
-        required: ["name", "date", "weeksOut", "goal"],
-      },
+      items: eventJsonSchema,
     },
     roadmap: {
       type: "array",
       description: "Periodized phases building toward the events; empty array if a single-phase plan is appropriate.",
-      items: {
-        type: "object",
-        properties: {
-          phase: { type: "string" },
-          dates: { type: "string" },
-          focus: { type: "string" },
-          lifting: { type: "string" },
-          running: { type: ["string", "null"] },
-          nutrition: { type: ["string", "null"] },
-        },
-        required: ["phase", "dates", "focus", "lifting", "running", "nutrition"],
-      },
+      items: roadmapPhaseJsonSchema,
     },
     weeklyStructure: {
       type: "array",
       description: "Day-by-day overview of the current phase's week, with placement rationale.",
-      items: {
-        type: "object",
-        properties: {
-          day: { type: "string" },
-          focus: { type: "string" },
-          note: { type: ["string", "null"] },
-        },
-        required: ["day", "focus", "note"],
-      },
+      items: weeklyDayJsonSchema,
     },
-    sessions: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          day: { type: "string" },
-          label: { type: "string" },
-          focus_note: { type: ["string", "null"] },
-          exercises: { type: "array", items: exerciseJsonSchema },
-        },
-        required: ["day", "label", "focus_note", "exercises"],
-      },
-    },
-    running: {
-      type: ["object", "null"],
-      description: "Running/endurance programming for hybrid & endurance goals; null for pure strength/physique goals.",
-      properties: {
-        pacesNote: { type: "string" },
-        sessions: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: { name: { type: "string" }, detail: { type: "string" } },
-            required: ["name", "detail"],
-          },
-        },
-      },
-      required: ["pacesNote", "sessions"],
-    },
+    sessions: { type: "array", items: sessionJsonSchema },
+    running: runningJsonSchema,
     progressionRules: { type: "string" },
     deloadGuidance: { type: "string" },
     warmupNotes: { type: "string" },
@@ -223,6 +243,116 @@ export const programJsonSchema = {
     "weeklyStructure", "sessions", "running", "progressionRules", "deloadGuidance",
     "warmupNotes", "coachNotes", "sportNotes", "nutritionNote",
   ],
+};
+
+// ---------------------------------------------------------------------------
+// Overview / schedule split — the two halves of a full generation, run as
+// independent concurrent LLM calls. Together their fields exactly cover
+// programSchema (see generateProgram.ts's merge + final programSchema check).
+// ---------------------------------------------------------------------------
+
+export const programOverviewSchema = z.object({
+  title: z.string(),
+  goalSummary: z.string(),
+  currentState: currentStateSchema,
+  events: z.array(eventSchema),
+  roadmap: z.array(roadmapPhaseSchema),
+  progressionRules: z.string(),
+  deloadGuidance: z.string(),
+  warmupNotes: z.string(),
+  coachNotes: z.string().nullable(),
+  sportNotes: z.string().nullable(),
+  nutritionNote: z.string().nullable(),
+});
+export type ProgramOverviewOutput = z.infer<typeof programOverviewSchema>;
+
+export const programOverviewJsonSchema = {
+  type: "object",
+  properties: {
+    title: { type: "string", description: "Short program title tied to the goal, e.g. 'Hybrid Base Block → Hyrox'." },
+    goalSummary: { type: "string", description: "One sentence framing how this program serves the athlete's stated goal." },
+    currentState: currentStateJsonSchema,
+    events: {
+      type: "array",
+      description: "Target events driving periodization; empty array for open-ended goals.",
+      items: eventJsonSchema,
+    },
+    roadmap: {
+      type: "array",
+      description: "Periodized phases building toward the events; empty array if a single-phase plan is appropriate.",
+      items: roadmapPhaseJsonSchema,
+    },
+    progressionRules: { type: "string" },
+    deloadGuidance: { type: "string" },
+    warmupNotes: { type: "string" },
+    coachNotes: { type: ["string", "null"] },
+    sportNotes: { type: ["string", "null"] },
+    nutritionNote: { type: ["string", "null"] },
+  },
+  required: [
+    "title", "goalSummary", "currentState", "events", "roadmap",
+    "progressionRules", "deloadGuidance", "warmupNotes", "coachNotes", "sportNotes", "nutritionNote",
+  ],
+};
+
+export const programScheduleSchema = z.object({
+  split: z.string(),
+  daysPerWeek: z.number().int().min(1).max(7),
+  weeklyStructure: z.array(weeklyDaySchema),
+  sessions: z.array(sessionSchema).min(1).max(10),
+  running: runningSchema,
+});
+export type ProgramScheduleOutput = z.infer<typeof programScheduleSchema>;
+
+export const programScheduleJsonSchema = {
+  type: "object",
+  properties: {
+    split: { type: "string" },
+    daysPerWeek: { type: "integer", minimum: 1, maximum: 7 },
+    weeklyStructure: {
+      type: "array",
+      description: "Day-by-day overview of the current phase's week, with placement rationale.",
+      items: weeklyDayJsonSchema,
+    },
+    sessions: { type: "array", items: sessionJsonSchema },
+    running: runningJsonSchema,
+  },
+  required: ["split", "daysPerWeek", "weeklyStructure", "sessions", "running"],
+};
+
+// ---------------------------------------------------------------------------
+// Incremental update — adjusts only the current block; the rest of the
+// program (roadmap, events, goal, etc.) is carried forward unchanged from
+// the active program document rather than re-generated.
+// ---------------------------------------------------------------------------
+
+export const programUpdateSchema = z.object({
+  currentState: currentStateSchema,
+  weeklyStructure: z.array(weeklyDaySchema),
+  sessions: z.array(sessionSchema).min(1).max(10),
+  changeSummary: z.array(z.string()),
+  coachNotes: z.string().nullable(),
+  nutritionNote: z.string().nullable(),
+  running: runningSchema,
+});
+export type ProgramUpdateOutput = z.infer<typeof programUpdateSchema>;
+
+export const programUpdateJsonSchema = {
+  type: "object",
+  properties: {
+    currentState: currentStateJsonSchema,
+    weeklyStructure: {
+      type: "array",
+      description: "Day-by-day overview of the adjusted current week, with placement rationale.",
+      items: weeklyDayJsonSchema,
+    },
+    sessions: { type: "array", items: sessionJsonSchema },
+    changeSummary: { type: "array", items: { type: "string" }, description: "Short bullet points of what changed vs the previous block, and why." },
+    coachNotes: { type: ["string", "null"] },
+    nutritionNote: { type: ["string", "null"] },
+    running: runningJsonSchema,
+  },
+  required: ["currentState", "weeklyStructure", "sessions", "changeSummary", "coachNotes", "nutritionNote", "running"],
 };
 
 const mealSchema = z.object({
