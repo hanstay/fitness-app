@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="robots" content="noindex, nofollow">
+<title>Connecting to intervals.icu…</title>
+<link rel="stylesheet" href="../styles/theme.css">
+</head>
+<body>
+
+<div class="wrap narrow" style="padding:60px 0; text-align:center">
+  <p id="statusText">Connecting to intervals.icu…</p>
+  <p id="closeHint" style="display:none"><a href="#" id="closeLink">Close this window</a></p>
+</div>
+
+<script type="module">
+  import { exchangeIntervalsIcuCode } from "../js/intervals-oauth.js";
+  import { waitForAuthState } from "../js/auth-guard.js";
+
+  const statusText = document.getElementById("statusText");
+  const closeHint = document.getElementById("closeHint");
+  document.getElementById("closeLink").addEventListener("click", (e) => {
+    e.preventDefault();
+    window.close();
+  });
+
+  function finish(payload) {
+    if (window.opener) {
+      window.opener.postMessage({ type: "intervals-oauth-result", ...payload }, location.origin);
+    }
+    window.close();
+    // window.close() only works because this window was script-opened (it
+    // was — via window.open in intervals-oauth.js). If a popup blocker or
+    // browser policy stops it, fall back to a manual close link.
+    setTimeout(() => {
+      statusText.textContent = payload.error ? "Something went wrong." : "Connected. You can close this window.";
+      closeHint.style.display = "block";
+    }, 300);
+  }
+
+  const params = new URLSearchParams(location.search);
+  const state = params.get("state");
+  const error = params.get("error");
+  const code = params.get("code");
+
+  if (error) {
+    finish({ state, error: error === "access_denied" ? "You cancelled the connection." : `intervals.icu error: ${error}` });
+  } else if (!code) {
+    finish({ state, error: "No authorization code received." });
+  } else {
+    const user = await waitForAuthState();
+    if (!user) {
+      finish({ state, error: "You're not signed in." });
+    } else {
+      try {
+        const result = await exchangeIntervalsIcuCode(code);
+        finish({ state, result });
+      } catch (err) {
+        finish({ state, error: err.message || "Couldn't connect to intervals.icu." });
+      }
+    }
+  }
+</script>
+</body>
+</html>
