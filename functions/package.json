@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
+    "@firebase/app": "^0.16.0",
     "csv-parse": "^5.6.0",
     "dotenv": "^17.4.2",
     "firebase-admin": "^14.2.0",
