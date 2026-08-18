@@ -21,12 +21,12 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
 
 const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyCVhLj3cYZVTbh83YySIQMKEMMKHAJ0la0",
-  authDomain: "hj-training-program-hj2t3of5.firebaseapp.com",
-  projectId: "hj-training-program-hj2t3of5",
-  storageBucket: "hj-training-program-hj2t3of5.firebasestorage.app",
-  messagingSenderId: "446751103328",
-  appId: "1:446751103328:web:d34a55938304b4e6d7e605",
+  apiKey: "AIzaSyDt7Z2meE2FW-QQ7m7DOKeNkAtsvX2DPWE",
+  authDomain: "fitness-app-47a06.firebaseapp.com",
+  projectId: "fitness-app-47a06",
+  storageBucket: "fitness-app-47a06.firebasestorage.app",
+  messagingSenderId: "39106506907",
+  appId: "1:39106506907:web:3f1484ebfec23fbae4d63e",
 };
 
 const app = initializeApp(FIREBASE_CONFIG);

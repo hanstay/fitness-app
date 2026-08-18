@@ -13,7 +13,7 @@ dotenv.config();
 // resolves to the wrong bucket and every storage read (Hevy CSV, body-scan PDF)
 // 404s with "No such object". Keep this in sync with firebase-init.js.
 initializeApp({
-  storageBucket: "hj-training-program-hj2t3of5.firebasestorage.app",
+  storageBucket: "fitness-app-47a06.firebasestorage.app",
 });
 
 export { onUserCreate } from "./auth/onUserCreate";
