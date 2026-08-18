@@ -5,6 +5,7 @@ import { db, storage, functions } from "./firebase-init.js";
 import { requireAuth } from "./auth-guard.js";
 import { renderEventsEditor, collectEvents } from "./events-editor.js";
 import { renderCommitmentsEditor, collectCommitments } from "./commitments-editor.js";
+import { connectIntervalsIcuViaOAuth } from "./intervals-oauth.js";
 
 const user = await requireAuth();
 if (!user) throw new Error("not authenticated"); // requireAuth already redirected
@@ -87,18 +88,20 @@ document.getElementById("step2BackBtn").addEventListener("click", () => goToStep
 document.getElementById("step2SkipBtn").addEventListener("click", () => goToStep(3));
 
 document.getElementById("icuConnectBtn").addEventListener("click", async () => {
-  const athleteId = document.getElementById("icuAthleteId").value.trim();
-  const apiKey = document.getElementById("icuApiKey").value.trim();
-  const status = document.getElementById("icuStatus");
-  if (!athleteId || !apiKey) return showError("Enter both your athlete ID and API key.");
   clearMessages();
-  status.textContent = "Verifying and syncing…";
+  const status = document.getElementById("icuStatus");
   const btn = document.getElementById("icuConnectBtn");
+  status.textContent = "Connecting…";
   btn.disabled = true;
   try {
-    const saveCreds = httpsCallable(functions, "saveIntervalsIcuCredentials");
-    const result = await saveCreds({ athleteId, apiKey });
-    status.textContent = `Connected — synced ${result.data.activitiesSynced ?? 0} recent activities.`;
+    const result = await connectIntervalsIcuViaOAuth();
+    if (result.cancelled) {
+      status.textContent = "";
+    } else if (result.syncError) {
+      status.textContent = `Connected, but the first sync failed: ${result.syncError}`;
+    } else {
+      status.textContent = `Connected — synced ${result.activitiesSynced ?? 0} recent activities.`;
+    }
   } catch (err) {
     status.textContent = "";
     showError(`Couldn't connect to intervals.icu: ${err.message || err}`);
