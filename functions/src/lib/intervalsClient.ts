@@ -1,22 +1,14 @@
-// Deterministic intervals.icu API client + parser — ports tools/sync-intervals.ps1.
+// Deterministic intervals.icu API client — ports tools/sync-intervals.ps1.
+// Uses OAuth2 Bearer tokens; athlete id "0" is intervals.icu's alias for
+// "the athlete who authorized this token" (see connectIntervalsIcuOAuth.ts),
+// so callers never need to pass or store a numeric athlete id to make calls.
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
 const BASE = "https://intervals.icu/api/v1";
+const SELF = "0";
 
-function authHeader(apiKey: string): Record<string, string> {
-  const pair = `API_KEY:${apiKey}`;
-  const b64 = Buffer.from(pair, "utf8").toString("base64");
-  return { Authorization: `Basic ${b64}` };
-}
-
-/** Verifies a key by fetching the athlete profile. Throws if invalid. */
-export async function verifyIntervalsCredentials(athleteId: string, apiKey: string): Promise<void> {
-  const res = await fetch(`${BASE}/athlete/${encodeURIComponent(athleteId)}`, {
-    headers: authHeader(apiKey),
-  });
-  if (!res.ok) {
-    throw new Error(res.status === 401 ? "Invalid athlete ID or API key." : `intervals.icu returned ${res.status}`);
-  }
+function authHeader(accessToken: string): Record<string, string> {
+  return { Authorization: `Bearer ${accessToken}` };
 }
 
 interface IntervalsActivity {
@@ -51,23 +43,22 @@ function formatPace(metersPerSec: number | undefined, type: string): string | nu
 /**
  * Pulls recent activities + the latest wellness (CTL/ATL/TSB) snapshot from
  * intervals.icu and writes them into Firestore for the given user. Shared by
- * both saveIntervalsIcuCredentials (auto-sync on connect) and
+ * both connectIntervalsIcuOAuth (auto-sync on connect) and
  * syncIntervalsActivities (manual "Sync Now").
  */
 export async function syncIntervalsActivitiesForUser(
   uid: string,
-  athleteId: string,
-  apiKey: string,
+  accessToken: string,
   days = 42
 ): Promise<{ activitiesSynced: number; wellness: { ctl: number; atl: number; tsb: number; asOf: string } | null }> {
   const db = getFirestore();
   const newest = new Date().toISOString().slice(0, 10);
   const oldest = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
-  const headers = authHeader(apiKey);
+  const headers = authHeader(accessToken);
 
   const [activitiesRes, wellnessRes] = await Promise.all([
-    fetch(`${BASE}/athlete/${encodeURIComponent(athleteId)}/activities?oldest=${oldest}&newest=${newest}`, { headers }),
-    fetch(`${BASE}/athlete/${encodeURIComponent(athleteId)}/wellness?oldest=${oldest}&newest=${newest}`, { headers }),
+    fetch(`${BASE}/athlete/${SELF}/activities?oldest=${oldest}&newest=${newest}`, { headers }),
+    fetch(`${BASE}/athlete/${SELF}/wellness?oldest=${oldest}&newest=${newest}`, { headers }),
   ]);
   if (!activitiesRes.ok) throw new Error(`intervals.icu activities fetch failed (${activitiesRes.status})`);
   if (!wellnessRes.ok) throw new Error(`intervals.icu wellness fetch failed (${wellnessRes.status})`);

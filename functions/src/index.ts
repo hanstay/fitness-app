@@ -18,7 +18,7 @@ initializeApp({
 
 export { onUserCreate } from "./auth/onUserCreate";
 export { parseHevyCsv } from "./integrations/parseHevyCsv";
-export { saveIntervalsIcuCredentials } from "./integrations/saveIntervalsIcuCredentials";
+export { connectIntervalsIcuOAuth } from "./integrations/connectIntervalsIcuOAuth";
 export { syncIntervalsActivities } from "./integrations/syncIntervalsActivities";
 export { parseBodyScan } from "./scans/parseBodyScan";
 export { calculateTargets } from "./profile/calculateTargets";
