@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import {
   computeE1RM,
   computeLiftProgression,
@@ -11,6 +11,18 @@ import {
   type StrengthSession,
   type HevySet,
 } from "../src/lib/hevyDerivedData";
+
+// Fixture dates below are all relative to this fixed "now" (the lookback
+// windows are boundary-sensitive against Date.now()); freeze the clock so
+// the suite doesn't drift out of its own 42-day window as real time passes.
+beforeAll(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-08-12T00:00:00.000Z"));
+});
+
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 // Tests author sessions in a flat "one row per set" shape for readability;
 // makeSession folds them into the canonical nested exercises[].sets[] structure
