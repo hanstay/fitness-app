@@ -6,6 +6,7 @@ import { ref as storageRef, uploadBytes } from "https://www.gstatic.com/firebase
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
 import { db, storage, functions } from "./firebase-init.js";
 import { requireOnboarded } from "./auth-guard.js";
+import { connectIntervalsIcuViaOAuth } from "./intervals-oauth.js";
 
 const session = await requireOnboarded();
 if (!session) throw new Error("redirecting"); // requireOnboarded already redirected
@@ -180,37 +181,23 @@ function renderIcuState(summary) {
 }
 
 document.getElementById("icuConnectBtn").addEventListener("click", (e) => {
-  const athleteId = document.getElementById("icuAthleteId").value.trim();
-  const apiKey = document.getElementById("icuApiKey").value.trim();
-  if (!athleteId || !apiKey) return showError("Enter both your athlete ID and API key.");
   clearMessages();
-  setStatus("icuConnectStatus", "Verifying and syncing…");
+  setStatus("icuConnectStatus", "Connecting…");
   withButtonBusy(e.currentTarget, "Connecting…", async () => {
-    const saveCreds = httpsCallable(functions, "saveIntervalsIcuCredentials");
-    const result = await saveCreds({ athleteId, apiKey });
+    const result = await connectIntervalsIcuViaOAuth();
     setStatus("icuConnectStatus", "");
-    showSuccess(`Connected — synced ${result.data.activitiesSynced ?? 0} recent activities.`);
+    if (result.cancelled) return;
+    if (result.syncError) {
+      showError(`Connected, but the first sync failed: ${result.syncError}`);
+    } else {
+      showSuccess(`Connected — synced ${result.activitiesSynced ?? 0} recent activities.`);
+    }
     summary = await loadSummary();
     renderIcuState(summary);
   }).catch((err) => {
     setStatus("icuConnectStatus", "");
     showError(`Couldn't connect to intervals.icu: ${err.message || err}`);
   });
-});
-
-// Reveal the credential form from the connected state so keys can be replaced
-// (expired/rotated key, or a stale connected flag with no stored credential).
-document.getElementById("icuUpdateKeysBtn").addEventListener("click", () => {
-  const icu = summary?.integrationsStatus?.intervalsIcu;
-  const form = document.getElementById("icuDisconnected");
-  form.style.display = "block";
-  if (icu?.athleteId) document.getElementById("icuAthleteId").value = icu.athleteId;
-  document.getElementById("icuApiKey").value = "";
-  // Deliberately re-opening the form is a fresh "not sent yet" — clear any
-  // disabled state left by an earlier successful connect so keys can be resent.
-  document.getElementById("icuConnectBtn").disabled = false;
-  document.getElementById("icuApiKey").focus();
-  form.scrollIntoView({ behavior: "smooth", block: "nearest" });
 });
 
 document.getElementById("icuSyncBtn").addEventListener("click", (e) => {
