@@ -21,7 +21,13 @@ export const queueProgramGeneration = onCall(async (request) => {
   const placeholderRef = db.collection(`users/${uid}/programs`).doc();
   await db.batch()
     .set(placeholderRef, { status: "generating", createdAt: FieldValue.serverTimestamp() })
-    .update(db.doc(`users/${uid}/state/summary`), { programGenerationStatus: "generating", programGenerationError: FieldValue.delete() })
+    .update(db.doc(`users/${uid}/state/summary`), {
+      programGenerationStatus: "generating",
+      programGenerationError: FieldValue.delete(),
+      // Lets the client judge staleness (see lib/staleGeneration.ts) without a
+      // second listener on the placeholder doc itself.
+      programGenerationStartedAt: FieldValue.serverTimestamp(),
+    })
     .commit();
 
   return { programId: placeholderRef.id };

@@ -68,14 +68,22 @@ export async function extractStructuredJson<T>(params: ExtractJsonParams<T>): Pr
       });
     }
 
-    const response = await anthropic.messages.create({
-      model: params.model ?? MODEL,
-      max_tokens: params.maxTokens ?? 4096,
-      system: params.system,
-      tools: [tool],
-      tool_choice: { type: "tool", name: params.toolName },
-      messages,
-    });
+    const response = await anthropic.messages.create(
+      {
+        model: params.model ?? MODEL,
+        max_tokens: params.maxTokens ?? 4096,
+        system: params.system,
+        tools: [tool],
+        tool_choice: { type: "tool", name: params.toolName },
+        messages,
+      },
+      // SDK default is 2 retries — too thin once many users onboard at once
+      // and start tripping Anthropic's rate limits together. We run inside a
+      // 300s-budget background job (see onProgramGenerationRequested.ts /
+      // onMealPlanGenerationRequested.ts), so there's room to let the SDK's
+      // built-in exponential backoff absorb a burst instead of failing fast.
+      { maxRetries: 6 }
+    );
 
     const toolUse = response.content.find((b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use");
     if (!toolUse) {

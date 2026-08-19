@@ -110,7 +110,11 @@ export async function runGenerateMealPlan(uid: string) {
     },
     ...plan,
   });
-  batch.update(db.doc(`users/${uid}/state/summary`), { currentMealPlanId: newRef.id, mealPlanGenerationStatus: FieldValue.delete() });
+  batch.update(db.doc(`users/${uid}/state/summary`), {
+    currentMealPlanId: newRef.id,
+    mealPlanGenerationStatus: FieldValue.delete(),
+    mealPlanGenerationStartedAt: FieldValue.delete(),
+  });
   await batch.commit();
 
   return { mealPlanId: newRef.id, ...plan };

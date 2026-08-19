@@ -526,7 +526,11 @@ export async function runGenerateProgram(uid: string): Promise<{ programId: stri
     ...(changeSummary ? { changeSummary } : {}),
     profileSnapshot: athlete,
   });
-  batch.update(db.doc(`users/${uid}/state/summary`), { currentProgramId: newRef.id, programGenerationStatus: FieldValue.delete() });
+  batch.update(db.doc(`users/${uid}/state/summary`), {
+    currentProgramId: newRef.id,
+    programGenerationStatus: FieldValue.delete(),
+    programGenerationStartedAt: FieldValue.delete(),
+  });
   await batch.commit();
 
   return { programId: newRef.id, ...mergedProgram, ...(changeSummary ? { changeSummary } : {}) };
