@@ -4,6 +4,7 @@
 // parseBodyScan, generateProgram, and generateMealPlan.
 import Anthropic from "@anthropic-ai/sdk";
 import type { ZodSchema } from "zod";
+import * as logger from "firebase-functions/logger";
 
 let client: Anthropic | null = null;
 function getClient(): Anthropic {
@@ -68,6 +69,7 @@ export async function extractStructuredJson<T>(params: ExtractJsonParams<T>): Pr
       });
     }
 
+    const startedAt = Date.now();
     const response = await anthropic.messages.create(
       {
         model: params.model ?? MODEL,
@@ -84,6 +86,17 @@ export async function extractStructuredJson<T>(params: ExtractJsonParams<T>): Pr
       // built-in exponential backoff absorb a burst instead of failing fast.
       { maxRetries: 6 }
     );
+    // Structured so Cloud Logging queries can answer "is our 300s function
+    // timeout / 6-minute stale threshold actually fair?" from real traffic
+    // over time, without needing a one-off synthetic benchmark.
+    logger.info("extractStructuredJson call completed", {
+      toolName: params.toolName,
+      attempt,
+      durationMs: Date.now() - startedAt,
+      maxTokens: params.maxTokens ?? 4096,
+      outputTokens: response.usage?.output_tokens ?? null,
+      stopReason: response.stop_reason,
+    });
 
     const toolUse = response.content.find((b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use");
     if (!toolUse) {

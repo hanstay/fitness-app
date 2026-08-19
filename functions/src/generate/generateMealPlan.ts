@@ -3,7 +3,10 @@ import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { extractStructuredJson } from "../lib/claude";
 import { mealPlanJsonSchema, mealPlanSchema } from "../lib/schemas";
 
-const SYSTEM_PROMPT = `You are a nutrition coach. Build a practical meal plan that hits the
+// Exported only so the manual latency probe
+// (test/generationLatency.manual.test.ts) can call extractStructuredJson with
+// the exact real prompt — not used by any other caller.
+export const MEAL_PLAN_SYSTEM_PROMPT = `You are a nutrition coach. Build a practical meal plan that hits the
 athlete's calorie and macro targets and fits their food preferences and logistics, then call
 the tool with it.
 
@@ -76,7 +79,7 @@ export async function runGenerateMealPlan(uid: string) {
   ].join("\n");
 
   const plan = await extractStructuredJson({
-    system: SYSTEM_PROMPT,
+    system: MEAL_PLAN_SYSTEM_PROMPT,
     userText: `Athlete nutrition profile:\n${profileText}\n\nGenerate their meal plan.`,
     toolName: "record_meal_plan",
     toolDescription: "Record the generated meal plan.",
