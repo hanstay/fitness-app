@@ -52,7 +52,43 @@ const FIXTURE_EXISTING_WEEK = JSON.stringify({
     { day: "Fri", focus: "Full body + conditioning" },
     { day: "Sat", focus: "Long run" },
   ],
-  sessions: [],
+  sessions: [
+    {
+      day: "Mon",
+      label: "Lower Body Strength",
+      focus_note: "Heavy compound work, moderate volume",
+      exercises: [
+        { name: "Back Squat", sets: 4, reps: "5", rir: "2", rest_seconds: 180, load_note: "100kg last week", substitution_note: null },
+        { name: "Romanian Deadlift", sets: 3, reps: "8", rir: "2", rest_seconds: 120, load_note: null, substitution_note: null },
+      ],
+    },
+    {
+      day: "Wed",
+      label: "Upper Body Strength",
+      focus_note: "Push/pull balance",
+      exercises: [
+        { name: "Bench Press", sets: 4, reps: "5", rir: "2", rest_seconds: 180, load_note: "70kg last week", substitution_note: null },
+        { name: "Barbell Row", sets: 3, reps: "8", rir: "2", rest_seconds: 120, load_note: null, substitution_note: null },
+      ],
+    },
+    {
+      day: "Fri",
+      label: "Full Body + Conditioning",
+      focus_note: "Lighter loading before the weekend long run",
+      exercises: [
+        { name: "Trap Bar Deadlift", sets: 3, reps: "6", rir: "2", rest_seconds: 150, load_note: null, substitution_note: null },
+        { name: "Sled Push", sets: 4, reps: "20 m", rir: "n/a", rest_seconds: 90, load_note: "conditioning finisher", substitution_note: null },
+      ],
+    },
+    {
+      day: "Sat",
+      label: "Long Run",
+      focus_note: "Easy aerobic pace",
+      exercises: [
+        { name: "Zone-2 long run", sets: 1, reps: "60 min", rir: "n/a", rest_seconds: 0, load_note: "conversational pace", substitution_note: null },
+      ],
+    },
+  ],
 });
 
 interface Case {
@@ -92,7 +128,7 @@ const cases: Case[] = [
   },
   {
     name: "program incremental update",
-    maxTokens: 3000,
+    maxTokens: 7000,
     run: () =>
       extractStructuredJson({
         system: INCREMENTAL_SYSTEM_PROMPT,
@@ -108,7 +144,7 @@ const cases: Case[] = [
         toolDescription: "Record the adjusted current week of the athlete's program.",
         inputSchema: programUpdateJsonSchema,
         validator: programUpdateSchema,
-        maxTokens: 3000,
+        maxTokens: 7000,
       }),
   },
   {
