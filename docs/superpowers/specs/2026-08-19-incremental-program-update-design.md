@@ -32,8 +32,9 @@ days don't change).
 - Stop the incremental-update call from truncating (`maxTokens` fix).
 - Reduce typical token usage for the common case (adjusting 1-2 days of a
   4-7 day week) via a sparse diff instead of full re-emission.
-- Never silently drop a day's session — fail loudly if the merge can't
-  resolve a session for every day in the new `weeklyStructure`.
+- Never end up with a program that has zero sessions — the existing final
+  `programSchema` validation already guards this; the merge itself must not
+  weaken that guarantee.
 - No change to full-regen behavior (`programOverviewSchema` /
   `programScheduleSchema` / their merge) — out of scope.
 
@@ -81,40 +82,47 @@ model currently has no signal that partial output is acceptable or expected:
 
 New pure module, following the existing pattern of extracted pure-logic
 modules with dedicated tests (`lib/programDecisions.ts`, `lib/staleGeneration.ts`,
-`lib/macros.ts`):
+`lib/macros.ts`).
+
+Note: `weeklyStructure` covers all 7 days including rest days (see
+`SCHEDULE_SYSTEM_PROMPT`'s "DAY COUNT" rule — every non-training day gets an
+explicit `focus: "Rest"/"Recovery"` entry), while `sessions` only covers
+training days. So the merge must NOT iterate `weeklyStructure` to decide
+which days need a session — that would demand a session for every rest day
+too. Instead it merges directly by the union of days present in the existing
+and updated `sessions` arrays:
 
 ```ts
 export function mergeIncrementalSessions(
-  weeklyStructure: { day: string }[],
-  existingSessions: { day: string }[],
-  updatedSessions: { day: string }[]
-): SessionType[] {
-  const existingByDay = new Map(existingSessions.map((s) => [s.day, s]));
+  existingSessions: SessionOutput[],
+  updatedSessions: SessionOutput[]
+): SessionOutput[] {
   const updatedByDay = new Map(updatedSessions.map((s) => [s.day, s]));
+  const existingByDay = new Map(existingSessions.map((s) => [s.day, s]));
 
-  return weeklyStructure.map(({ day }) => {
-    const session = updatedByDay.get(day) ?? existingByDay.get(day);
-    if (!session) {
-      throw new Error(
-        `Incremental program update: no session for day "${day}" — not in ` +
-        `the model's response and no existing session to carry forward.`
-      );
-    }
-    return session;
-  });
+  // Carry forward every existing day, swapping in the update where present.
+  const merged = existingSessions.map((s) => updatedByDay.get(s.day) ?? s);
+
+  // Append any day the update introduces that wasn't in the existing week
+  // (e.g. a brand-new training day).
+  for (const s of updatedSessions) {
+    if (!existingByDay.has(s.day)) merged.push(s);
+  }
+
+  return merged;
 }
 ```
 
 `generateProgram.ts`'s incremental branch calls
-`mergeIncrementalSessions(update.weeklyStructure, activeProgram!.sessions ?? [], update.sessions)`
-and uses the result in place of `update.sessions` in the merge candidate.
+`mergeIncrementalSessions(activeProgram!.sessions ?? [], update.sessions)` and
+uses the result in place of `update.sessions` in the merge candidate.
 
-This is the correctness safety net: if the model's `weeklyStructure` names a
-day that's neither in its own sparse `sessions` output nor in the athlete's
-existing program, the whole generation throws immediately rather than
-producing a program silently missing a training day — consistent with this
-codebase's existing fail-fast approach (e.g. the recent stale-generation
-hang fix).
+Correctness net: no per-day throw (rest-day detection isn't reliable enough
+to gate on), but the existing final `programSchema.safeParse(candidate)`
+check (`generateProgram.ts:513`, unchanged) still catches the catastrophic
+case — `programSchema.sessions` requires `min(1)`, so a merge that somehow
+produces zero sessions still fails the generation loudly rather than saving
+a broken program.
 
 ### 5. Manual-test fixture
 
@@ -128,12 +136,13 @@ representative sessions for Mon/Wed/Fri/Sat (matching its existing
 ### 6. Tests
 
 New `test/programMerge.test.ts` covering `mergeIncrementalSessions`:
-- all days unchanged → full carry-forward from existing
-- mixed: some days in `updatedSessions`, rest carried forward
-- a day present in `weeklyStructure` and `updatedSessions` but absent from
-  `existingSessions` (new day) → uses the update
-- a day present in `weeklyStructure` but absent from both `existingSessions`
-  and `updatedSessions` → throws
+- all days unchanged (`updatedSessions` empty) → full carry-forward from
+  `existingSessions`, same order
+- mixed: some days present in `updatedSessions` → those replace the matching
+  existing entries by `day`, the rest carried forward unchanged
+- a day in `updatedSessions` not present in `existingSessions` (new training
+  day) → appended to the result
+- both empty → returns an empty array
 
 Then: `npm run build && npx vitest run --exclude "**/test/rules.test.ts"`,
 and re-run the real-API manual latency probe to confirm no more truncation
