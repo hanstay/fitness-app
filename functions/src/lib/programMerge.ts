@@ -13,7 +13,7 @@ export function mergeIncrementalSessions(
 
   const merged = existingSessions.map((s) => updatedByDay.get(s.day) ?? s);
 
-  for (const s of updatedSessions) {
+  for (const s of updatedByDay.values()) {
     if (!existingByDay.has(s.day)) merged.push(s);
   }
 

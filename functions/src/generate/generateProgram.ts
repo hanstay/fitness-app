@@ -6,6 +6,7 @@ import {
   programOverviewJsonSchema, programOverviewSchema,
   programScheduleJsonSchema, programScheduleSchema,
   programUpdateJsonSchema, programUpdateSchema,
+  SessionOutput,
 } from "../lib/schemas";
 import { identifyKeyLifts, computeLiftProgression, PROGRESSION_CONFIG } from "../lib/hevyDerivedData";
 import { needsFullRegen, AthleteProfileSnapshot } from "../lib/programDecisions";
@@ -499,6 +500,19 @@ export async function runGenerateProgram(uid: string): Promise<{ programId: stri
     });
 
     changeSummary = update.changeSummary;
+    // A placement change (e.g. moving a lifting day off an injured day) marks
+    // the old day "Rest"/"Recovery" in the new weeklyStructure without the
+    // model re-emitting that day in "sessions" -- drop the carried-forward
+    // session for any day the update now calls a rest day, so it doesn't
+    // linger attached to a day that no longer trains.
+    const restDays = new Set(
+      update.weeklyStructure
+        .filter((d) => /rest|recovery/i.test(d.focus))
+        .map((d) => d.day)
+    );
+    const existingTrainingSessions = (activeProgram!.sessions ?? []).filter(
+      (s: SessionOutput) => !restDays.has(s.day)
+    );
     const candidate = {
       title: activeProgram!.title,
       goalSummary: activeProgram!.goalSummary,
@@ -512,7 +526,7 @@ export async function runGenerateProgram(uid: string): Promise<{ programId: stri
       sportNotes: activeProgram!.sportNotes,
       currentState: update.currentState,
       weeklyStructure: update.weeklyStructure,
-      sessions: mergeIncrementalSessions(activeProgram!.sessions ?? [], update.sessions),
+      sessions: mergeIncrementalSessions(existingTrainingSessions, update.sessions),
       coachNotes: update.coachNotes,
       nutritionNote: update.nutritionNote,
       running: update.running,

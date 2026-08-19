@@ -37,4 +37,12 @@ describe("mergeIncrementalSessions", () => {
   it("returns an empty array when both inputs are empty", () => {
     expect(mergeIncrementalSessions([], [])).toEqual([]);
   });
+
+  it("dedups a day duplicated within updatedSessions when it's new to the existing week", () => {
+    const existing = [session("Mon", "Lower v1")];
+    const dup1 = session("Sat", "Long Run v1");
+    const dup2 = session("Sat", "Long Run v2");
+    const result = mergeIncrementalSessions(existing, [dup1, dup2]);
+    expect(result).toEqual([session("Mon", "Lower v1"), dup2]);
+  });
 });
