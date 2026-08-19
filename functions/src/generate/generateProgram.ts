@@ -9,6 +9,7 @@ import {
 } from "../lib/schemas";
 import { identifyKeyLifts, computeLiftProgression, PROGRESSION_CONFIG } from "../lib/hevyDerivedData";
 import { needsFullRegen, AthleteProfileSnapshot } from "../lib/programDecisions";
+import { mergeIncrementalSessions } from "../lib/programMerge";
 
 const MODEL = "claude-sonnet-4-5-20250929";
 
@@ -156,9 +157,15 @@ WORK IN THIS ORDER:
    placement if the data clearly calls for it (e.g. an injury flag) — otherwise keep today's
    placement and just adjust the session content.
 
-3. Write the updated "sessions" using the same exercise-writing rules as a fresh plan: every
-   item (including runs/conditioning) as an exercise with sets/reps/rir/rest_seconds/notes.
-   Seed loads from current lifts and the progression data.
+3. Write "sessions" AS A DIFF, not a full re-list: include an entry only for a day whose
+   exercises/sets/reps/load are actually changing based on the fresh data. Omit any day whose
+   session should stay exactly as it is in the existing week — it will be carried forward
+   automatically, so do not restate it. "sessions" may be empty if nothing should change (e.g.
+   no Hevy data to act on). A day that's new to the schedule (not present in the existing week
+   above) must be included in full, since there is nothing existing to carry forward for it. For
+   any session you do include, use the same exercise-writing rules as a fresh plan: every item
+   (including runs/conditioning) as an exercise with sets/reps/rir/rest_seconds/notes, loads
+   seeded from current lifts and the progression data.
 
 4. Write "changeSummary": 2-5 short bullet points of what actually changed this update and why
    (e.g. "Bench press +2.5kg — e1RM trending up 3 weeks straight", "Dropped a set on squats —
@@ -488,7 +495,7 @@ export async function runGenerateProgram(uid: string): Promise<{ programId: stri
       toolDescription: "Record the adjusted current week of the athlete's program.",
       inputSchema: programUpdateJsonSchema,
       validator: programUpdateSchema,
-      maxTokens: 3000,
+      maxTokens: 7000,
     });
 
     changeSummary = update.changeSummary;
@@ -505,7 +512,7 @@ export async function runGenerateProgram(uid: string): Promise<{ programId: stri
       sportNotes: activeProgram!.sportNotes,
       currentState: update.currentState,
       weeklyStructure: update.weeklyStructure,
-      sessions: update.sessions,
+      sessions: mergeIncrementalSessions(activeProgram!.sessions ?? [], update.sessions),
       coachNotes: update.coachNotes,
       nutritionNote: update.nutritionNote,
       running: update.running,
