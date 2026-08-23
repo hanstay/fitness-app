@@ -1,6 +1,6 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
-import { extractStructuredJson } from "../lib/claude";
+import { extractStructuredJson, MODEL } from "../lib/claude";
 import {
   programSchema, ProgramOutput,
   programOverviewJsonSchema, programOverviewSchema,
@@ -11,8 +11,6 @@ import {
 import { identifyKeyLifts, computeLiftProgression, PROGRESSION_CONFIG } from "../lib/hevyDerivedData";
 import { needsFullRegen, AthleteProfileSnapshot } from "../lib/programDecisions";
 import { mergeIncrementalSessions } from "../lib/programMerge";
-
-const MODEL = "claude-sonnet-4-5-20250929";
 
 // Shared framing every path needs: goal-driven training style and how to
 // ground the program in the athlete's actual data.
@@ -240,21 +238,22 @@ export async function runGenerateProgram(uid: string): Promise<{ programId: stri
     throw new HttpsError("failed-precondition", "Complete your training profile first (days/week, session length).");
   }
 
-  // Gather grounding data: training load + recent activities (from intervals.icu sync).
-  const summarySnap = await db.doc(`users/${uid}/state/summary`).get();
+  // Gather grounding data: training load + recent activities (from intervals.icu
+  // sync), the active program, and Hevy progression history. None of these
+  // four reads depends on another's result, so fetch them concurrently
+  // rather than paying for four sequential round trips.
+  const [summarySnap, activitiesSnap, existingActiveSnap, sessionsSnap] = await Promise.all([
+    db.doc(`users/${uid}/state/summary`).get(),
+    db.collection(`users/${uid}/activities`).orderBy("date", "desc").limit(15).get().catch(() => null),
+    db.collection(`users/${uid}/programs`).where("status", "==", "active").get(),
+    db.collection(`users/${uid}/strengthSessions`).orderBy("date", "desc").limit(500).get().catch(() => null),
+  ]);
   const summary = summarySnap.data();
   const wellness = summary?.wellness ?? null;
   const currentTargets = summary?.currentTargets ?? null;
 
-  const activitiesSnap = await db
-    .collection(`users/${uid}/activities`)
-    .orderBy("date", "desc")
-    .limit(15)
-    .get()
-    .catch(() => null);
   const activities: ActivityDoc[] = activitiesSnap ? activitiesSnap.docs.map((d) => d.data() as ActivityDoc) : [];
 
-  const existingActiveSnap = await db.collection(`users/${uid}/programs`).where("status", "==", "active").get();
   const activeProgramDoc = existingActiveSnap.docs[0] ?? null;
   const activeProgram = activeProgramDoc?.data() ?? null;
 
@@ -263,18 +262,11 @@ export async function runGenerateProgram(uid: string): Promise<{ programId: stri
     activeProgram: activeProgramDoc ? { profileSnapshot: activeProgram?.profileSnapshot, createdAt: activeProgram?.createdAt } : null,
   });
 
-  // Query Hevy strengthSessions for progression analysis
+  // Build progression/adherence text from the already-fetched strengthSessions.
   let progressionBlock = "";
   let adherenceBlock = "";
 
   try {
-    const sessionsSnap = await db
-      .collection(`users/${uid}/strengthSessions`)
-      .orderBy("date", "desc")
-      .limit(500)
-      .get()
-      .catch(() => null);
-
     const sessions = sessionsSnap
       ? sessionsSnap.docs.map((d) => ({
           id: d.id,
