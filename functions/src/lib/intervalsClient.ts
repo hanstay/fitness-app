@@ -14,8 +14,8 @@ function authHeader(accessToken: string): Record<string, string> {
 interface IntervalsActivity {
   id: string | number;
   start_date_local: string;
-  type: string;
-  name: string;
+  type?: string;
+  name?: string;
   distance?: number;
   moving_time?: number;
   average_speed?: number;
@@ -80,14 +80,18 @@ export async function syncIntervalsActivitiesForUser(
 
   const batch = db.batch();
   for (const a of activities) {
+    // intervals.icu doesn't guarantee every field is present despite the
+    // IntervalsActivity type — an activity missing "type" would otherwise
+    // write `undefined` into Firestore, which it rejects outright.
+    const type = a.type ?? "Other";
     const ref = db.doc(`users/${uid}/activities/${a.id}`);
     batch.set(ref, {
       date: a.start_date_local?.slice(0, 10) ?? null,
-      type: a.type,
-      name: a.name,
+      type,
+      name: a.name ?? null,
       distance_km: a.distance ? Math.round((a.distance / 1000) * 100) / 100 : null,
       duration_s: a.moving_time ?? null,
-      pace: formatPace(a.average_speed, a.type),
+      pace: formatPace(a.average_speed, type),
       avg_hr: a.average_heartrate ? Math.round(a.average_heartrate) : null,
       training_load: a.icu_training_load ?? null,
       ctl: wellness?.ctl ?? null,
