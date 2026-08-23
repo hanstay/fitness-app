@@ -1,0 +1,6 @@
+node_modules/
+# Compiled TypeScript output only — anchored to the functions root so it does
+# NOT also ignore src/lib (the shared library source).
+/lib/
+*.local
+.env

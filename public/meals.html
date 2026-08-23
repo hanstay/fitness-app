@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="robots" content="noindex, nofollow">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Hybrid Plan">
+<meta name="theme-color" content="#ffffff">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<title>Meal Plan — Hybrid Training Plan</title>
+<link rel="stylesheet" href="styles/theme.css">
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <a class="backlink" href="dashboard.html">← Dashboard</a>
+    <h1>Your meal plan</h1>
+    <p class="sub" id="pageSub">Loading…</p>
+    <div class="badges" id="headerBadges"></div>
+  </div>
+</header>
+
+<div class="wrap">
+<div class="layout">
+  <nav class="toc" id="toc">
+    <button class="navtoggle" id="navtoggle">Jump to section <span class="arrow">▾</span></button>
+    <div class="links" id="tocLinks">
+      <div class="toc-title">Contents</div>
+    </div>
+  </nav>
+  <main id="mainContent">
+    <section id="loading"><p class="muted">Loading your meal plan…</p></section>
+  </main>
+</div>
+</div>
+
+<footer class="wrap">
+  <a href="dashboard.html">← Back to dashboard</a> ·
+  Personal training plan · personal-trainer toolkit · General fitness coaching, not medical advice.
+</footer>
+
+<script src="update.js"></script>
+<script type="module">
+  import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+  import { db } from "./js/firebase-init.js";
+  import { requireOnboarded } from "./js/auth-guard.js";
+
+  const session = await requireOnboarded();
+  if (!session) throw new Error("redirecting");
+  const { user } = session;
+
+  const summarySnap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
+  const mealPlanId = summarySnap.data()?.currentMealPlanId;
+
+  const main = document.getElementById("mainContent");
+  const tocLinks = document.getElementById("tocLinks");
+
+  if (!mealPlanId) {
+    main.innerHTML = `<section><p class="muted">No meal plan generated yet. Go to your <a href="dashboard.html">dashboard</a> and generate one.</p></section>`;
+    document.getElementById("pageSub").textContent = "No meal plan yet";
+  } else {
+    const planSnap = await getDoc(doc(db, "users", user.uid, "mealPlans", mealPlanId));
+    const plan = planSnap.data();
+    const t = plan.targetsSnapshot;
+
+    document.getElementById("pageSub").textContent = `Generated ${
+      plan.createdAt?.toDate ? plan.createdAt.toDate().toLocaleDateString() : "recently"
+    }`;
+    document.getElementById("headerBadges").innerHTML = t
+      ? `<span class="badge"><b>${t.kcal}</b> kcal</span><span class="badge"><b>${t.p}g</b> protein</span><span class="badge"><b>${t.c}g</b> carbs</span><span class="badge"><b>${t.f}g</b> fat</span>`
+      : "";
+
+    const sections = [];
+
+    plan.days.forEach((day, i) => {
+      const sectionId = `day${i}`;
+      sections.push({ id: sectionId, label: day.label });
+      const rows = day.meals.map((m) => `
+        <tr>
+          <td><b>${m.name}</b><br><span class="muted small">${m.items}</span>${m.notes ? `<br><span class="note">${m.notes}</span>` : ""}</td>
+          <td class="n">${m.kcal}</td>
+          <td class="n">${m.protein_g}g</td>
+          <td class="n">${m.carbs_g}g</td>
+          <td class="n">${m.fat_g}g</td>
+        </tr>`).join("");
+      main.insertAdjacentHTML("beforeend", `
+        <section id="${sectionId}">
+          <h2><span class="dot"></span>${day.label}</h2>
+          <div class="tablescroll"><table>
+            <thead><tr><th>Meal</th><th class="n">Kcal</th><th class="n">P</th><th class="n">C</th><th class="n">F</th></tr></thead>
+            <tbody>${rows}
+              <tr class="total"><td>Total</td><td class="n">${day.totals.kcal}</td><td class="n">${day.totals.p}g</td><td class="n">${day.totals.c}g</td><td class="n">${day.totals.f}g</td></tr>
+            </tbody>
+          </table></div>
+        </section>`);
+    });
+
+    if (plan.groceryList?.length) {
+      sections.push({ id: "grocery", label: "Grocery list" });
+      main.insertAdjacentHTML("beforeend", `
+        <section id="grocery"><h2><span class="dot"></span>Grocery list</h2>
+          <ul>${plan.groceryList.map((g) => `<li>${g}</li>`).join("")}</ul>
+        </section>`);
+    }
+
+    if (plan.notes) {
+      sections.push({ id: "notes", label: "Notes" });
+      main.insertAdjacentHTML("beforeend", `
+        <section id="notes"><h2><span class="dot"></span>Notes</h2><div class="callout">${plan.notes}</div></section>`);
+    }
+
+    document.getElementById("loading").remove();
+    tocLinks.insertAdjacentHTML("beforeend", sections.map((s) => `<a href="#${s.id}">${s.label}</a>`).join(""));
+
+    const toc = document.getElementById("toc"), tgl = document.getElementById("navtoggle");
+    tgl.addEventListener("click", () => toc.classList.toggle("open"));
+    const links = Array.from(document.querySelectorAll("nav.toc .links a"));
+    links.forEach((a) => {
+      a.addEventListener("click", (e) => {
+        const target = document.getElementById(a.getAttribute("href").slice(1));
+        if (target) {
+          e.preventDefault();
+          target.scrollIntoView({ behavior: "smooth", block: "start" });
+          links.forEach((l) => l.classList.remove("active"));
+          a.classList.add("active");
+        }
+        if (window.innerWidth <= 820) toc.classList.remove("open");
+      });
+    });
+    const map = {};
+    links.forEach((a) => { map[a.getAttribute("href").slice(1)] = a; });
+    const obs = new IntersectionObserver((entries) => {
+      entries.forEach((e) => {
+        if (e.isIntersecting) {
+          links.forEach((l) => l.classList.remove("active"));
+          const act = map[e.target.id];
+          if (act) act.classList.add("active");
+        }
+      });
+    }, { rootMargin: "-20% 0px -70% 0px" });
+    document.querySelectorAll("main section").forEach((s) => obs.observe(s));
+  }
+</script>
+</body>
+</html>

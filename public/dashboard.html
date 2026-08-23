@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="robots" content="noindex, nofollow">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Hybrid Plan">
+<meta name="theme-color" content="#ffffff">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<title>Dashboard — Hybrid Training Plan</title>
+<link rel="stylesheet" href="styles/theme.css">
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <h1 id="greeting">Your plan</h1>
+    <p class="sub" id="targetsSub">Loading…</p>
+    <div class="badges" id="targetBadges"></div>
+  </div>
+</header>
+
+<div class="wrap" style="padding:26px 0 60px; max-width:720px">
+
+  <section id="trainingLoad" style="display:none">
+    <h2><span class="dot"></span>Training load</h2>
+    <div class="stats" id="loadStats"></div>
+    <p class="note" id="loadAsOf"></p>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>Weekly check-in</h2>
+    <a class="item-card" href="checkin.html">
+      <span class="item-thumb">📋</span>
+      <span class="item-info"><span class="item-title">Check in for the week</span><span class="item-meta">Import Hevy, sync your load, rebuild your plan</span></span>
+      <span class="item-val">→</span>
+    </a>
+  </section>
+
+  <section>
+    <h2><span class="dot"></span>Your plan</h2>
+    <div id="planCards"></div>
+    <a class="item-card" href="profile.html">
+      <span class="item-thumb">⚙️</span>
+      <span class="item-info"><span class="item-title">Profile</span><span class="item-meta">Stats, training, diet prefs</span></span>
+      <span class="item-val">→</span>
+    </a>
+    <p class="note" id="actionStatus"></p>
+  </section>
+
+  <section>
+    <div class="btn-row" style="flex-wrap:wrap">
+      <button class="btn secondary" id="signOutBtn" type="button">Sign out</button>
+    </div>
+  </section>
+
+</div>
+
+<footer class="wrap">
+  Personal training plan · personal-trainer toolkit ·
+  General fitness coaching, not medical advice.
+</footer>
+
+<script src="update.js"></script>
+<script type="module">
+  import { doc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+  import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
+  import { db, functions } from "./js/firebase-init.js";
+  import { requireOnboarded, signOut } from "./js/auth-guard.js";
+
+  const session = await requireOnboarded();
+  if (!session) throw new Error("redirecting"); // requireOnboarded already redirected
+  const { user, profile } = session;
+
+  document.getElementById("greeting").textContent = profile.displayName
+    ? `Hi ${profile.displayName}`
+    : "Your plan";
+
+  function renderTargets(summary) {
+    const t = summary?.currentTargets;
+    const badgesEl = document.getElementById("targetBadges");
+    const subEl = document.getElementById("targetsSub");
+    if (!t) {
+      subEl.textContent = "No targets yet — set up your meal plan below to calculate them.";
+      badgesEl.innerHTML = "";
+      return;
+    }
+    subEl.textContent = `Updated ${t.calculated_at?.toDate ? t.calculated_at.toDate().toLocaleDateString() : "recently"}`;
+    badgesEl.innerHTML = `
+      <span class="badge"><b>${t.target_calories}</b> kcal</span>
+      <span class="badge"><b>${t.protein_g}g</b> protein</span>
+      <span class="badge"><b>${t.carbs_g}g</b> carbs</span>
+      <span class="badge"><b>${t.fat_g}g</b> fat</span>`;
+  }
+
+  function renderTrainingLoad(summary) {
+    const w = summary?.wellness;
+    if (!w) return;
+    document.getElementById("trainingLoad").style.display = "block";
+    document.getElementById("loadStats").innerHTML = `
+      <div class="stat"><div class="k">Fitness (CTL)</div><div class="v">${w.ctl}</div></div>
+      <div class="stat"><div class="k">Fatigue (ATL)</div><div class="v">${w.atl}</div></div>
+      <div class="stat"><div class="k">Form (TSB)</div><div class="v ${w.tsb < -10 ? "warn" : ""}">${w.tsb}</div></div>`;
+    document.getElementById("loadAsOf").textContent = `as of ${w.asOf} · synced from intervals.icu`;
+  }
+
+  let summary = null;
+
+  function setStatus(msg) {
+    document.getElementById("actionStatus").textContent = msg;
+  }
+
+  // Renders the program + meal-plan cards from summary state. Each feature is
+  // "generating" (background job in flight), "set up" (view + regenerate),
+  // or "not set up" (generate prompt).
+  function renderPlanCards() {
+    const el = document.getElementById("planCards");
+    el.innerHTML = "";
+    el.appendChild(featureCard({
+      icon: "🏋️",
+      title: "Training program",
+      href: "program.html",
+      hasIt: Boolean(summary?.currentProgramId),
+      genStatus: summary?.programGenerationStatus,
+      genError: summary?.programGenerationError,
+      setupMeta: "Generate from your training details",
+      viewMeta: "View your current split",
+      genLabel: "training program",
+      missingHint: "Add your training details (days/week, session length) in your profile first.",
+      generate: () => httpsCallable(functions, "generateProgram", { timeout: 300000 })(),
+      showRegen: false, // rebuilding lives in the Weekly check-in now
+    }));
+    el.appendChild(featureCard({
+      icon: "🍱",
+      title: "Meal plan",
+      href: "meals.html",
+      hasIt: Boolean(summary?.currentMealPlanId),
+      genStatus: summary?.mealPlanGenerationStatus,
+      genError: summary?.mealPlanGenerationError,
+      setupMeta: "Generate targets and a meal plan",
+      viewMeta: "Meals that hit your macros",
+      genLabel: "meal plan",
+      missingHint: "Add your stats (height, weight, meals/day) in your profile first.",
+      generate: () => httpsCallable(functions, "calculateTargets")().then(() => httpsCallable(functions, "generateMealPlan", { timeout: 300000 })()),
+    }));
+  }
+
+  function featureCard(cfg) {
+    const wrap = document.createElement("div");
+    if (cfg.genStatus === "generating") {
+      const card = document.createElement("div");
+      card.className = "item-card setup";
+      card.style.opacity = ".7";
+      card.innerHTML = `<span class="item-thumb">${cfg.icon}</span>
+        <span class="item-info"><span class="item-title">Generating your ${cfg.genLabel}…</span><span class="item-meta">This can take a few minutes — feel free to browse elsewhere, it'll show up here.</span></span>
+        <span class="spinner"></span>`;
+      wrap.appendChild(card);
+    } else if (cfg.hasIt) {
+      const a = document.createElement("a");
+      a.className = "item-card";
+      a.href = cfg.href;
+      a.innerHTML = `<span class="item-thumb">${cfg.icon}</span>
+        <span class="item-info"><span class="item-title">${cfg.title}</span><span class="item-meta">${cfg.viewMeta}</span></span>
+        <span class="item-val">→</span>`;
+      wrap.appendChild(a);
+      if (cfg.showRegen !== false) {
+        const regen = document.createElement("button");
+        regen.className = "btn secondary small-btn";
+        regen.type = "button";
+        regen.textContent = "Regenerate";
+        regen.style.cssText = "margin:0 0 12px; padding:8px 14px; font-size:.82rem";
+        regen.addEventListener("click", () => runGenerate(cfg, regen, "Regenerating"));
+        wrap.appendChild(regen);
+      }
+    } else {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "item-card setup";
+      const meta = cfg.genStatus === "error" && cfg.genError
+        ? `Last attempt failed: ${cfg.genError}`
+        : cfg.setupMeta;
+      card.innerHTML = `<span class="item-thumb">${cfg.icon}</span>
+        <span class="item-info"><span class="item-title">Set up your ${cfg.genLabel}</span><span class="item-meta">${meta}</span></span>
+        <span class="item-val">+</span>`;
+      card.addEventListener("click", () => runGenerate(cfg, card, "Generating"));
+      wrap.appendChild(card);
+    }
+    return wrap;
+  }
+
+  async function runGenerate(cfg, btn, verb) {
+    if (btn.disabled) return; // guard against re-firing a generation already in flight
+    btn.disabled = true;
+    const original = btn.innerHTML;
+    btn.style.opacity = ".6";
+    setStatus(`${verb} your ${cfg.genLabel} — this can take up to a minute…`);
+    try {
+      await cfg.generate();
+      setStatus(`Your ${cfg.genLabel} is ready.`);
+      // The onSnapshot listener below picks up the Firestore write this just
+      // made and re-renders the cards — no manual refresh needed here.
+    } catch (err) {
+      const msg = String(err?.message || err);
+      const isPrecondition = /first|required|Complete/i.test(msg);
+      setStatus(isPrecondition ? cfg.missingHint : `Couldn't generate your ${cfg.genLabel}: ${msg}`);
+      btn.disabled = false;
+      btn.style.opacity = "1";
+      btn.innerHTML = original;
+    }
+  }
+
+  // Realtime listener (rather than a one-shot fetch) so cards update live —
+  // in particular so a "generating" card flips to "view" the moment the
+  // background generation trigger finishes, with no manual refresh needed.
+  onSnapshot(doc(db, "users", user.uid, "state", "summary"), (snap) => {
+    summary = snap.exists() ? snap.data() : null;
+    renderTargets(summary);
+    renderTrainingLoad(summary);
+    renderPlanCards();
+  });
+
+  document.getElementById("signOutBtn").addEventListener("click", () => signOut());
+</script>
+</body>
+</html>

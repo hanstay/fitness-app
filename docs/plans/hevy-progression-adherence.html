@@ -1,0 +1,453 @@
+<title>Plan — Maximizing Hevy data for plan generation</title>
+<style>
+  :root{
+    --page-bg:#eef1f4; --panel:#ffffff; --panel-2:#f7f9fb; --panel-3:#eef2f6;
+    --ink:#181a1d; --ink-soft:#5c626c; --line:#e2e5ea; --line-strong:#d3d8df;
+    --accent:#dd4045; --accent-ink:#c9333a; --accent-soft:#fdecec;
+    --good:#1c7a3e; --good-soft:#eaf7ee; --warn:#b7791f; --warn-soft:#fdf3e2;
+    --mono-bg:#f4f6f9; --mono-ink:#2b2f36;
+    --shadow:0 1px 2px rgba(20,25,35,.05), 0 10px 30px rgba(20,25,35,.06);
+    --font-head:"Poppins","Segoe UI",system-ui,-apple-system,sans-serif;
+    --font-body:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+    --font-mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --page-bg:#0f1114; --panel:#191c21; --panel-2:#15181c; --panel-3:#20242b;
+      --ink:#eceef1; --ink-soft:#98a0ab; --line:#2a2e35; --line-strong:#3a3f48;
+      --accent:#e5595d; --accent-ink:#f08b8e; --accent-soft:#2b1d1f;
+      --good:#4ec97a; --good-soft:#16281c; --warn:#e0a341; --warn-soft:#2a2113;
+      --mono-bg:#12151a; --mono-ink:#c7cdd6;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 34px rgba(0,0,0,.4);
+    }
+  }
+  :root[data-theme="dark"]{
+    --page-bg:#0f1114; --panel:#191c21; --panel-2:#15181c; --panel-3:#20242b;
+    --ink:#eceef1; --ink-soft:#98a0ab; --line:#2a2e35; --line-strong:#3a3f48;
+    --accent:#e5595d; --accent-ink:#f08b8e; --accent-soft:#2b1d1f;
+    --good:#4ec97a; --good-soft:#16281c; --warn:#e0a341; --warn-soft:#2a2113;
+    --mono-bg:#12151a; --mono-ink:#c7cdd6;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 34px rgba(0,0,0,.4);
+  }
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0; background:var(--page-bg); color:var(--ink); font-family:var(--font-body); line-height:1.6; -webkit-font-smoothing:antialiased}
+  .wrap{max-width:940px; margin:0 auto; padding:0 clamp(16px,4vw,30px)}
+  h1,h2,h3,h4{font-family:var(--font-head); letter-spacing:-.01em; text-wrap:balance}
+  code,kbd{font-family:var(--font-mono)}
+
+  /* Masthead */
+  header.top{padding:54px 0 30px; border-bottom:1px solid var(--line)}
+  .eyebrow{font-family:var(--font-mono); font-size:.72rem; letter-spacing:.11em; text-transform:uppercase; color:var(--accent-ink); margin:0 0 15px; display:flex; align-items:center; gap:9px}
+  .eyebrow::before{content:""; width:22px; height:2px; background:var(--accent)}
+  header.top h1{font-weight:700; font-size:clamp(1.85rem,4.4vw,2.7rem); line-height:1.05; margin:0 0 14px; max-width:20ch}
+  header.top p{font-size:clamp(1rem,1.5vw,1.12rem); color:var(--ink-soft); max-width:64ch; margin:0}
+  header.top .accent{color:var(--accent-ink); font-weight:600}
+  .metabar{display:flex; flex-wrap:wrap; gap:8px; margin-top:22px}
+  .chip{font-size:.74rem; font-weight:600; border:1px solid var(--line-strong); border-radius:999px; padding:5px 12px; color:var(--ink-soft); background:var(--panel)}
+  .chip.on{background:var(--accent-soft); color:var(--accent-ink); border-color:transparent}
+  .chip.off{text-decoration:line-through; opacity:.6}
+
+  section{padding:38px 0 6px}
+  .kicker{font-family:var(--font-mono); font-size:.7rem; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-soft); margin:0 0 8px}
+  h2{font-size:1.42rem; font-weight:700; margin:0 0 8px}
+  section > p.intro{color:var(--ink-soft); max-width:66ch; margin:0 0 20px}
+  p{margin:0 0 12px}
+  b{color:var(--ink)}
+  a{color:var(--accent-ink)}
+
+  /* Pipeline diagram */
+  .flow{background:var(--panel); border:1px solid var(--line); border-radius:16px; box-shadow:var(--shadow); overflow:hidden}
+  .flow-track{padding:18px 20px}
+  .flow-track + .flow-track{border-top:1px solid var(--line)}
+  .flow-head{display:flex; align-items:center; gap:10px; margin-bottom:14px}
+  .flow-head .tag{font-family:var(--font-mono); font-size:.66rem; letter-spacing:.08em; text-transform:uppercase; font-weight:700; padding:3px 9px; border-radius:6px}
+  .flow-track.before .tag{background:var(--panel-3); color:var(--ink-soft)}
+  .flow-track.after .tag{background:var(--accent-soft); color:var(--accent-ink)}
+  .flow-head .hl{font-size:.84rem; color:var(--ink-soft)}
+  .chain{display:flex; align-items:stretch; gap:0; flex-wrap:wrap}
+  .node{flex:1 1 0; min-width:118px; background:var(--panel-2); border:1px solid var(--line); border-radius:11px; padding:11px 12px; display:flex; flex-direction:column; gap:3px}
+  .node .n-k{font-family:var(--font-mono); font-size:.6rem; letter-spacing:.05em; text-transform:uppercase; color:var(--ink-soft)}
+  .node .n-v{font-size:.84rem; font-weight:600; color:var(--ink); line-height:1.35}
+  .node .n-d{font-size:.72rem; color:var(--ink-soft)}
+  .node.loss{border-color:var(--line-strong); background:var(--panel-3)}
+  .node.loss .n-v{color:var(--warn)}
+  .node.fix{border-color:var(--accent); background:var(--accent-soft)}
+  .node.fix .n-v{color:var(--accent-ink)}
+  .node.win{border-color:var(--good); background:var(--good-soft)}
+  .node.win .n-v{color:var(--good)}
+  .arr{flex:0 0 22px; display:grid; place-items:center; color:var(--accent); font-size:1.1rem}
+  .flow-track.before .arr{color:var(--ink-soft)}
+  @media (max-width:640px){ .chain{flex-direction:column} .arr{transform:rotate(90deg); height:16px} .node{min-width:0} }
+
+  /* Numbered build parts */
+  .parts{display:flex; flex-direction:column; gap:16px; margin-top:4px}
+  .part{display:grid; grid-template-columns:auto 1fr; gap:18px; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px 22px; box-shadow:var(--shadow)}
+  .part .num{font-family:var(--font-head); font-weight:700; font-size:1.5rem; color:var(--accent); font-variant-numeric:tabular-nums; line-height:1}
+  .part h3{font-size:1.08rem; font-weight:600; margin:2px 0 7px}
+  .part h3 .role{font-family:var(--font-mono); font-size:.64rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--accent-ink); background:var(--accent-soft); padding:2px 7px; border-radius:5px; margin-left:8px; vertical-align:middle}
+  .part p{font-size:.92rem; margin:0 0 8px}
+  .part ul{margin:0; padding-left:18px; font-size:.9rem; color:var(--ink-soft)}
+  .part li{margin:4px 0}
+  .part li b{color:var(--ink)}
+  .path{font-family:var(--font-mono); font-size:.82em; background:var(--mono-bg); color:var(--mono-ink); padding:1px 6px; border-radius:5px; border:1px solid var(--line); word-break:break-word}
+
+  /* Prompt example */
+  pre.block{background:var(--mono-bg); border:1px solid var(--line); border-radius:12px; padding:16px 18px; overflow-x:auto; margin:0; font-family:var(--font-mono); font-size:.82rem; line-height:1.6; color:var(--mono-ink)}
+  pre.block .lbl{color:var(--accent-ink); font-weight:700}
+  pre.block .mut{color:var(--ink-soft)}
+  pre.block .good{color:var(--good); font-weight:600}
+
+  /* Decisions grid */
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:14px; margin-top:4px}
+  .cell{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px 17px}
+  .cell h4{font-size:.95rem; margin:0 0 6px; display:flex; align-items:center; gap:8px}
+  .cell h4 .dot{width:8px; height:8px; border-radius:50%; background:var(--accent); flex:none}
+  .cell p{font-size:.85rem; color:var(--ink-soft); margin:0}
+
+  /* Screens — high-fidelity walkthrough */
+  .walk{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:clamp(18px,2.5vw,28px); margin-top:6px; align-items:start}
+  .step{display:flex; flex-direction:column; gap:13px}
+  .step-cap .n{font-family:var(--font-mono); font-size:.72rem; font-weight:700; color:var(--accent-ink)}
+  .step-cap h3{font-family:var(--font-head); font-weight:600; font-size:1.02rem; margin:3px 0 4px}
+  .step-cap p{margin:0; font-size:.84rem; color:var(--ink-soft)}
+  .step-cap .newpill{display:inline-block; font-family:var(--font-mono); font-size:.58rem; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--accent-ink); background:var(--accent-soft); padding:2px 7px; border-radius:5px; margin-left:6px}
+  .phone{ --a-bg:#ffffff; --a-tint:#f5f8fa; --a-card:#ffffff; --a-accent:#dd4045; --a-accent-ink:#c9333a; --a-accent-soft:#fdecec; --a-ink:#17181a; --a-ink2:#868b94; --a-line:#e8eaed; --a-good:#1c7a3e; --a-good-soft:#eaf7ee; --a-warn:#b7791f; background:#dfe3e8; border:1px solid var(--line); border-radius:28px; padding:8px; box-shadow:var(--shadow); overflow:hidden}
+  .screen{background:var(--a-bg); color:var(--a-ink); border-radius:21px; overflow:hidden; font-size:13.5px; line-height:1.5}
+  .statusbar{display:flex; justify-content:space-between; align-items:center; padding:8px 15px 4px; font-size:.66rem; font-weight:600; color:var(--a-ink); font-variant-numeric:tabular-nums}
+  .statusbar .dots{display:flex; gap:3px}
+  .statusbar .dots i{width:5px; height:5px; border-radius:50%; background:var(--a-ink2); display:block; opacity:.5}
+  .s-hero{background:var(--a-tint); border-bottom:1px solid var(--a-line); padding:11px 15px 13px}
+  .s-hero .back{font-size:.7rem; font-weight:600; color:var(--a-ink2)}
+  .s-hero h4{font-family:var(--font-head); font-weight:700; font-size:1.08rem; margin:4px 0 3px; color:var(--a-ink)}
+  .s-hero .sub{font-size:.72rem; color:var(--a-ink2)}
+  .s-hero .badges{display:flex; flex-wrap:wrap; gap:6px; margin-top:8px}
+  .s-hero .bdg{background:var(--a-card); border:1px solid var(--a-line); border-radius:999px; padding:3px 9px; font-size:.64rem; font-weight:600; color:var(--a-ink)}
+  .s-hero .bdg b{color:var(--a-accent-ink)}
+  .s-body{padding:13px 15px 17px; display:flex; flex-direction:column; gap:11px}
+  .s-sec{font-family:var(--font-head); font-weight:600; font-size:.8rem; color:var(--a-ink); display:flex; align-items:center; gap:7px; margin:2px 0 -3px}
+  .s-sec .sdot{width:7px; height:7px; border-radius:50%; background:var(--a-accent); flex:none}
+  .a-stats{display:flex; gap:7px}
+  .a-stat{flex:1; background:var(--a-tint); border:1px solid var(--a-line); border-radius:10px; padding:8px 9px}
+  .a-stat .k{font-size:.53rem; text-transform:uppercase; letter-spacing:.04em; color:var(--a-ink2); font-weight:600}
+  .a-stat .v{font-size:.94rem; font-weight:700; margin-top:2px; color:var(--a-ink); font-variant-numeric:tabular-nums}
+  .a-stat .v.warn{color:var(--a-warn)}
+  .a-item{display:flex; gap:10px; align-items:center; padding:10px; border:1px solid var(--a-line); border-radius:11px; background:var(--a-card)}
+  .a-item.cue{border:1.5px dashed var(--a-accent); background:var(--a-accent-soft)}
+  .a-thumb{width:34px; height:34px; border-radius:9px; background:var(--a-tint); flex:none; display:grid; place-items:center; font-size:16px}
+  .a-item.cue .a-thumb{background:#fff}
+  .a-item .info{flex:1; min-width:0}
+  .a-item .t{font-family:var(--font-head); font-weight:600; font-size:.83rem; color:var(--a-ink)}
+  .a-item .mt{font-size:.69rem; color:var(--a-ink2)}
+  .a-item .val{font-size:.98rem; font-weight:700; color:var(--a-accent-ink); flex:none}
+  .regen{align-self:flex-start; font-size:.73rem; font-weight:600; color:var(--a-ink); background:var(--a-card); border:1px solid var(--a-line); border-radius:7px; padding:6px 12px; margin-top:-3px}
+  .a-upload{display:flex; align-items:center; justify-content:space-between; gap:8px; border:1.5px dashed var(--a-line); border-radius:11px; padding:11px; background:var(--a-tint)}
+  .a-upload.done{border-style:solid}
+  .a-upload .u-l{display:flex; align-items:center; gap:9px}
+  .a-upload .u-ic{width:30px; height:30px; border-radius:8px; background:var(--a-card); border:1px solid var(--a-line); display:grid; place-items:center; font-size:14px; color:var(--a-accent-ink)}
+  .a-upload .u-t{font-family:var(--font-head); font-weight:600; font-size:.8rem; color:var(--a-ink)}
+  .a-upload .u-m{font-size:.66rem; color:var(--a-ink2)}
+  .a-upload .u-s{font-size:.64rem; font-weight:700; color:var(--a-good); background:var(--a-good-soft); padding:3px 8px; border-radius:999px; white-space:nowrap}
+  .a-upload .u-s.old{color:var(--a-ink2); background:var(--a-tint); border:1px solid var(--a-line)}
+  .a-btn{background:var(--a-accent); color:#fff; border:none; border-radius:9px; padding:11px; font-size:.84rem; font-weight:600; font-family:var(--font-head); text-align:center}
+  .a-btn.full{width:100%}
+  .a-pr{align-self:flex-start; font-size:.7rem; font-weight:700; color:var(--a-accent-ink); background:var(--a-accent-soft); border:1px solid #f3cfd0; border-radius:999px; padding:4px 11px}
+  .lift{border:1px solid var(--a-line); border-radius:10px; padding:9px 11px; background:var(--a-card)}
+  .lift .lr{display:flex; justify-content:space-between; align-items:center; gap:8px}
+  .lift .ln{font-weight:600; font-size:.78rem; color:var(--a-ink)}
+  .lift .lt{font-size:.64rem; color:var(--a-ink2); font-variant-numeric:tabular-nums}
+  .lift .axes{display:flex; gap:6px; margin-top:7px}
+  .ax{flex:1; display:flex; flex-direction:column; gap:1px; background:var(--a-tint); border:1px solid var(--a-line); border-radius:7px; padding:5px 8px}
+  .ax .axk{font-size:.52rem; text-transform:uppercase; letter-spacing:.04em; color:var(--a-ink2); font-weight:700}
+  .ax .axv{font-size:.72rem; font-weight:700; color:var(--a-ink)}
+  .ax .axv.up{color:var(--a-good)}
+  .ax .axv.flat{color:var(--a-ink2)}
+  .lift .cap{font-size:.61rem; color:var(--a-ink2); margin-top:5px; font-style:italic}
+  .a-callout{border-left:3px solid var(--a-accent); background:var(--a-tint); border-radius:0 9px 9px 0; padding:8px 11px; font-size:.74rem; color:var(--a-ink)}
+  .a-callout .h{font-family:var(--font-head); font-weight:700; font-size:.76rem; margin-bottom:2px}
+  .a-callout b{color:var(--a-accent-ink)}
+  .a-success{display:flex; flex-direction:column; align-items:center; text-align:center; gap:2px; padding:6px 0 2px}
+  .a-success .ring{width:42px; height:42px; border-radius:50%; background:var(--a-good-soft); display:grid; place-items:center; color:var(--a-good); margin-bottom:4px; font-weight:700; font-size:1.25rem}
+  .a-success h4{font-family:var(--font-head); font-weight:700; font-size:.98rem; margin:0; color:var(--a-ink)}
+  .a-success .sub{font-size:.7rem; color:var(--a-ink2)}
+  .a-change{display:flex; gap:8px; align-items:flex-start; font-size:.76rem; color:var(--a-ink)}
+  .a-change .op{width:18px; height:18px; border-radius:5px; background:var(--a-accent-soft); color:var(--a-accent-ink); flex:none; display:grid; place-items:center; font-weight:700; font-size:.7rem; margin-top:1px}
+  .a-change .why{color:var(--a-ink2)}
+
+  /* Files table */
+  .tablewrap{overflow-x:auto; border:1px solid var(--line); border-radius:12px; background:var(--panel)}
+  table{border-collapse:collapse; width:100%; font-size:.86rem; min-width:520px}
+  th,td{text-align:left; padding:11px 14px; border-bottom:1px solid var(--line); vertical-align:top}
+  th{font-family:var(--font-mono); font-size:.66rem; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-soft); font-weight:700}
+  tr:last-child td{border-bottom:none}
+  td:first-child{white-space:nowrap}
+  .badge{font-family:var(--font-mono); font-size:.64rem; font-weight:700; padding:2px 7px; border-radius:5px; text-transform:uppercase; letter-spacing:.04em}
+  .badge.new{background:var(--good-soft); color:var(--good)}
+  .badge.edit{background:var(--warn-soft); color:var(--warn)}
+
+  /* Verify list */
+  ol.verify{counter-reset:v; list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px}
+  ol.verify li{counter-increment:v; display:grid; grid-template-columns:auto 1fr; gap:13px; align-items:start; font-size:.92rem}
+  ol.verify li::before{content:counter(v); font-family:var(--font-mono); font-weight:700; font-size:.78rem; color:var(--accent-ink); background:var(--accent-soft); width:24px; height:24px; border-radius:50%; display:grid; place-items:center}
+
+  .nongoals{display:flex; flex-wrap:wrap; gap:8px; margin-top:4px}
+  .ng{font-size:.82rem; color:var(--ink-soft); background:var(--panel); border:1px dashed var(--line-strong); border-radius:8px; padding:7px 12px}
+
+  footer{margin-top:40px; padding:22px 0 60px; border-top:1px solid var(--line); color:var(--ink-soft); font-size:.84rem}
+  a:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:3px}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style>
+
+<div class="wrap">
+
+  <header class="top">
+    <p class="eyebrow">Hybrid Training Plan · implementation plan</p>
+    <h1>Make the plan read your Hevy history.</h1>
+    <p>A good coach programs the next block from the <span class="accent">goal</span>, then from <span class="accent">how you're actually performing</span>. We have the goal half. This plan builds the performance half — turning the Hevy export from a throwaway snapshot into a measured record of <b>progression</b> and <b>adherence</b> the model can reason over.</p>
+    <div class="metabar">
+      <span class="chip on">Progression tracking</span>
+      <span class="chip on">Adherence (LLM-judged)</span>
+      <span class="chip on">Workflow screens</span>
+      <span class="chip off">Sleep check-in</span>
+    </div>
+  </header>
+
+  <!-- PROBLEM / DIAGRAM -->
+  <section>
+    <p class="kicker">The core change</p>
+    <h2>Stop discarding the history</h2>
+    <p class="intro">Today every import collapses to one number per lift and overwrites the last one — so the model can only <em>guess</em> your trajectory. Keep the per-session history and two questions become answerable: are you progressing, and did you follow the plan?</p>
+
+    <div class="flow">
+      <div class="flow-track before">
+        <div class="flow-head"><span class="tag">Today</span><span class="hl">lossy — one snapshot, overwritten each upload</span></div>
+        <div class="chain">
+          <div class="node"><span class="n-k">Source</span><span class="n-v">Hevy CSV</span><span class="n-d">per-set rows</span></div>
+          <div class="arr">→</div>
+          <div class="node loss"><span class="n-k">Reduce</span><span class="n-v">latest set / lift</span><span class="n-d">30-day, ≤40</span></div>
+          <div class="arr">→</div>
+          <div class="node loss"><span class="n-k">Store</span><span class="n-v">overwrite current_lifts</span><span class="n-d">history discarded</span></div>
+          <div class="arr">→</div>
+          <div class="node"><span class="n-k">Prompt</span><span class="n-v">"current lifts"</span><span class="n-d">one data point</span></div>
+          <div class="arr">→</div>
+          <div class="node"><span class="n-k">LLM</span><span class="n-v">guesses trend</span><span class="n-d">"~intermediate"</span></div>
+        </div>
+      </div>
+      <div class="flow-track after">
+        <div class="flow-head"><span class="tag">Proposed</span><span class="hl">history kept → measured progression + adherence</span></div>
+        <div class="chain">
+          <div class="node"><span class="n-k">Source</span><span class="n-v">Hevy CSV</span><span class="n-d">per-set rows</span></div>
+          <div class="arr">→</div>
+          <div class="node fix"><span class="n-k">Persist</span><span class="n-v">strengthSessions</span><span class="n-d">idempotent history</span></div>
+          <div class="arr">→</div>
+          <div class="node"><span class="n-k">Analyze</span><span class="n-v">e1RM · PR · trend</span><span class="n-d">+ last block vs actual</span></div>
+          <div class="arr">→</div>
+          <div class="node"><span class="n-k">Prompt</span><span class="n-v">progression + adherence</span><span class="n-d">distilled</span></div>
+          <div class="arr">→</div>
+          <div class="node win"><span class="n-k">LLM</span><span class="n-v">grounded call</span><span class="n-d">push / hold / adapt</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- BUILD PARTS -->
+  <section>
+    <p class="kicker">Build order · each part stands alone</p>
+    <h2>Three parts</h2>
+    <div class="parts">
+      <div class="part">
+        <div class="num">01</div>
+        <div>
+          <h3>Persist the training history<span class="role">enabler</span></h3>
+          <p>A new pure module parses the full export into per-session records and stores them, keyed by a hash of the session time so re-uploads upsert instead of duplicating. The old snapshot keeps working alongside it.</p>
+          <ul>
+            <li>New <span class="path">functions/src/lib/hevyAnalyzer.ts</span> — group set-rows by <code>start_time</code> into <code>{ date, title, exercises[{ name, sets[] }] }</code>.</li>
+            <li><span class="path">parseHevyCsv.ts</span> writes <span class="path">users/{uid}/strengthSessions/{id}</span> <b>and</b> still derives <code>current_lifts</code> (backward compatible).</li>
+            <li><span class="path">firestore.rules</span> — owner-read, Functions-write (mirrors the <code>activities</code> seam).</li>
+          </ul>
+        </div>
+      </div>
+      <div class="part">
+        <div class="num">02</div>
+        <div>
+          <h3>Measure progression — two axes<span class="role">objective</span></h3>
+          <p>Strength moves in more than one direction, so we track two independent signals off the history, keyed on Hevy's own exercise names (no matching needed):</p>
+          <ul>
+            <li><b>Intensity — e1RM</b> (Epley <code>w·(1+reps/30)</code>): the strength ceiling. PR + date, recent top set, 6-wk trend.</li>
+            <li><b>Volume — tonnage</b> (Σ <code>sets·reps·weight</code> per movement): total work done. Per-session and per-week, 6-wk trend.</li>
+            <li>Plus <b>frequency</b> (sessions/wk). For bodyweight/conditioning moves, volume falls back to reps · distance · time.</li>
+          </ul>
+          <p style="margin-top:6px; font-size:.88rem; color:var(--ink-soft)">They diverge usefully — volume&nbsp;↑ with e1RM flat = <b>building work capacity</b>; e1RM&nbsp;↑ with volume&nbsp;↓ = <b>peaking</b>. The model reads the pair, not one number.</p>
+        </div>
+      </div>
+      <div class="part">
+        <div class="num">03</div>
+        <div>
+          <h3>Feed the model<span class="role">progression + adherence</span></h3>
+          <p>Two distilled blocks join the prompt. Progression is the computed summary above. Adherence is <b>LLM-judged</b> — the plan's semi-numeric prescriptions and Hevy's free-form names don't cleanly diff, so we hand both to the model and let it reason.</p>
+          <ul>
+            <li><b>PLANNED</b>: last block's sessions (reuse the archive read already in <span class="path">generateProgram.ts</span>).</li>
+            <li><b>ACTUAL</b>: the week's <code>strengthSessions</code>.</li>
+            <li>System prompt: progression → push/hold/deload; adherence → repeat/scale/adapt; recognise repeated swaps; <b>never penalise missing history</b>.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PROMPT EXAMPLE -->
+  <section>
+    <p class="kicker">What the model receives</p>
+    <h2>Adherence, judged not diffed</h2>
+    <p class="intro">Rather than a brittle name-matcher, the prompt carries a compact planned-vs-actual view and asks the model to assess it — tolerant of "Squat (Barbell)" ≈ "Back Squat" and of a swapped exercise.</p>
+    <pre class="block"><span class="lbl">PERFORMANCE &amp; PROGRESSION (from Hevy)</span>          <span class="mut">e1RM / intensity        volume / tonnage</span>
+  Back Squat   top 90kg×6   PR e1RM 108 <span class="good">↑ +6%/4wk</span>    4.2t/wk <span class="good">↑</span>
+  RDL          top 90kg×8   PR e1RM 114 → flat        3.1t/wk <span class="good">↑</span>   <span class="mut">(work capacity, not ceiling)</span>
+  Sessions     5/wk avg (last 4wk)
+
+<span class="lbl">PLANNED — last block</span>          <span class="lbl">ACTUAL — logged in Hevy</span>
+  Mon  Squat 4×5, RDL 3×8       Mon  Squat 5/5/5/4, Hip Thrust 3×8
+  Thu  Upper strength           Thu  <span class="mut">(not logged)</span>
+  Sat  Long run                 Sat  Long run ✓
+
+<span class="mut">→ model concludes: 5/6 sessions; squat loads hit;
+  RDL→hip-thrust swapped 2 weeks running (likely equipment)
+  — consider adopting. Missed Thu upper — hold, don't add volume.</span></pre>
+  </section>
+
+  <!-- SCREENS -->
+  <section>
+    <p class="kicker">The human side of the loop · UI follow-on</p>
+    <h2>Screens that supplement the workflow</h2>
+    <p class="intro">Parts 01–03 are backend — they make the data real. These screens are the human side of the loop: where the athlete <b>brings Hevy in each week</b> and <b>sees what it changed</b>. Rendered in the app's real design, starting from the main menu. Today Hevy upload lives only in onboarding, so there's no weekly home for it.</p>
+    <div class="walk">
+
+      <div class="step">
+        <div class="step-cap"><span class="n">01 · start here</span><h3>Main menu <span class="newpill">+ This week</span></h3><p>Today's dashboard — targets, training load, your plan — with one new entry point: <b>This week</b>.</p></div>
+        <div class="phone"><div class="screen">
+          <div class="statusbar"><span>9:41</span><span class="dots"><i></i><i></i><i></i></span></div>
+          <div class="s-hero"><h4>Hi Han</h4><div class="sub">Updated Aug 10</div><div class="badges"><span class="bdg"><b>2500</b> kcal</span><span class="bdg"><b>190g</b> protein</span><span class="bdg"><b>250g</b> carbs</span></div></div>
+          <div class="s-body">
+            <div class="s-sec"><span class="sdot"></span>Training load</div>
+            <div class="a-stats"><div class="a-stat"><div class="k">Fitness CTL</div><div class="v">10</div></div><div class="a-stat"><div class="k">Fatigue ATL</div><div class="v">22.8</div></div><div class="a-stat"><div class="k">Form TSB</div><div class="v warn">−12.8</div></div></div>
+            <div class="a-item cue"><span class="a-thumb">📥</span><span class="info"><span class="t">This week</span><span class="mt">Import Hevy · regenerate</span></span><span class="val">→</span></div>
+            <div class="s-sec"><span class="sdot"></span>Your plan</div>
+            <div class="a-item"><span class="a-thumb">🏋️</span><span class="info"><span class="t">Training program</span><span class="mt">View your current split</span></span><span class="val">→</span></div>
+            <button class="regen">Regenerate</button>
+            <div class="a-item"><span class="a-thumb">⚙️</span><span class="info"><span class="t">Profile</span><span class="mt">Stats, training, diet prefs</span></span><span class="val">→</span></div>
+          </div>
+        </div></div>
+      </div>
+
+      <div class="step">
+        <div class="step-cap"><span class="n">02 · bring data in</span><h3>Weekly check-in hub</h3><p>Import this week's Hevy export, sync cardio, then regenerate. Fills the onboarding-only gap.</p></div>
+        <div class="phone"><div class="screen">
+          <div class="statusbar"><span>9:41</span><span class="dots"><i></i><i></i><i></i></span></div>
+          <div class="s-hero"><div class="back">← Dashboard</div><h4>This week</h4><div class="sub">Week 3 · bring your data in</div></div>
+          <div class="s-body">
+            <div class="a-upload"><div class="u-l"><span class="u-ic">⬆</span><div><div class="u-t">Import Hevy CSV</div><div class="u-m">Strength — sets, reps, loads</div></div></div><span class="u-s old">8d ago</span></div>
+            <div class="a-upload done"><div class="u-l"><span class="u-ic">↻</span><div><div class="u-t">Sync intervals.icu</div><div class="u-m">Cardio + training load</div></div></div><span class="u-s">2d ago</span></div>
+            <div class="a-callout">Fresh strength + cardio data lets the next block adapt to how you actually trained.</div>
+            <button class="a-btn full">Regenerate plan</button>
+          </div>
+        </div></div>
+      </div>
+
+      <div class="step">
+        <div class="step-cap"><span class="n">03 · confirm + surface</span><h3>Import summary</h3><p>What landed, and the signals that drive the next block: PRs, <b>two-axis</b> progression, and adherence.</p></div>
+        <div class="phone"><div class="screen">
+          <div class="statusbar"><span>9:42</span><span class="dots"><i></i><i></i><i></i></span></div>
+          <div class="s-hero"><div class="back">← This week</div><h4>Imported ✓</h4><div class="sub">6 sessions · last 7 days</div></div>
+          <div class="s-body">
+            <span class="a-pr">★ New PR — Squat e1RM 108</span>
+            <div class="lift"><div class="lr"><span class="ln">Back Squat</span><span class="lt">top 90kg×6</span></div><div class="axes"><div class="ax"><span class="axk">e1RM</span><span class="axv up">↑ +6%</span></div><div class="ax"><span class="axk">Volume</span><span class="axv up">↑</span></div></div></div>
+            <div class="lift"><div class="lr"><span class="ln">Romanian Deadlift</span><span class="lt">top 90kg×8</span></div><div class="axes"><div class="ax"><span class="axk">e1RM</span><span class="axv flat">→ flat</span></div><div class="ax"><span class="axk">Volume</span><span class="axv up">↑</span></div></div><div class="cap">work capacity, not ceiling</div></div>
+            <div class="a-callout"><div class="h">Adherence</div>5 of 6 planned sessions · <b>RDL → Hip Thrust ×2</b> (likely equipment)</div>
+            <button class="a-btn full">Use this to update my plan →</button>
+          </div>
+        </div></div>
+      </div>
+
+      <div class="step">
+        <div class="step-cap"><span class="n">04 · loop closes</span><h3>Plan updated — what &amp; why</h3><p>Every change traced to a progression or adherence signal — trust through reasoning.</p></div>
+        <div class="phone"><div class="screen">
+          <div class="statusbar"><span>9:45</span><span class="dots"><i></i><i></i><i></i></span></div>
+          <div class="s-body" style="padding-top:20px">
+            <div class="a-success"><span class="ring">✓</span><h4>Week 4 ready</h4><div class="sub">grounded in your last block</div></div>
+            <div class="s-sec"><span class="sdot"></span>What changed</div>
+            <div class="a-change"><span class="op">+</span><div>Back Squat +2.5kg <span class="why">— hit all sets, e1RM ↑</span></div></div>
+            <div class="a-change"><span class="op">⇄</span><div>Adopted Hip Thrust for RDL <span class="why">— logged 2 weeks running</span></div></div>
+            <div class="a-change"><span class="op">↑</span><div>More rowing volume <span class="why">— tonnage climbing, capacity focus</span></div></div>
+            <div class="a-change"><span class="op">=</span><div>Held upper volume <span class="why">— missed Thursday, no add</span></div></div>
+            <button class="a-btn full" style="margin-top:4px">View Week 4</button>
+          </div>
+        </div></div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- DECISIONS -->
+  <section>
+    <p class="kicker">Design decisions</p>
+    <h2>Why these calls</h2>
+    <div class="grid">
+      <div class="cell"><h4><span class="dot"></span>LLM-judged adherence</h4><p>Prescribed reps/load are strings + free-text; Hevy names differ. The model tolerates that fuzziness; a matcher wouldn't. Minimal brittle code.</p></div>
+      <div class="cell"><h4><span class="dot"></span>Two progression axes</h4><p>e1RM (strength ceiling) and volume/tonnage (work done) move independently — tracking both tells the model whether you're getting stronger, doing more, or peaking.</p></div>
+      <div class="cell"><h4><span class="dot"></span>Idempotent history</h4><p>Sessions keyed by a hash of start-time, so overlapping weekly exports merge cleanly instead of double-counting.</p></div>
+      <div class="cell"><h4><span class="dot"></span>Graceful absence</h4><p>No Hevy data → prompt says "not tracked" and generation is unchanged. Never penalise the athlete for missing logs.</p></div>
+      <div class="cell"><h4><span class="dot"></span>Distilled, not raw</h4><p>Summaries into the prompt, not every set — keeps the ~4-min / paid generation from ballooning in tokens and latency.</p></div>
+      <div class="cell"><h4><span class="dot"></span>Snapshot kept</h4><p><code>current_lifts</code> stays derived for backward-compat, so nothing downstream breaks while the richer path lands.</p></div>
+    </div>
+  </section>
+
+  <!-- FILES -->
+  <section>
+    <p class="kicker">Touch points</p>
+    <h2>Files</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>File</th><th>Change</th><th>What</th></tr></thead>
+        <tbody>
+          <tr><td><code>lib/hevyAnalyzer.ts</code></td><td><span class="badge new">new</span></td><td>Parse history · e1RM / PR / trend · planned-vs-actual summaries (pure, unit-tested)</td></tr>
+          <tr><td><code>integrations/parseHevyCsv.ts</code></td><td><span class="badge edit">edit</span></td><td>Persist <code>strengthSessions</code> alongside deriving <code>current_lifts</code></td></tr>
+          <tr><td><code>generate/generateProgram.ts</code></td><td><span class="badge edit">edit</span></td><td>Read history + last program; build progression &amp; adherence prompt blocks; prompt guidance</td></tr>
+          <tr><td><code>firestore.rules</code></td><td><span class="badge edit">edit</span></td><td>Add <code>strengthSessions/{id}</code> — owner read, Functions write</td></tr>
+          <tr><td><code>lib/hevyParser.ts</code></td><td><span class="badge edit">edit</span></td><td>Share CSV parsing with the analyzer</td></tr>
+          <tr><td><code>test/hevyAnalyzer.test.ts</code></td><td><span class="badge new">new</span></td><td>e1RM · PR · trend · session grouping vs the real CSV fixture</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- VERIFY -->
+  <section>
+    <p class="kicker">Verification</p>
+    <h2>How we prove it</h2>
+    <ol class="verify">
+      <li>Unit-test the analyzer (e1RM, PR, trend, session grouping) against the existing real Hevy fixture.</li>
+      <li>Import a CSV → <code>strengthSessions</code> docs appear; re-import an overlapping export → no duplicates (idempotent).</li>
+      <li>Regenerate → the prompt carries the progression + PLANNED/ACTUAL blocks; the program's <code>currentState</code> / <code>coachNotes</code> cite real trend + adherence.</li>
+      <li>Graceful-absence: clear history → prompt shows "not tracked", generation unaffected.</li>
+      <li>Watch prompt size / latency; trim summaries if the generation grows past its ~4-min budget.</li>
+    </ol>
+  </section>
+
+  <!-- NON GOALS -->
+  <section>
+    <p class="kicker">Out of scope</p>
+    <h2>Not in this pass</h2>
+    <div class="nongoals">
+      <span class="ng">Sleep check-in (dropped for now)</span>
+      <span class="ng">In-app set logging — Hevy owns it</span>
+      <span class="ng">Real-time per-day auto-regulation</span>
+      <span class="ng">Full analytics dashboard — screens surface just enough</span>
+    </div>
+  </section>
+
+  <footer>
+    Deviation handling comes for free: because Hevy already records what you actually did, a swapped or missed lift shows up in <b>ACTUAL</b> and the model reconciles it — no in-app logging, no penalty. The single decision that unlocks progression, PRs, and adherence together is Part 01: keep the history instead of overwriting it.
+  </footer>
+
+</div>

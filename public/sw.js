@@ -1,9 +1,11 @@
 // Offline cache for the training plan PWA.
 // Bump CACHE when you republish updated pages so phones fetch the new version.
-const CACHE = 'trainer-2026-07-04b';
+const CACHE = 'trainer-2026-08-02-phase1';
 const ASSETS = [
-  './', 'index.html', 'program.html', 'meals.html', 'nutrition.html', 'remote.html',
-  'update.js', 'firebase-config.js',
+  './', 'login.html', 'onboarding.html', 'dashboard.html', 'program.html', 'meals.html', 'profile.html',
+  'styles/theme.css',
+  'js/firebase-init.js', 'js/auth-guard.js', 'js/onboarding-wizard.js',
+  'update.js',
   'manifest.webmanifest', 'icon-180.png', 'icon-512.png', 'icon-meals-180.png', 'icon-meals-512.png'
 ];
 
@@ -34,6 +36,6 @@ self.addEventListener('fetch', e => {
         caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => {});
         return resp;
       })
-      .catch(() => caches.match(e.request).then(r => r || caches.match('index.html')))
+      .catch(() => caches.match(e.request).then(r => r || caches.match('login.html')))
   );
 });

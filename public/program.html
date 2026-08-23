@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="robots" content="noindex, nofollow">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Hybrid Plan">
+<meta name="theme-color" content="#ffffff">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<title>Program — Hybrid Training Plan</title>
+<link rel="stylesheet" href="styles/theme.css">
+<style>
+  /* Collapsible groups + periodized phase blocks. */
+  section.grp > .grp-head{cursor:pointer; user-select:none; justify-content:space-between; margin:0}
+  section.grp.open > .grp-head{margin-bottom:12px}
+  section.grp > .grp-head .lead{display:flex; align-items:center; gap:9px}
+  section.grp > .grp-head .caret{margin-left:auto; color:var(--text-secondary); font-size:.9rem; transition:transform .2s}
+  section.grp:not(.open) > .grp-head .caret{transform:rotate(-90deg)}
+  section.grp:not(.open) > .grp-body{display:none}
+
+  .phase{border:1px solid var(--border); border-radius:10px; margin:10px 0; overflow:hidden}
+  .phase > .ph-head{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:0; padding:12px 14px;
+    background:var(--bg-tint); cursor:pointer; user-select:none; font-family:var(--font-head); font-size:1rem; font-weight:600; color:var(--text-primary)}
+  .phase .ph-dates{margin-left:auto}
+  .phase .caret{color:var(--text-secondary); font-size:.9rem; transition:transform .2s}
+  .phase:not(.open) .caret{transform:rotate(-90deg)}
+  .phase:not(.open) .ph-body{display:none}
+  .phase .ph-body{padding:14px}
+  .phase-badge{font-size:.6rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px;
+    color:var(--accent-dark); background:var(--accent-soft); border:1px solid #f3cfd0; border-radius:999px; padding:2px 8px}
+
+  .day-block{padding:12px 0; border-top:1px solid var(--border)}
+  .day-block:first-child{border-top:0; padding-top:0}
+  .day-block.rest{opacity:.6}
+  .day-h{margin:0 0 6px; font-family:var(--font-head); font-size:1rem; font-weight:600}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <a class="backlink" href="dashboard.html">← Dashboard</a>
+    <h1 id="pageTitle">Your training program</h1>
+    <p class="sub" id="pageSub">Loading…</p>
+    <div class="badges" id="headerBadges"></div>
+  </div>
+</header>
+
+<div class="wrap">
+<div class="layout">
+  <nav class="toc" id="toc">
+    <button class="navtoggle" id="navtoggle">Jump to section <span class="arrow">▾</span></button>
+    <div class="links" id="tocLinks">
+      <div class="toc-title">Contents</div>
+    </div>
+  </nav>
+  <main id="mainContent">
+    <section id="loading"><p class="muted">Loading your program…</p></section>
+  </main>
+</div>
+</div>
+
+<footer class="wrap">
+  <a href="dashboard.html">← Back to dashboard</a> ·
+  Personal training plan · personal-trainer toolkit · General fitness coaching, not medical advice.
+</footer>
+
+<script src="update.js"></script>
+<script type="module">
+  import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+  import { db } from "./js/firebase-init.js";
+  import { requireOnboarded } from "./js/auth-guard.js";
+
+  const session = await requireOnboarded();
+  if (!session) throw new Error("redirecting");
+  const { user } = session;
+
+  const summarySnap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
+  const programId = summarySnap.data()?.currentProgramId;
+
+  const main = document.getElementById("mainContent");
+  const tocLinks = document.getElementById("tocLinks");
+
+  const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+  if (!programId) {
+    main.innerHTML = `<section><p class="muted">No program generated yet. Go to your <a href="dashboard.html">dashboard</a> and generate one.</p></section>`;
+    document.getElementById("pageSub").textContent = "No program yet";
+  } else {
+    const programSnap = await getDoc(doc(db, "users", user.uid, "programs", programId));
+    const p = programSnap.data();
+
+    document.getElementById("pageTitle").textContent = p.title || `${p.split} Program`;
+    document.getElementById("pageSub").textContent = `${p.goalSummary || p.split} · ${p.daysPerWeek} days/week · generated ${
+      p.createdAt?.toDate ? p.createdAt.toDate().toLocaleDateString() : "recently"
+    }`;
+    const eventBadges = (p.events || []).map((e) => `<span class="badge">📅 <b>${esc(e.name)}</b>${e.date ? ` · ${esc(e.date)}` : ""}</span>`).join("");
+    document.getElementById("headerBadges").innerHTML =
+      `<span class="badge">🏋️ <b>${esc(p.split)}</b></span><span class="badge"><b>${p.daysPerWeek}</b> days/week</span>${eventBadges}`;
+
+    // Collapsible top-level groups. Each becomes a section + a TOC entry.
+    const groups = [];
+    const group = (id, label, innerHtml, { open = false } = {}) => {
+      groups.push({ id, label });
+      main.insertAdjacentHTML("beforeend", `
+        <section id="${id}" class="grp${open ? " open" : ""}">
+          <h2 class="grp-head"><span class="lead"><span class="dot"></span>${esc(label)}</span><span class="caret">▾</span></h2>
+          <div class="grp-body">${innerHtml}</div>
+        </section>`);
+    };
+
+    const exHtml = (ex) => `<div class="ex">
+      <div class="row"><span class="name">${esc(ex.name)}</span><span class="sets">${ex.sets} × ${esc(ex.reps)}</span></div>
+      <div class="load">RIR ${esc(ex.rir)} · rest ${ex.rest_seconds}s${ex.load_note ? ` · ${esc(ex.load_note)}` : ""}</div>
+      ${ex.substitution_note ? `<div class="note">Sub: ${esc(ex.substitution_note)}</div>` : ""}
+    </div>`;
+
+    // ---- Where you are now ----
+    if (p.currentState) {
+      const cs = p.currentState;
+      const load = cs.trainingLoad ? `<div class="stats">
+        <div class="stat"><div class="k">Fitness (CTL)</div><div class="v">${cs.trainingLoad.ctl}</div></div>
+        <div class="stat"><div class="k">Fatigue (ATL)</div><div class="v">${cs.trainingLoad.atl}</div></div>
+        <div class="stat"><div class="k">Form (TSB)</div><div class="v ${cs.trainingLoad.tsb < -10 ? "warn" : ""}">${cs.trainingLoad.tsb}</div></div>
+      </div>` : "";
+      const highlights = (cs.highlights || []).length ? `<ul>${cs.highlights.map((h) => `<li>${esc(h)}</li>`).join("")}</ul>` : "";
+      group("current", "Where you are now", `${load}<p>${esc(cs.summary)}</p>${highlights}`, { open: true });
+    }
+
+    // ---- Target events ----
+    if ((p.events || []).length) {
+      const rows = p.events.map((e) => `<tr><td><b>${esc(e.name)}</b></td><td>${esc(e.date || "—")}</td><td>${esc(e.weeksOut || "—")}</td><td>${esc(e.goal)}</td></tr>`).join("");
+      group("events", "Target events", `<div class="tablescroll"><table><thead><tr><th>Event</th><th>Date</th><th>Out</th><th>Goal</th></tr></thead><tbody>${rows}</tbody></table></div>`, { open: true });
+    }
+
+    // ---- Periodized plan: one collapsible phase per roadmap entry; the current
+    // block (first phase) holds the detailed weekly days, later phases their focus.
+    const bySessionDay = {};
+    (p.sessions || []).forEach((s) => { (bySessionDay[s.day] = bySessionDay[s.day] || []).push(s); });
+
+    const currentWeekHtml = () => {
+      const days = (p.weeklyStructure || []).length
+        ? p.weeklyStructure
+        : (p.sessions || []).map((s) => ({ day: s.day, focus: s.label, note: "" }));
+      return days.map((d) => {
+        const daySessions = bySessionDay[d.day] || [];
+        const isRest = /rest|recovery/i.test(d.focus || "");
+        const focusNotes = daySessions.map((s) => s.focus_note).filter(Boolean).map((f) => `<div class="muted small">${esc(f)}</div>`).join("");
+        const exs = daySessions.flatMap((s) => s.exercises || []).map(exHtml).join("");
+        return `<div class="day-block${isRest ? " rest" : ""}">
+          <h4 class="day-h">${esc(d.day)} <span class="muted">— ${esc(d.focus)}</span></h4>
+          ${d.note ? `<div class="note">${esc(d.note)}</div>` : ""}${focusNotes}${exs}
+        </div>`;
+      }).join("");
+    };
+
+    const phaseSummaryHtml = (ph) => `<div class="tablescroll"><table><tbody>
+      <tr><th>Focus</th><td>${esc(ph.focus)}</td></tr>
+      <tr><th>Lifting</th><td>${esc(ph.lifting)}</td></tr>
+      <tr><th>Running</th><td>${esc(ph.running || "—")}</td></tr>
+      <tr><th>Nutrition</th><td>${esc(ph.nutrition || "—")}</td></tr>
+    </tbody></table></div>`;
+
+    if ((p.roadmap || []).length) {
+      const phasesHtml = p.roadmap.map((ph, i) => {
+        const current = i === 0;
+        const body = current
+          ? `<p class="muted small">This block’s week — grouped under the phase:</p>${currentWeekHtml() || phaseSummaryHtml(ph)}`
+          : `${phaseSummaryHtml(ph)}<p class="note">Detailed sessions are generated when this block becomes current — update your plan then.</p>`;
+        return `<div class="phase${current ? " open" : ""}">
+          <h3 class="ph-head"><span class="ph-title">${esc(ph.phase)}</span>${current ? '<span class="phase-badge">This block</span>' : ""}<span class="muted small ph-dates">${esc(ph.dates || "")}</span><span class="caret">▾</span></h3>
+          <div class="ph-body">${body}</div>
+        </div>`;
+      }).join("");
+      group("phases", "Periodized plan", `<p class="muted small">Your training moves through these phases toward your event. The current block’s week is detailed; later phases show their focus.</p>${phasesHtml}`, { open: true });
+    } else if ((p.weeklyStructure || []).length || (p.sessions || []).length) {
+      group("week", "Weekly plan", currentWeekHtml(), { open: true });
+    }
+
+    // ---- Notes & tips: each item its own accordion entry (one open at a time) ----
+    const noteItem = (title, bodyHtml) => `<div class="phase">
+      <h3 class="ph-head"><span class="ph-title">${esc(title)}</span><span class="caret">▾</span></h3>
+      <div class="ph-body">${bodyHtml}</div></div>`;
+    const notes = [];
+    if (p.running) {
+      const runs = (p.running.sessions || []).map((r) => `<div class="ex"><div class="row"><span class="name">${esc(r.name)}</span></div><div class="note">${esc(r.detail)}</div></div>`).join("");
+      notes.push(noteItem("Running", `<p class="muted small">${esc(p.running.pacesNote)}</p>${runs}`));
+    }
+    if (p.warmupNotes) notes.push(noteItem("Warm-up", `<p>${esc(p.warmupNotes)}</p>`));
+    if (p.progressionRules) notes.push(noteItem("Progression", `<p>${esc(p.progressionRules)}</p>`));
+    if (p.deloadGuidance) notes.push(noteItem("Deload", `<div class="callout">${esc(p.deloadGuidance)}</div>`));
+    if (p.coachNotes) notes.push(noteItem("Recovery & mobility", `<div class="callout warn">${esc(p.coachNotes)}</div>`));
+    if (p.sportNotes) notes.push(noteItem("Event strategy", `<div class="callout">${esc(p.sportNotes)}</div>`));
+    if (p.nutritionNote) notes.push(noteItem("Fueling", `<p>${esc(p.nutritionNote)}</p>`));
+    if (notes.length) group("notes", "Notes & tips", notes.join(""), { open: false });
+
+    document.getElementById("loading").remove();
+    tocLinks.insertAdjacentHTML("beforeend", groups.map((g) => `<a href="#${g.id}">${g.label}</a>`).join(""));
+
+    // Top-level groups toggle independently.
+    main.querySelectorAll("section.grp > .grp-head").forEach((h) => h.addEventListener("click", () => h.parentElement.classList.toggle("open")));
+    // Inner items (phases, notes) behave as an accordion within their group:
+    // opening one closes its siblings, so you see them one at a time.
+    main.querySelectorAll(".phase > .ph-head").forEach((h) => h.addEventListener("click", () => {
+      const item = h.parentElement;
+      const willOpen = !item.classList.contains("open");
+      item.parentElement.querySelectorAll(":scope > .phase").forEach((sib) => sib.classList.remove("open"));
+      if (willOpen) item.classList.add("open");
+    }));
+
+    // Mobile nav toggle + smooth-scroll (auto-opens the target group) + scrollspy.
+    const toc = document.getElementById("toc"), tgl = document.getElementById("navtoggle");
+    tgl.addEventListener("click", () => toc.classList.toggle("open"));
+    const links = Array.from(document.querySelectorAll("nav.toc .links a"));
+    links.forEach((a) => {
+      a.addEventListener("click", (e) => {
+        const target = document.getElementById(a.getAttribute("href").slice(1));
+        if (target) {
+          e.preventDefault();
+          target.classList.add("open");
+          target.scrollIntoView({ behavior: "smooth", block: "start" });
+          links.forEach((l) => l.classList.remove("active"));
+          a.classList.add("active");
+        }
+        if (window.innerWidth <= 820) toc.classList.remove("open");
+      });
+    });
+    const map = {};
+    links.forEach((a) => { map[a.getAttribute("href").slice(1)] = a; });
+    const obs = new IntersectionObserver((entries) => {
+      entries.forEach((e) => {
+        if (e.isIntersecting) {
+          links.forEach((l) => l.classList.remove("active"));
+          const act = map[e.target.id];
+          if (act) act.classList.add("active");
+        }
+      });
+    }, { rootMargin: "-20% 0px -70% 0px" });
+    document.querySelectorAll("main section").forEach((s) => obs.observe(s));
+  }
+</script>
+</body>
+</html>

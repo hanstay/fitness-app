@@ -16,7 +16,7 @@
     if(document.getElementById('sw-update-banner')) return;
     var b=document.createElement('div');
     b.id='sw-update-banner';
-    b.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:10000;background:#16c79a;color:#04130d;'+
+    b.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:10000;background:#dd4045;color:#fff;'+
       'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-weight:700;'+
       'font-size:.9rem;display:flex;align-items:center;gap:10px;padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));'+
       'box-shadow:0 -2px 14px #0007;';
@@ -24,7 +24,7 @@
     msg.style.cssText='flex:1'; msg.textContent='Update available — a newer version was published.';
     var btn=document.createElement('button');
     btn.textContent='Refresh';
-    btn.style.cssText='background:#04130d;color:#fff;border:0;border-radius:8px;padding:8px 16px;font-weight:700;'+
+    btn.style.cssText='background:#fff;color:#c9333a;border:0;border-radius:8px;padding:8px 16px;font-weight:700;'+
       'font-size:.88rem;cursor:pointer;font-family:inherit;flex:none;';
     btn.addEventListener('click',function(){
       accepted=true;
@@ -35,7 +35,7 @@
     });
     var close=document.createElement('button');
     close.textContent='✕'; close.setAttribute('aria-label','Dismiss');
-    close.style.cssText='background:none;border:0;color:#04130d;font-size:1rem;cursor:pointer;flex:none;opacity:.7;';
+    close.style.cssText='background:none;border:0;color:#fff;font-size:1rem;cursor:pointer;flex:none;opacity:.7;';
     close.addEventListener('click',function(){ b.remove(); });
     b.appendChild(msg); b.appendChild(btn); b.appendChild(close);
     document.body.appendChild(b);

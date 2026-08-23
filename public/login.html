@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="robots" content="noindex, nofollow">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Hybrid Plan">
+<meta name="theme-color" content="#ffffff">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<title>Sign In — Hybrid Training Plan</title>
+<link rel="stylesheet" href="styles/theme.css">
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap narrow">
+    <h1>Hybrid Training Plan</h1>
+    <p class="sub">Sign in to see your program, meal plan, and progress.</p>
+  </div>
+</header>
+
+<div class="wrap narrow" style="padding:26px 0 60px">
+  <div class="card narrow">
+    <div id="errorBox" class="error-msg" style="display:none"></div>
+
+    <form id="authForm">
+      <div class="field">
+        <label for="email">Email</label>
+        <input class="input" type="email" id="email" autocomplete="email" required>
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input class="input" type="password" id="password" autocomplete="current-password" required minlength="6">
+      </div>
+      <button class="btn full" type="submit" id="submitBtn">
+        <span id="submitLabel">Sign In</span>
+      </button>
+    </form>
+
+    <p class="skip-link" style="margin-top:14px">
+      <span id="toggleModeText">Don't have an account?</span>
+      <a href="#" id="toggleModeLink">Create one</a>
+    </p>
+
+    <div style="display:flex; align-items:center; gap:10px; margin:18px 0; color:var(--text-secondary); font-size:.8rem">
+      <div style="flex:1; height:1px; background:var(--border)"></div>
+      or
+      <div style="flex:1; height:1px; background:var(--border)"></div>
+    </div>
+
+    <button class="btn google full" id="googleBtn" type="button">
+      Continue with Google
+    </button>
+  </div>
+</div>
+
+<footer class="wrap">
+  Personal training plan · personal-trainer toolkit ·
+  General fitness coaching, not medical advice.
+</footer>
+
+<script src="update.js"></script>
+<script type="module">
+  import {
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
+    signInWithPopup,
+  } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js";
+  import { auth, googleProvider, db } from "./js/firebase-init.js";
+  import { redirectIfSignedIn } from "./js/auth-guard.js";
+  import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+
+  // If already signed in, skip the form entirely.
+  redirectIfSignedIn();
+
+  let mode = "signin"; // 'signin' | 'signup'
+
+  const form = document.getElementById("authForm");
+  const emailInput = document.getElementById("email");
+  const passwordInput = document.getElementById("password");
+  const submitBtn = document.getElementById("submitBtn");
+  const submitLabel = document.getElementById("submitLabel");
+  const errorBox = document.getElementById("errorBox");
+  const toggleModeText = document.getElementById("toggleModeText");
+  const toggleModeLink = document.getElementById("toggleModeLink");
+  const googleBtn = document.getElementById("googleBtn");
+
+  function showError(message) {
+    errorBox.textContent = message;
+    errorBox.style.display = "block";
+  }
+  function clearError() {
+    errorBox.style.display = "none";
+  }
+  function setBusy(busy) {
+    submitBtn.disabled = busy;
+    googleBtn.disabled = busy;
+    submitLabel.innerHTML = busy ? '<span class="spinner"></span>' : mode === "signin" ? "Sign In" : "Create Account";
+  }
+
+  toggleModeLink.addEventListener("click", (e) => {
+    e.preventDefault();
+    mode = mode === "signin" ? "signup" : "signin";
+    submitLabel.textContent = mode === "signin" ? "Sign In" : "Create Account";
+    toggleModeText.textContent = mode === "signin" ? "Don't have an account?" : "Already have an account?";
+    toggleModeLink.textContent = mode === "signin" ? "Create one" : "Sign in";
+    clearError();
+  });
+
+  async function afterSignIn() {
+    // onUserCreate (Cloud Function) seeds the profile doc on first signup;
+    // it may not have landed yet on the very first redirect, so fall back
+    // to onboarding rather than failing if the doc read comes back empty.
+    let profile = null;
+    try {
+      const snap = await getDoc(doc(db, "users", auth.currentUser.uid));
+      profile = snap.exists() ? snap.data() : null;
+    } catch {
+      profile = null;
+    }
+    location.href = profile?.onboarding?.completed ? "dashboard.html" : "onboarding.html";
+  }
+
+  function friendlyError(err) {
+    const code = err?.code || "";
+    if (code.includes("wrong-password") || code.includes("invalid-credential")) return "Incorrect email or password.";
+    if (code.includes("user-not-found")) return "No account found with that email.";
+    if (code.includes("email-already-in-use")) return "An account with that email already exists — try signing in instead.";
+    if (code.includes("weak-password")) return "Password must be at least 6 characters.";
+    if (code.includes("popup-closed-by-user")) return "Sign-in was cancelled.";
+    return "Something went wrong. Please try again.";
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    clearError();
+    setBusy(true);
+    try {
+      if (mode === "signin") {
+        await signInWithEmailAndPassword(auth, emailInput.value.trim(), passwordInput.value);
+      } else {
+        await createUserWithEmailAndPassword(auth, emailInput.value.trim(), passwordInput.value);
+      }
+      await afterSignIn();
+    } catch (err) {
+      console.error("[auth]", err);
+      showError(friendlyError(err));
+      setBusy(false);
+    }
+  });
+
+  googleBtn.addEventListener("click", async () => {
+    clearError();
+    setBusy(true);
+    try {
+      await signInWithPopup(auth, googleProvider);
+      await afterSignIn();
+    } catch (err) {
+      showError(friendlyError(err));
+      setBusy(false);
+    }
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="robots" content="noindex, nofollow">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Hybrid Plan">
+<meta name="theme-color" content="#ffffff">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<title>Set Up Your Profile — Hybrid Training Plan</title>
+<link rel="stylesheet" href="styles/theme.css">
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap narrow">
+    <h1>Let's set up your plan</h1>
+    <p class="sub">Start with the basics — add training and nutrition whenever you're ready.</p>
+  </div>
+</header>
+
+<div class="wrap narrow" style="padding:26px 0 60px">
+  <div id="errorBox" class="error-msg" style="display:none"></div>
+  <div id="successBox" class="success-msg" style="display:none"></div>
+
+  <!-- Card 1: About you (mandatory) -->
+  <section id="step1" class="wizard-card">
+    <div class="wizard-head">
+      <div>
+        <p class="wizard-step-label">Step 1 of 3 · Required</p>
+        <p class="wizard-title">About you</p>
+      </div>
+      <div class="progress-track"><div class="progress-fill" style="width:33%"></div></div>
+    </div>
+    <div class="wizard-body">
+      <h3>About you</h3>
+      <p class="lead">These two are all we need to get you started. Everything else is optional and can be added later.</p>
+
+      <div class="field">
+        <label for="sex">Sex <span class="req">required</span></label>
+        <select class="input" id="sex">
+          <option value="">Select…</option>
+          <option value="male">Male</option>
+          <option value="female">Female</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="age">Age <span class="req">required</span></label>
+        <input class="input" type="number" id="age" min="13" max="100">
+      </div>
+
+      <button class="btn full" id="step1ContinueBtn" type="button">Continue</button>
+    </div>
+  </section>
+
+  <!-- Card 2: Training (optional) -->
+  <section id="step2" class="wizard-card" style="display:none">
+    <div class="wizard-head">
+      <div>
+        <p class="wizard-step-label">Step 2 of 3 · Optional</p>
+        <p class="wizard-title">Training</p>
+      </div>
+      <div class="progress-track"><div class="progress-fill" style="width:66%"></div></div>
+    </div>
+    <div class="wizard-body">
+      <h3>Set up your training plan</h3>
+      <p class="lead">Fill this in to generate a training program. Skip it and you can set it up any time from your dashboard.</p>
+
+      <fieldset class="field-group">
+        <legend>Connect your data (optional)</legend>
+        <p class="hint" style="margin:0 0 12px">Gives your program a head start with real training history.</p>
+        <button class="btn secondary" id="icuConnectBtn" type="button">Connect with intervals.icu</button>
+        <p class="note" id="icuStatus"></p>
+        <div class="field" style="margin-top:14px">
+          <label for="hevyFile">Hevy workout export (CSV)</label>
+          <input class="input" type="file" id="hevyFile" accept=".csv">
+        </div>
+        <button class="btn secondary" id="hevyUploadBtn" type="button">Upload &amp; import lifts</button>
+        <p class="note" id="hevyStatus"></p>
+      </fieldset>
+
+      <fieldset class="field-group">
+        <legend>Training details</legend>
+        <p class="hint" style="margin:0 0 12px">Days/week and session length are needed to generate a program.</p>
+        <div class="field"><label for="training_days_per_week">Days/week available <span class="req">for program</span></label><input class="input" type="number" min="1" max="7" id="training_days_per_week"></div>
+        <div class="field"><label for="session_length_minutes">Session length (minutes) <span class="req">for program</span></label><input class="input" type="number" id="session_length_minutes"></div>
+        <div class="field"><label for="training_experience_years">Years training</label><input class="input" type="number" step="0.5" id="training_experience_years"></div>
+        <div class="field"><label for="preferred_split">Preferred split (optional)</label><input class="input" type="text" id="preferred_split" placeholder="e.g. Push/Pull/Legs"></div>
+        <div class="field"><label for="equipment">Equipment (comma-separated)</label><input class="input" type="text" id="equipment" placeholder="barbell, dumbbells, cables, kettlebells"></div>
+      </fieldset>
+
+      <fieldset class="field-group">
+        <legend>Group classes / fixed sessions (optional)</legend>
+        <p class="hint" style="margin:0 0 12px">Regular classes that are already part of your week (these count toward your days/week above). Your program anchors these on their day and builds the rest of the week around them.</p>
+        <div id="commitmentsEditor"></div>
+      </fieldset>
+
+      <fieldset class="field-group">
+        <legend>Target events (optional)</legend>
+        <p class="hint" style="margin:0 0 12px">Races or competitions you're training for, with dates — your program periodizes toward these. Leave blank if you have none.</p>
+        <div id="eventsEditor"></div>
+      </fieldset>
+
+      <fieldset class="field-group">
+        <legend>Goals &amp; constraints (optional)</legend>
+        <div class="field"><label for="goal">Overall goal</label><textarea class="input" id="goal" placeholder="Your general focus — e.g. build strength while improving conditioning. Add specific races above."></textarea></div>
+        <div class="field"><label for="injuries_constraints">Injuries / constraints</label><textarea class="input" id="injuries_constraints"></textarea></div>
+      </fieldset>
+
+      <div class="btn-row">
+        <button class="btn secondary" id="step2BackBtn" type="button">Back</button>
+        <button class="btn secondary" id="step2SkipBtn" type="button">Skip</button>
+        <button class="btn" id="step2ContinueBtn" type="button" style="flex:1">Save &amp; continue</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Card 3: Nutrition (optional) -->
+  <section id="step3" class="wizard-card" style="display:none">
+    <div class="wizard-head">
+      <div>
+        <p class="wizard-step-label">Step 3 of 3 · Optional</p>
+        <p class="wizard-title">Nutrition</p>
+      </div>
+      <div class="progress-track"><div class="progress-fill" style="width:100%"></div></div>
+    </div>
+    <div class="wizard-body">
+      <h3>Set up your nutrition plan</h3>
+      <p class="lead">Fill this in to generate calorie/macro targets and a meal plan. Skip it and you can set it up any time from your dashboard.</p>
+
+      <fieldset class="field-group">
+        <legend>Body scan (optional)</legend>
+        <p class="hint" style="margin:0 0 12px">Upload a Visbody/Evolt PDF and we'll fill your weight and body fat % automatically.</p>
+        <div class="field">
+          <label for="scanFile">Scan PDF</label>
+          <input class="input" type="file" id="scanFile" accept="application/pdf">
+        </div>
+        <button class="btn secondary" id="scanUploadBtn" type="button">Upload &amp; extract</button>
+        <div id="scanReview" style="display:none; margin-top:14px">
+          <div class="field">
+            <label for="scanWeight">Extracted weight (kg)</label>
+            <input class="input" type="number" step="0.1" id="scanWeight">
+          </div>
+          <div class="field">
+            <label for="scanBodyFat">Extracted body fat %</label>
+            <input class="input" type="number" step="0.1" id="scanBodyFat">
+          </div>
+          <p class="note" id="scanExtra"></p>
+          <button class="btn secondary" id="scanConfirmBtn" type="button">Use these values</button>
+        </div>
+      </fieldset>
+
+      <fieldset class="field-group">
+        <legend>Stats</legend>
+        <p class="hint" style="margin:0 0 12px">Height, weight, and meals/day are needed to generate targets and a meal plan.</p>
+        <div class="field"><label for="height_cm">Height (cm) <span class="req">for meals</span></label><input class="input" type="number" id="height_cm"></div>
+        <div class="field"><label for="bodyweight_kg">Weight (kg) <span class="req">for meals</span></label><input class="input" type="number" step="0.1" id="bodyweight_kg"></div>
+        <div class="field"><label for="body_fat_pct">Body fat % (optional)</label><input class="input" type="number" step="0.1" id="body_fat_pct"></div>
+        <div class="field">
+          <label for="activity_level">Daily activity level</label>
+          <select class="input" id="activity_level">
+            <option value="sedentary">Sedentary</option>
+            <option value="light">Light</option>
+            <option value="moderate" selected>Moderate</option>
+            <option value="very_active">Very active</option>
+          </select>
+        </div>
+      </fieldset>
+
+      <fieldset class="field-group">
+        <legend>Diet preferences</legend>
+        <div class="field"><label for="meals_per_day">Meals/day <span class="req">for meals</span></label><input class="input" type="number" id="meals_per_day"></div>
+        <div class="field">
+          <label for="diet_style">Diet style</label>
+          <select class="input" id="diet_style">
+            <option value="">Select…</option>
+            <option value="omnivore">Omnivore</option>
+            <option value="pescatarian">Pescatarian</option>
+            <option value="vegetarian">Vegetarian</option>
+            <option value="vegan">Vegan</option>
+          </select>
+        </div>
+        <div class="field"><label for="allergies">Allergies (comma-separated)</label><input class="input" type="text" id="allergies"></div>
+        <div class="field"><label for="foods_to_avoid">Foods to avoid (comma-separated)</label><input class="input" type="text" id="foods_to_avoid"></div>
+        <div class="field"><label for="preferred_cuisines">Preferred cuisines (comma-separated)</label><input class="input" type="text" id="preferred_cuisines"></div>
+        <div class="field">
+          <label for="cooking_time_preference">Cooking time preference</label>
+          <select class="input" id="cooking_time_preference">
+            <option value="">Select…</option>
+            <option value="cook_fresh_daily">Cook fresh daily</option>
+            <option value="meal_prep_weekly">Meal prep weekly</option>
+            <option value="mix">Mix</option>
+            <option value="eat_out_primarily">Eat out primarily</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="eat_out_frequency">Eat-out frequency</label>
+          <select class="input" id="eat_out_frequency">
+            <option value="">Select…</option>
+            <option value="rarely">Rarely</option>
+            <option value="sometimes">Sometimes</option>
+            <option value="often">Often</option>
+            <option value="mostly">Mostly</option>
+          </select>
+        </div>
+        <div class="field"><label for="budget_preference">Budget preference (optional)</label><input class="input" type="text" id="budget_preference"></div>
+        <div class="field"><label for="supplements">Supplements (comma-separated, optional)</label><input class="input" type="text" id="supplements"></div>
+      </fieldset>
+
+      <div class="btn-row">
+        <button class="btn secondary" id="step3BackBtn" type="button">Back</button>
+        <button class="btn secondary" id="step3SkipBtn" type="button">Skip &amp; finish</button>
+        <button class="btn" id="step3FinishBtn" type="button" style="flex:1">Save &amp; finish</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Finishing state -->
+  <section id="finishing" class="wizard-card" style="display:none">
+    <div class="wizard-body" style="text-align:center; padding:40px 22px">
+      <div class="spinner" id="finishSpinner" style="width:28px; height:28px; border-width:3px; border-color:var(--border); border-top-color:var(--accent); margin:0 auto 16px"></div>
+      <h3 id="finishTitle" style="justify-content:center">Finishing up…</h3>
+      <p class="lead" id="finishMsg" style="margin:0 auto; max-width:340px">Building your plans — this can take up to a minute.</p>
+    </div>
+  </section>
+</div>
+
+<footer class="wrap">
+  Personal training plan · personal-trainer toolkit ·
+  General fitness coaching, not medical advice.
+</footer>
+
+<script src="update.js"></script>
+<script type="module" src="js/onboarding-wizard.js"></script>
+</body>
+</html>
