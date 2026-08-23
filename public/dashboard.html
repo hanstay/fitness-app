@@ -137,6 +137,7 @@
       // navigate away from (see queueProgramGeneration.ts).
       generate: () => httpsCallable(functions, "queueProgramGeneration")(),
       showRegen: false, // rebuilding lives in the Weekly check-in now
+      secondaryLink: { href: "advice.html", label: "💬 Trainer's advice →" },
     }));
     el.appendChild(featureCard({
       icon: "🍱",
@@ -199,6 +200,13 @@
         <span class="item-info"><span class="item-title">${cfg.title}</span><span class="item-meta">${cfg.viewMeta}</span></span>
         <span class="item-val">→</span>`;
       wrap.appendChild(a);
+      if (cfg.secondaryLink) {
+        const link = document.createElement("a");
+        link.href = cfg.secondaryLink.href;
+        link.textContent = cfg.secondaryLink.label;
+        link.style.cssText = "display:block; font-size:.82rem; font-weight:600; color:var(--text-secondary); margin:0 0 12px";
+        wrap.appendChild(link);
+      }
       if (cfg.showRegen !== false) {
         const regen = document.createElement("button");
         regen.className = "btn secondary small-btn";

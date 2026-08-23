@@ -12,10 +12,10 @@
 <meta name="theme-color" content="#ffffff">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<title>Program — Hybrid Training Plan</title>
+<title>Trainer's advice — Hybrid Training Plan</title>
 <link rel="stylesheet" href="styles/theme.css">
 <style>
-  /* Collapsible groups + periodized phase blocks. */
+  /* Collapsible groups + accordion note items — same pattern as program.html. */
   section.grp > .grp-head{cursor:pointer; user-select:none; justify-content:space-between; margin:0}
   section.grp.open > .grp-head{margin-bottom:12px}
   section.grp > .grp-head .lead{display:flex; align-items:center; gap:9px}
@@ -34,21 +34,19 @@
   .phase-badge{font-size:.6rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px;
     color:var(--accent-dark); background:var(--accent-soft); border:1px solid #f3cfd0; border-radius:999px; padding:2px 8px}
 
-  .day-block{padding:12px 0; border-top:1px solid var(--border)}
-  .day-block:first-child{border-top:0; padding-top:0}
-  .day-block.rest{opacity:.6}
-  .day-h{margin:0 0 6px; font-family:var(--font-head); font-size:1rem; font-weight:600}
+  .day-note{padding:10px 0; border-top:1px solid var(--border)}
+  .day-note:first-child{border-top:0; padding-top:0}
+  .day-note .day-h{margin:0 0 4px; font-family:var(--font-head); font-size:.95rem; font-weight:600}
 </style>
 </head>
 <body>
 
 <header class="hero">
   <div class="wrap">
-    <a class="backlink" href="dashboard.html">← Dashboard</a>
-    <h1 id="pageTitle">Your training program</h1>
+    <a class="backlink" href="program.html">← Training program</a>
+    <h1 id="pageTitle">Trainer's advice</h1>
     <p class="sub" id="pageSub">Loading…</p>
     <div class="badges" id="headerBadges"></div>
-    <a id="adviceLink" href="advice.html" class="backlink" style="display:none; margin-top:10px">💬 Why it's built this way — Trainer's advice →</a>
   </div>
 </header>
 
@@ -67,7 +65,7 @@
 </div>
 
 <footer class="wrap">
-  <a href="dashboard.html">← Back to dashboard</a> ·
+  <a href="program.html">← Back to program</a> ·
   Personal training plan · personal-trainer toolkit · General fitness coaching, not medical advice.
 </footer>
 
@@ -96,16 +94,11 @@
     const programSnap = await getDoc(doc(db, "users", user.uid, "programs", programId));
     const p = programSnap.data();
 
-    document.getElementById("pageTitle").textContent = p.title || `${p.split} Program`;
-    document.getElementById("pageSub").textContent = `${p.goalSummary || p.split} · ${p.daysPerWeek} days/week · generated ${
-      p.createdAt?.toDate ? p.createdAt.toDate().toLocaleDateString() : "recently"
-    }`;
+    document.getElementById("pageSub").textContent = `${p.goalSummary || p.split} · coaching notes behind your ${p.title || p.split} program`;
     const eventBadges = (p.events || []).map((e) => `<span class="badge">📅 <b>${esc(e.name)}</b>${e.date ? ` · ${esc(e.date)}` : ""}</span>`).join("");
     document.getElementById("headerBadges").innerHTML =
-      `<span class="badge">🏋️ <b>${esc(p.split)}</b></span><span class="badge"><b>${p.daysPerWeek}</b> days/week</span>${eventBadges}`;
-    document.getElementById("adviceLink").style.display = "inline-flex";
+      `<span class="badge">🏋️ <b>${esc(p.split)}</b></span>${eventBadges}`;
 
-    // Collapsible top-level groups. Each becomes a section + a TOC entry.
     const groups = [];
     const group = (id, label, innerHtml, { open = false } = {}) => {
       groups.push({ id, label });
@@ -116,53 +109,71 @@
         </section>`);
     };
 
-    const exHtml = (ex) => `<div class="ex">
-      <div class="row"><span class="name">${esc(ex.name)}</span><span class="sets">${ex.sets} × ${esc(ex.reps)}</span></div>
-      <div class="load">RIR ${esc(ex.rir)} · rest ${ex.rest_seconds}s${ex.load_note ? ` · ${esc(ex.load_note)}` : ""}</div>
-      ${ex.substitution_note ? `<div class="note">Sub: ${esc(ex.substitution_note)}</div>` : ""}
-    </div>`;
-
-    // ---- Target events ----
-    if ((p.events || []).length) {
-      const rows = p.events.map((e) => `<tr><td><b>${esc(e.name)}</b></td><td>${esc(e.date || "—")}</td><td>${esc(e.weeksOut || "—")}</td><td>${esc(e.goal)}</td></tr>`).join("");
-      group("events", "Target events", `<div class="tablescroll"><table><thead><tr><th>Event</th><th>Date</th><th>Out</th><th>Goal</th></tr></thead><tbody>${rows}</tbody></table></div>`, { open: true });
+    // ---- Where you are now ----
+    if (p.currentState) {
+      const cs = p.currentState;
+      const load = cs.trainingLoad ? `<div class="stats">
+        <div class="stat"><div class="k">Fitness (CTL)</div><div class="v">${cs.trainingLoad.ctl}</div></div>
+        <div class="stat"><div class="k">Fatigue (ATL)</div><div class="v">${cs.trainingLoad.atl}</div></div>
+        <div class="stat"><div class="k">Form (TSB)</div><div class="v ${cs.trainingLoad.tsb < -10 ? "warn" : ""}">${cs.trainingLoad.tsb}</div></div>
+      </div>` : "";
+      const highlights = (cs.highlights || []).length ? `<ul>${cs.highlights.map((h) => `<li>${esc(h)}</li>`).join("")}</ul>` : "";
+      group("current", "Where you are now", `${load}<p>${esc(cs.summary)}</p>${highlights}`, { open: true });
     }
 
-    // ---- Periodized plan: one collapsible phase per roadmap entry; the current
-    // block (first phase) holds the detailed weekly days, later phases their focus.
+    // ---- This week's sequencing: why each day is placed where it is ----
     const bySessionDay = {};
     (p.sessions || []).forEach((s) => { (bySessionDay[s.day] = bySessionDay[s.day] || []).push(s); });
+    const days = (p.weeklyStructure || []).length
+      ? p.weeklyStructure
+      : (p.sessions || []).map((s) => ({ day: s.day, focus: s.label, note: "" }));
+    const sequencingItems = days.map((d) => {
+      const daySessions = bySessionDay[d.day] || [];
+      const focusNotes = daySessions.map((s) => s.focus_note).filter(Boolean);
+      const bits = [d.note, ...focusNotes].filter(Boolean);
+      if (!bits.length) return "";
+      return `<div class="day-note">
+        <h4 class="day-h">${esc(d.day)} <span class="muted">— ${esc(d.focus)}</span></h4>
+        ${bits.map((b) => `<p class="muted small">${esc(b)}</p>`).join("")}
+      </div>`;
+    }).filter(Boolean).join("");
+    if (sequencingItems) group("sequencing", "This week's sequencing", sequencingItems, { open: true });
 
-    const currentWeekHtml = () => {
-      const days = (p.weeklyStructure || []).length
-        ? p.weeklyStructure
-        : (p.sessions || []).map((s) => ({ day: s.day, focus: s.label, note: "" }));
-      return days.map((d) => {
-        const daySessions = bySessionDay[d.day] || [];
-        const isRest = /rest|recovery/i.test(d.focus || "");
-        const exs = daySessions.flatMap((s) => s.exercises || []).map(exHtml).join("");
-        return `<div class="day-block${isRest ? " rest" : ""}">
-          <h4 class="day-h">${esc(d.day)} <span class="muted">— ${esc(d.focus)}</span></h4>
-          ${exs}
-        </div>`;
-      }).join("");
-    };
+    // ---- Periodized roadmap detail: focus/lifting/running/nutrition for every phase ----
+    const phaseSummaryHtml = (ph) => `<div class="tablescroll"><table><tbody>
+      <tr><th>Focus</th><td>${esc(ph.focus)}</td></tr>
+      <tr><th>Lifting</th><td>${esc(ph.lifting)}</td></tr>
+      <tr><th>Running</th><td>${esc(ph.running || "—")}</td></tr>
+      <tr><th>Nutrition</th><td>${esc(ph.nutrition || "—")}</td></tr>
+    </tbody></table></div>`;
 
     if ((p.roadmap || []).length) {
       const phasesHtml = p.roadmap.map((ph, i) => {
         const current = i === 0;
-        const body = current
-          ? currentWeekHtml() || `<p class="muted small">${esc(ph.focus)}</p>`
-          : `<p class="muted small">${esc(ph.focus)}</p>`;
         return `<div class="phase${current ? " open" : ""}">
           <h3 class="ph-head"><span class="ph-title">${esc(ph.phase)}</span>${current ? '<span class="phase-badge">This block</span>' : ""}<span class="muted small ph-dates">${esc(ph.dates || "")}</span><span class="caret">▾</span></h3>
-          <div class="ph-body">${body}</div>
+          <div class="ph-body">${phaseSummaryHtml(ph)}</div>
         </div>`;
       }).join("");
-      group("phases", "Periodized plan", `<p class="muted small">Your training moves through these phases toward your event. The current block’s week is detailed below; see <a href="advice.html">Trainer's advice</a> for the reasoning behind each phase.</p>${phasesHtml}`, { open: true });
-    } else if ((p.weeklyStructure || []).length || (p.sessions || []).length) {
-      group("week", "Weekly plan", currentWeekHtml(), { open: true });
+      group("phases", "Periodized plan — phase detail", `<p class="muted small">The reasoning behind each phase of your build toward your event.</p>${phasesHtml}`, { open: false });
     }
+
+    // ---- Notes & tips: each item its own accordion entry (one open at a time) ----
+    const noteItem = (title, bodyHtml) => `<div class="phase">
+      <h3 class="ph-head"><span class="ph-title">${esc(title)}</span><span class="caret">▾</span></h3>
+      <div class="ph-body">${bodyHtml}</div></div>`;
+    const notes = [];
+    if (p.running) {
+      const runs = (p.running.sessions || []).map((r) => `<div class="ex"><div class="row"><span class="name">${esc(r.name)}</span></div><div class="note">${esc(r.detail)}</div></div>`).join("");
+      notes.push(noteItem("Running", `<p class="muted small">${esc(p.running.pacesNote)}</p>${runs}`));
+    }
+    if (p.warmupNotes) notes.push(noteItem("Warm-up", `<p>${esc(p.warmupNotes)}</p>`));
+    if (p.progressionRules) notes.push(noteItem("Progression", `<p>${esc(p.progressionRules)}</p>`));
+    if (p.deloadGuidance) notes.push(noteItem("Deload", `<div class="callout">${esc(p.deloadGuidance)}</div>`));
+    if (p.coachNotes) notes.push(noteItem("Recovery & mobility", `<div class="callout warn">${esc(p.coachNotes)}</div>`));
+    if (p.sportNotes) notes.push(noteItem("Event strategy", `<div class="callout">${esc(p.sportNotes)}</div>`));
+    if (p.nutritionNote) notes.push(noteItem("Fueling", `<p>${esc(p.nutritionNote)}</p>`));
+    if (notes.length) group("notes", "Notes & tips", notes.join(""), { open: true });
 
     document.getElementById("loading").remove();
     tocLinks.insertAdjacentHTML("beforeend", groups.map((g) => `<a href="#${g.id}">${g.label}</a>`).join(""));
