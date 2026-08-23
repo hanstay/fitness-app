@@ -153,7 +153,10 @@ export function rowsToStrengthSession(rows: HevyRow[], uid: string): StrengthSes
 }
 
 export function parseHevyCsvToSessions(csvText: string, uid: string = ""): StrengthSession[] {
-  const rows: HevyRow[] = parse(csvText, {
+  // Some exports (observed from iOS) mix CRLF and bare-LF line endings within
+  // the same file, which makes csv-parse lock onto the wrong record delimiter
+  // and throw "Invalid Opening Quote" on the stray \n. Normalize to LF first.
+  const rows: HevyRow[] = parse(csvText.replace(/\r\n/g, "\n").replace(/\r/g, "\n"), {
     columns: true,
     skip_empty_lines: true,
     relax_column_count: true,

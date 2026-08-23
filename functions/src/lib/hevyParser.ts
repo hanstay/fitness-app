@@ -61,7 +61,10 @@ function toKg(row: HevyRow): number | null {
  * history. `limit` remains a safety net for pathological exercise variety.
  */
 export function parseHevyCsvToCurrentLifts(csvText: string, windowDays = 30, limit = 40): CurrentLift[] {
-  const rows: HevyRow[] = parse(csvText, {
+  // Some exports (observed from iOS) mix CRLF and bare-LF line endings within
+  // the same file, which makes csv-parse lock onto the wrong record delimiter
+  // and throw "Invalid Opening Quote" on the stray \n. Normalize to LF first.
+  const rows: HevyRow[] = parse(csvText.replace(/\r\n/g, "\n").replace(/\r/g, "\n"), {
     columns: true,
     skip_empty_lines: true,
     relax_column_count: true,

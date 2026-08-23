@@ -241,6 +241,19 @@ describe("hevyAnalyzer", () => {
       expect(sessions.length).toBe(0);
     });
 
+    it("parses exports with mixed CRLF/LF line endings (seen from iOS)", () => {
+      // Real iOS exports observed in the wild have most rows terminated with
+      // \r\n but a handful of bare \n at workout boundaries, which previously
+      // made csv-parse lock onto the wrong record delimiter and throw
+      // "Invalid Opening Quote" on the stray \n.
+      const header = "title,start_time,end_time,exercise_title,set_index,set_type,weight_kg,reps,distance_km,duration_seconds,rpe";
+      const rowA = '"A","Aug 1, 2026, 10:00 AM","Aug 1, 2026, 11:00 AM","Bench",0,"normal","80","5","","",""';
+      const rowB = '"B","Aug 2, 2026, 10:00 AM","Aug 2, 2026, 11:00 AM","Squat",0,"normal","95","4","","",""';
+      const csv = [header, rowA].join("\r\n") + "\n" + rowB + "\r\n";
+      const sessions = parseHevyCsvToSessions(csv, "user");
+      expect(sessions.map((s) => s.title).sort()).toEqual(["A", "B"]);
+    });
+
     it("groups multiple exercises into one session", () => {
       const csv = [
         "title,start_time,end_time,exercise_title,set_index,set_type,weight_kg,reps,distance_km,duration_seconds,rpe",

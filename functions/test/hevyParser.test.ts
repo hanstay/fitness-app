@@ -61,4 +61,19 @@ describe("parseHevyCsvToCurrentLifts", () => {
     const lifts = parseHevyCsvToCurrentLifts(csv);
     expect(lifts[0].weight_kg).toBeCloseTo(99.8, 1); // 220 lbs ≈ 99.8 kg
   });
+
+  it("parses exports with mixed CRLF/LF line endings (seen from iOS)", () => {
+    // Real iOS exports observed in the wild have most rows terminated with
+    // \r\n but a handful of bare \n at workout boundaries, which previously
+    // made csv-parse lock onto the wrong record delimiter and throw
+    // "Invalid Opening Quote" on the stray \n.
+    const csv = [
+      "title,start_time,exercise_title,set_index,set_type,weight_kg,reps",
+      '"A","Aug 1, 2026, 10:00 AM","Bench Press",0,"normal",80,5',
+    ].join("\r\n") + "\n" + [
+      '"B","Aug 2, 2026, 10:00 AM","Squat (Barbell)",0,"normal",95,4',
+    ].join("\r\n") + "\r\n";
+    const lifts = parseHevyCsvToCurrentLifts(csv);
+    expect(lifts.map((l) => l.exercise).sort()).toEqual(["Bench Press", "Squat (Barbell)"]);
+  });
 });
