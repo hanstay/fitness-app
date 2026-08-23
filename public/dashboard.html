@@ -130,7 +130,7 @@
       icon: "🏋️",
       title: "Training program",
       href: "program.html",
-      hasIt: Boolean(summary?.currentProgramId),
+      hasIt: summary?.activeProgramSource === "group" ? Boolean(summary?.groupId) : Boolean(summary?.currentProgramId),
       genStatus: summary?.programGenerationStatus,
       genError: summary?.programGenerationError,
       genStartedAt: summary?.programGenerationStartedAt,
