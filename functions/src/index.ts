@@ -29,3 +29,5 @@ export { onProgramGenerationRequested } from "./generate/onProgramGenerationRequ
 export { queueMealPlanGeneration } from "./generate/queueMealPlanGeneration";
 export { onMealPlanGenerationRequested } from "./generate/onMealPlanGenerationRequested";
 export { sweepStaleGenerations } from "./generate/sweepStaleGenerations";
+export { createGroup } from "./generate/createGroup";
+export { setActiveProgramSource, leaveGroup } from "./generate/groupMembership";

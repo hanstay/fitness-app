@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { structuralChanged, needsFullRegen } from "../src/lib/programDecisions";
+import { structuralChanged, needsFullRegen, needsGroupFullRegen } from "../src/lib/programDecisions";
 
 const baseAthlete = {
   goal: "Hyrox",
@@ -94,6 +94,76 @@ describe("needsFullRegen", () => {
     expect(needsFullRegen({
       athlete: baseAthlete,
       activeProgram: { profileSnapshot: baseAthlete, createdAt: null },
+      now,
+    })).toBe(true);
+  });
+});
+
+describe("needsGroupFullRegen", () => {
+  const now = new Date("2026-08-18T00:00:00Z");
+  const partnerAthlete = { ...baseAthlete, goal: "Marathon", equipment: ["dumbbells"] };
+  const freshCreatedAt = { toMillis: () => now.getTime() - 7 * 24 * 60 * 60 * 1000 };
+  const staleCreatedAt = { toMillis: () => now.getTime() - 7 * 7 * 24 * 60 * 60 * 1000 };
+
+  it("is true when there's no group program yet", () => {
+    expect(needsGroupFullRegen({
+      memberAthletes: { a: baseAthlete, b: partnerAthlete },
+      activeProgram: null,
+      now,
+    })).toBe(true);
+  });
+
+  it("is false for a routine, fresh, structurally-unchanged update across all members", () => {
+    expect(needsGroupFullRegen({
+      memberAthletes: { a: baseAthlete, b: partnerAthlete },
+      activeProgram: {
+        profileSnapshots: { a: baseAthlete, b: partnerAthlete },
+        createdAt: freshCreatedAt,
+      },
+      now,
+    })).toBe(false);
+  });
+
+  it("is true when any member's profile changed structurally", () => {
+    expect(needsGroupFullRegen({
+      memberAthletes: { a: baseAthlete, b: { ...partnerAthlete, training_days_per_week: 3 } },
+      activeProgram: {
+        profileSnapshots: { a: baseAthlete, b: partnerAthlete },
+        createdAt: freshCreatedAt,
+      },
+      now,
+    })).toBe(true);
+  });
+
+  it("is true when a member joined since the snapshot was taken", () => {
+    expect(needsGroupFullRegen({
+      memberAthletes: { a: baseAthlete, b: partnerAthlete, c: baseAthlete },
+      activeProgram: {
+        profileSnapshots: { a: baseAthlete, b: partnerAthlete },
+        createdAt: freshCreatedAt,
+      },
+      now,
+    })).toBe(true);
+  });
+
+  it("is true when the group program is stale (older than 6 weeks)", () => {
+    expect(needsGroupFullRegen({
+      memberAthletes: { a: baseAthlete, b: partnerAthlete },
+      activeProgram: {
+        profileSnapshots: { a: baseAthlete, b: partnerAthlete },
+        createdAt: staleCreatedAt,
+      },
+      now,
+    })).toBe(true);
+  });
+
+  it("is true when the group program has no reliable createdAt", () => {
+    expect(needsGroupFullRegen({
+      memberAthletes: { a: baseAthlete, b: partnerAthlete },
+      activeProgram: {
+        profileSnapshots: { a: baseAthlete, b: partnerAthlete },
+        createdAt: null,
+      },
       now,
     })).toBe(true);
   });

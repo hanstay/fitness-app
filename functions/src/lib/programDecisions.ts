@@ -79,3 +79,34 @@ export function needsFullRegen(params: {
   if (now.getTime() - createdAtMs > SIX_WEEKS_MS) return true;
   return false;
 }
+
+export interface ActiveGroupProgramForDecision {
+  /** Every member's athlete snapshot as of when this group program's shared structure was generated. */
+  profileSnapshots?: Record<string, AthleteProfileSnapshot | null | undefined> | null;
+  createdAt?: { toMillis(): number } | null;
+}
+
+/**
+ * Group analogue of needsFullRegen: the shared structure (Stage A) needs
+ * regenerating if there's no group program yet, the member roster changed
+ * (someone joined since the snapshot was taken), any current member's
+ * profile changed structurally since their snapshot, or the program is
+ * stale — same triggers as the personal path, evaluated across every member.
+ */
+export function needsGroupFullRegen(params: {
+  memberAthletes: Record<string, AthleteProfileSnapshot>;
+  activeProgram: ActiveGroupProgramForDecision | null;
+  now?: Date;
+}): boolean {
+  const { memberAthletes, activeProgram, now = new Date() } = params;
+  if (!activeProgram) return true;
+  const snapshots = activeProgram.profileSnapshots ?? {};
+  for (const [uid, athlete] of Object.entries(memberAthletes)) {
+    if (!(uid in snapshots)) return true; // new member, never snapshotted
+    if (structuralChanged(athlete, snapshots[uid])) return true;
+  }
+  const createdAtMs = activeProgram.createdAt?.toMillis?.();
+  if (createdAtMs == null) return true;
+  if (now.getTime() - createdAtMs > SIX_WEEKS_MS) return true;
+  return false;
+}

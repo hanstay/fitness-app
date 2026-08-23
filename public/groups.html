@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="robots" content="noindex, nofollow">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Hybrid Plan">
+<meta name="theme-color" content="#ffffff">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<title>Groups — Hybrid Training Plan</title>
+<link rel="stylesheet" href="styles/theme.css">
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap narrow">
+    <a class="backlink" href="dashboard.html">← Dashboard</a>
+    <h1>Training group</h1>
+    <p class="sub">Train with someone and follow the same plan — everyone still gets their own loads and notes.</p>
+  </div>
+</header>
+
+<div class="wrap narrow" style="padding:26px 0 60px">
+  <div id="errorBox" class="error-msg" style="display:none"></div>
+  <div id="successBox" class="success-msg" style="display:none"></div>
+
+  <div class="card" id="noGroupCard" style="display:none">
+    <h2 style="margin:0 0 12px; font-size:1.05rem">Create a group</h2>
+    <p class="hint" style="margin:0 0 12px">Enter your training partner's email (comma-separated for more than one). They need an existing account. This generates a fresh shared program from everyone's current profile — it doesn't touch anyone's existing individual plan.</p>
+    <div class="field"><label for="memberEmails">Teammate email(s)</label><input class="input" type="text" id="memberEmails" placeholder="partner@example.com"></div>
+    <button class="btn full" id="createBtn" type="button">Create group</button>
+  </div>
+
+  <div class="card" id="groupCard" style="display:none">
+    <h2 style="margin:0 0 12px; font-size:1.05rem">Your group</h2>
+    <div id="memberList"></div>
+
+    <fieldset class="field-group" style="margin-top:16px">
+      <legend>Which plan is active</legend>
+      <div class="field">
+        <label for="sourceSelect">Follow</label>
+        <select class="input" id="sourceSelect">
+          <option value="group">The group's shared plan</option>
+          <option value="personal">My own individual plan</option>
+        </select>
+      </div>
+      <p class="hint" style="margin:0">Switching doesn't delete either plan — you can switch back any time.</p>
+    </fieldset>
+
+    <button class="btn secondary full" id="leaveBtn" type="button" style="margin-top:16px">Leave group</button>
+  </div>
+</div>
+
+<footer class="wrap">
+  <a href="dashboard.html">← Back to dashboard</a> ·
+  Personal training plan · personal-trainer toolkit · General fitness coaching, not medical advice.
+</footer>
+
+<script src="update.js"></script>
+<script type="module">
+  import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+  import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
+  import { db, functions } from "./js/firebase-init.js";
+  import { requireOnboarded } from "./js/auth-guard.js";
+
+  const session = await requireOnboarded();
+  if (!session) throw new Error("redirecting");
+  const { user } = session;
+
+  const errorBox = document.getElementById("errorBox");
+  const successBox = document.getElementById("successBox");
+  function showError(msg) { errorBox.textContent = msg; errorBox.style.display = "block"; successBox.style.display = "none"; }
+  function showSuccess(msg) { successBox.textContent = msg; successBox.style.display = "block"; errorBox.style.display = "none"; }
+  function clearMessages() { errorBox.style.display = "none"; successBox.style.display = "none"; }
+
+  async function withButtonBusy(btn, busyLabel, fn) {
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spinner"></span> ${busyLabel}`;
+    try {
+      await fn();
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  }
+
+  const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+  async function render() {
+    clearMessages();
+    const summarySnap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
+    const summary = summarySnap.data();
+    const groupId = summary?.groupId;
+
+    if (!groupId) {
+      document.getElementById("noGroupCard").style.display = "block";
+      document.getElementById("groupCard").style.display = "none";
+      return;
+    }
+
+    document.getElementById("noGroupCard").style.display = "none";
+    document.getElementById("groupCard").style.display = "block";
+
+    const groupSnap = await getDoc(doc(db, "groups", groupId));
+    const group = groupSnap.data();
+    const emailsByUid = group?.memberEmails || {};
+    const list = document.getElementById("memberList");
+    list.innerHTML = (group?.memberUids || []).map((uid) => `
+      <div class="ex">
+        <div class="row"><span class="name">${esc(emailsByUid[uid] || uid)}</span>${uid === user.uid ? '<span class="sets">you</span>' : ""}</div>
+      </div>`).join("");
+
+    document.getElementById("sourceSelect").value = summary?.activeProgramSource === "personal" ? "personal" : "group";
+  }
+
+  document.getElementById("createBtn").addEventListener("click", (e) => {
+    clearMessages();
+    const raw = document.getElementById("memberEmails").value.trim();
+    const memberEmails = raw.split(",").map((s) => s.trim()).filter(Boolean);
+    if (!memberEmails.length) { showError("Enter at least one teammate email."); return; }
+    withButtonBusy(e.currentTarget, "Creating…", async () => {
+      const create = httpsCallable(functions, "createGroup", { timeout: 300000 });
+      await create({ memberEmails });
+      showSuccess("Group created — your shared plan is ready.");
+      await render();
+    }).catch((err) => showError(`Couldn't create group: ${err.message || err}`));
+  });
+
+  document.getElementById("sourceSelect").addEventListener("change", async (e) => {
+    clearMessages();
+    const select = e.currentTarget;
+    const source = select.value;
+    select.disabled = true;
+    try {
+      const setSource = httpsCallable(functions, "setActiveProgramSource");
+      await setSource({ source });
+      showSuccess(source === "group" ? "Now following the group's plan." : "Now following your own plan.");
+    } catch (err) {
+      showError(`Couldn't switch: ${err.message || err}`);
+    } finally {
+      select.disabled = false;
+    }
+  });
+
+  document.getElementById("leaveBtn").addEventListener("click", (e) => {
+    clearMessages();
+    if (!confirm("Leave this group? Your teammates keep the shared plan; you'll go back to your own.")) return;
+    withButtonBusy(e.currentTarget, "Leaving…", async () => {
+      const leave = httpsCallable(functions, "leaveGroup");
+      await leave();
+      showSuccess("You left the group.");
+      await render();
+    }).catch((err) => showError(`Couldn't leave: ${err.message || err}`));
+  });
+
+  await render();
+</script>
+</body>
+</html>

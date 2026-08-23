@@ -72,7 +72,7 @@
 
 <script src="update.js"></script>
 <script type="module">
-  import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+  import { doc, getDoc, collection, query, where, limit, getDocs } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
   import { db } from "./js/firebase-init.js";
   import { requireOnboarded } from "./js/auth-guard.js";
 
@@ -81,20 +81,65 @@
   const { user } = session;
 
   const summarySnap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
-  const programId = summarySnap.data()?.currentProgramId;
+  const summary = summarySnap.data();
 
   const main = document.getElementById("mainContent");
   const tocLinks = document.getElementById("tocLinks");
 
   const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 
-  if (!programId) {
+  // A group's shared session skeleton has load_note stripped; overlay this
+  // member's own sessionLoads (from groups/{groupId}/members/{uid}) onto it
+  // by day + exercise name — mirrors functions/src/lib/sessionLoads.ts.
+  function applySessionLoads(sessions, sessionLoads) {
+    const loadsByDay = new Map();
+    for (const day of sessionLoads || []) {
+      const byName = new Map();
+      for (const ex of day.exercises || []) byName.set(ex.name, ex.load_note);
+      loadsByDay.set(day.day, byName);
+    }
+    return (sessions || []).map((session) => {
+      const byName = loadsByDay.get(session.day);
+      if (!byName) return session;
+      return {
+        ...session,
+        exercises: (session.exercises || []).map((ex) =>
+          byName.has(ex.name) ? { ...ex, load_note: byName.get(ex.name) } : ex
+        ),
+      };
+    });
+  }
+
+  let p = null;
+  if (summary?.activeProgramSource === "group" && summary?.groupId) {
+    const activeSnap = await getDocs(query(
+      collection(db, "groups", summary.groupId, "programs"),
+      where("status", "==", "active"),
+      limit(1)
+    ));
+    const sharedDoc = activeSnap.docs[0];
+    if (sharedDoc) {
+      const shared = sharedDoc.data();
+      const memberSnap = await getDoc(doc(db, "groups", summary.groupId, "members", user.uid));
+      const member = memberSnap.exists() ? memberSnap.data() : null;
+      p = {
+        ...shared,
+        sessions: applySessionLoads(shared.sessions, member?.sessionLoads),
+        currentState: member?.currentState ?? null,
+        coachNotes: member?.coachNotes ?? null,
+        sportNotes: member?.sportNotes ?? null,
+        nutritionNote: member?.nutritionNote ?? null,
+      };
+    }
+  } else if (summary?.currentProgramId) {
+    const programSnap = await getDoc(doc(db, "users", user.uid, "programs", summary.currentProgramId));
+    p = programSnap.data();
+  }
+
+  if (!p) {
     main.innerHTML = `<section><p class="muted">No program generated yet. Go to your <a href="dashboard.html">dashboard</a> and generate one.</p></section>`;
     document.getElementById("pageSub").textContent = "No program yet";
   } else {
-    const programSnap = await getDoc(doc(db, "users", user.uid, "programs", programId));
-    const p = programSnap.data();
-
     document.getElementById("pageTitle").textContent = p.title || `${p.split} Program`;
     document.getElementById("pageSub").textContent = `${p.goalSummary || p.split} · ${p.daysPerWeek} days/week · generated ${
       p.createdAt?.toDate ? p.createdAt.toDate().toLocaleDateString() : "recently"
