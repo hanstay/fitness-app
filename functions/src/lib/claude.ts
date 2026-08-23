@@ -15,7 +15,11 @@ function getClient(): Anthropic {
   return client;
 }
 
-const MODEL = "claude-sonnet-4-5-20250929";
+// Exported so callers that persist the model id alongside generated content
+// (e.g. generateProgram.ts's `model:` field) reference this single source of
+// truth instead of redeclaring the literal — a future model bump only needs
+// to change it here.
+export const MODEL = "claude-sonnet-4-5-20250929";
 
 interface ExtractJsonParams<T> {
   system: string;
@@ -58,16 +62,9 @@ export async function extractStructuredJson<T>(params: ExtractJsonParams<T>): Pr
     input_schema: params.inputSchema as Anthropic.Messages.Tool.InputSchema,
   };
 
+  const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content }];
   let lastError = "";
   for (let attempt = 0; attempt < 2; attempt++) {
-    const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content }];
-    if (attempt > 0) {
-      messages.push({
-        role: "user",
-        content: `Your previous response failed validation: ${lastError}. Please call the tool again with corrected values.`,
-      });
-    }
-
     const response = await anthropic.messages.create({
       model: params.model ?? MODEL,
       max_tokens: params.maxTokens ?? 4096,
@@ -78,14 +75,23 @@ export async function extractStructuredJson<T>(params: ExtractJsonParams<T>): Pr
     });
 
     const toolUse = response.content.find((b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use");
-    if (!toolUse) {
+    if (toolUse) {
+      const parsed = params.validator.safeParse(toolUse.input);
+      if (parsed.success) return parsed.data;
+      lastError = parsed.error.message;
+    } else {
       lastError = "Model did not return a tool call.";
-      continue;
     }
 
-    const parsed = params.validator.safeParse(toolUse.input);
-    if (parsed.success) return parsed.data;
-    lastError = parsed.error.message;
+    // Feed the failure back as a proper assistant turn before the retry's
+    // correction message -- the Anthropic API requires strictly alternating
+    // user/assistant roles, so two consecutive `user` messages (the previous
+    // version of this loop) get rejected with a 400 instead of retrying.
+    messages.push({ role: "assistant", content: response.content });
+    messages.push({
+      role: "user",
+      content: `Your previous response failed validation: ${lastError}. Please call the tool again with corrected values.`,
+    });
   }
 
   throw new Error(`Claude output failed validation after retry: ${lastError}`);
