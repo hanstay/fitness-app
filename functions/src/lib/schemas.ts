@@ -141,12 +141,13 @@ const weeklyDayJsonSchema = {
   required: ["day", "focus", "note"],
 };
 
-const sessionSchema = z.object({
+export const sessionSchema = z.object({
   day: z.string(),
   label: z.string(),
   focus_note: z.string().nullable(),
   exercises: z.array(exerciseSchema).min(1).max(14),
 });
+export type SessionOutput = z.infer<typeof sessionSchema>;
 
 const sessionJsonSchema = {
   type: "object",
@@ -329,7 +330,7 @@ export const programScheduleJsonSchema = {
 export const programUpdateSchema = z.object({
   currentState: currentStateSchema,
   weeklyStructure: z.array(weeklyDaySchema),
-  sessions: z.array(sessionSchema).min(1).max(10),
+  sessions: z.array(sessionSchema).max(10),
   changeSummary: z.array(z.string()),
   coachNotes: z.string().nullable(),
   nutritionNote: z.string().nullable(),
@@ -346,7 +347,11 @@ export const programUpdateJsonSchema = {
       description: "Day-by-day overview of the adjusted current week, with placement rationale.",
       items: weeklyDayJsonSchema,
     },
-    sessions: { type: "array", items: sessionJsonSchema },
+    sessions: {
+      type: "array",
+      items: sessionJsonSchema,
+      description: "Only include an entry for a day whose session you are actually changing. Omit any day whose session should stay exactly as-is in the existing week — it will be carried forward automatically, so do not restate it. May be empty if nothing should change. A day new to the schedule (not present in the existing week) must be included in full, since there is nothing existing to carry forward for it.",
+    },
     changeSummary: { type: "array", items: { type: "string" }, description: "Short bullet points of what changed vs the previous block, and why." },
     coachNotes: { type: ["string", "null"] },
     nutritionNote: { type: ["string", "null"] },

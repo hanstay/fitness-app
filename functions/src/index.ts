@@ -28,3 +28,4 @@ export { queueProgramGeneration } from "./generate/queueProgramGeneration";
 export { onProgramGenerationRequested } from "./generate/onProgramGenerationRequested";
 export { queueMealPlanGeneration } from "./generate/queueMealPlanGeneration";
 export { onMealPlanGenerationRequested } from "./generate/onMealPlanGenerationRequested";
+export { sweepStaleGenerations } from "./generate/sweepStaleGenerations";

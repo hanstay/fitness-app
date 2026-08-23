@@ -9,7 +9,17 @@ import { HttpsError } from "firebase-functions/v2/https";
 import { runGenerateProgram } from "./generateProgram";
 
 export const onProgramGenerationRequested = onDocumentWritten(
-  { document: "users/{uid}/programs/{programId}", secrets: ["ANTHROPIC_API_KEY"], timeoutSeconds: 300 },
+  {
+    document: "users/{uid}/programs/{programId}",
+    secrets: ["ANTHROPIC_API_KEY"],
+    timeoutSeconds: 300,
+    // Bounds how many of these run at once, which bounds concurrent pressure
+    // on the Anthropic API when a burst of users onboard together. Eventarc
+    // queues excess writes and delivers them as instances free up — this is
+    // a real (if coarse) throttle, not just a resource cap. Tune against your
+    // Anthropic tier's actual RPM/TPM limits.
+    maxInstances: 5,
+  },
   async (event) => {
     const after = event.data?.after;
     if (!after?.exists || after.data()?.status !== "generating") return;
@@ -27,7 +37,11 @@ export const onProgramGenerationRequested = onDocumentWritten(
       const message = err instanceof HttpsError ? err.message : err instanceof Error ? err.message : String(err);
       await db.batch()
         .delete(db.doc(`users/${uid}/programs/${programId}`))
-        .update(db.doc(`users/${uid}/state/summary`), { programGenerationStatus: "error", programGenerationError: message })
+        .update(db.doc(`users/${uid}/state/summary`), {
+          programGenerationStatus: "error",
+          programGenerationError: message,
+          programGenerationStartedAt: FieldValue.delete(),
+        })
         .commit();
     }
   }

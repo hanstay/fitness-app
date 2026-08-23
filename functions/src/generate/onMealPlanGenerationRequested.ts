@@ -2,12 +2,19 @@
 // background — see onProgramGenerationRequested.ts for the equivalent
 // program-side trigger and why this pattern is needed.
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
-import { getFirestore } from "firebase-admin/firestore";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import { runGenerateMealPlan } from "./generateMealPlan";
 
 export const onMealPlanGenerationRequested = onDocumentWritten(
-  { document: "users/{uid}/mealPlans/{mealPlanId}", secrets: ["ANTHROPIC_API_KEY"], timeoutSeconds: 300 },
+  {
+    document: "users/{uid}/mealPlans/{mealPlanId}",
+    secrets: ["ANTHROPIC_API_KEY"],
+    timeoutSeconds: 300,
+    // See onProgramGenerationRequested.ts — same reasoning, shared Anthropic
+    // rate-limit budget across both generation kinds.
+    maxInstances: 5,
+  },
   async (event) => {
     const after = event.data?.after;
     if (!after?.exists || after.data()?.status !== "generating") return;
@@ -22,7 +29,11 @@ export const onMealPlanGenerationRequested = onDocumentWritten(
       const message = err instanceof HttpsError ? err.message : err instanceof Error ? err.message : String(err);
       await db.batch()
         .delete(db.doc(`users/${uid}/mealPlans/${mealPlanId}`))
-        .update(db.doc(`users/${uid}/state/summary`), { mealPlanGenerationStatus: "error", mealPlanGenerationError: message })
+        .update(db.doc(`users/${uid}/state/summary`), {
+          mealPlanGenerationStatus: "error",
+          mealPlanGenerationError: message,
+          mealPlanGenerationStartedAt: FieldValue.delete(),
+        })
         .commit();
     }
   }

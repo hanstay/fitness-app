@@ -23,7 +23,13 @@ export const queueMealPlanGeneration = onCall(async (request) => {
   const placeholderRef = db.collection(`users/${uid}/mealPlans`).doc();
   await db.batch()
     .set(placeholderRef, { status: "generating", createdAt: FieldValue.serverTimestamp() })
-    .update(db.doc(`users/${uid}/state/summary`), { mealPlanGenerationStatus: "generating", mealPlanGenerationError: FieldValue.delete() })
+    .update(db.doc(`users/${uid}/state/summary`), {
+      mealPlanGenerationStatus: "generating",
+      mealPlanGenerationError: FieldValue.delete(),
+      // Lets the client judge staleness (see lib/staleGeneration.ts) without a
+      // second listener on the placeholder doc itself.
+      mealPlanGenerationStartedAt: FieldValue.serverTimestamp(),
+    })
     .commit();
 
   return { mealPlanId: placeholderRef.id };
