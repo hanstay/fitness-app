@@ -128,11 +128,14 @@
       hasIt: Boolean(summary?.currentProgramId),
       genStatus: summary?.programGenerationStatus,
       genError: summary?.programGenerationError,
+      genStartedAt: summary?.programGenerationStartedAt,
       setupMeta: "Generate from your training details",
       viewMeta: "View your current split",
       genLabel: "training program",
       missingHint: "Add your training details (days/week, session length) in your profile first.",
-      generate: () => httpsCallable(functions, "generateProgram", { timeout: 300000 })(),
+      // Queues the job and returns immediately — runs server-side, safe to
+      // navigate away from (see queueProgramGeneration.ts).
+      generate: () => httpsCallable(functions, "queueProgramGeneration")(),
       showRegen: false, // rebuilding lives in the Weekly check-in now
     }));
     el.appendChild(featureCard({
@@ -142,23 +145,51 @@
       hasIt: Boolean(summary?.currentMealPlanId),
       genStatus: summary?.mealPlanGenerationStatus,
       genError: summary?.mealPlanGenerationError,
+      genStartedAt: summary?.mealPlanGenerationStartedAt,
       setupMeta: "Generate targets and a meal plan",
       viewMeta: "Meals that hit your macros",
       genLabel: "meal plan",
       missingHint: "Add your stats (height, weight, meals/day) in your profile first.",
-      generate: () => httpsCallable(functions, "calculateTargets")().then(() => httpsCallable(functions, "generateMealPlan", { timeout: 300000 })()),
+      // calculateTargets is a fast deterministic calc, fine to await directly;
+      // only the LLM part gets queued.
+      generate: () => httpsCallable(functions, "calculateTargets")().then(() => httpsCallable(functions, "queueMealPlanGeneration")()),
     }));
+  }
+
+  // Kept in sync by hand with functions/src/lib/staleGeneration.ts — comfortably
+  // above the background function's own 300s timeout, and the server-side
+  // sweep (sweepStaleGenerations.ts) uses the same threshold to eventually
+  // mark these "error" even if nobody has the dashboard open to see this.
+  const GENERATION_STALE_AFTER_MS = 6 * 60 * 1000;
+
+  function isStale(startedAt) {
+    const ms = startedAt?.toDate ? startedAt.toDate().getTime() : null;
+    if (!ms) return false;
+    return Date.now() - ms > GENERATION_STALE_AFTER_MS;
   }
 
   function featureCard(cfg) {
     const wrap = document.createElement("div");
-    if (cfg.genStatus === "generating") {
+    if (cfg.genStatus === "generating" && !isStale(cfg.genStartedAt)) {
       const card = document.createElement("div");
       card.className = "item-card setup";
       card.style.opacity = ".7";
       card.innerHTML = `<span class="item-thumb">${cfg.icon}</span>
         <span class="item-info"><span class="item-title">Generating your ${cfg.genLabel}…</span><span class="item-meta">This can take a few minutes — feel free to browse elsewhere, it'll show up here.</span></span>
         <span class="spinner"></span>`;
+      wrap.appendChild(card);
+    } else if (cfg.genStatus === "generating") {
+      // Stale: the background job likely got killed by its own timeout
+      // without ever writing an error (the server-side sweep will catch this
+      // too, eventually — this just surfaces it immediately for whoever has
+      // the dashboard open right now).
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "item-card setup";
+      card.innerHTML = `<span class="item-thumb">${cfg.icon}</span>
+        <span class="item-info"><span class="item-title">Taking longer than expected</span><span class="item-meta">Your ${cfg.genLabel} generation may have stalled. Tap to retry.</span></span>
+        <span class="item-val">↻</span>`;
+      card.addEventListener("click", () => runGenerate(cfg, card, "Retrying"));
       wrap.appendChild(card);
     } else if (cfg.hasIt) {
       const a = document.createElement("a");
@@ -198,12 +229,15 @@
     btn.disabled = true;
     const original = btn.innerHTML;
     btn.style.opacity = ".6";
-    setStatus(`${verb} your ${cfg.genLabel} — this can take up to a minute…`);
+    setStatus(`${verb} your ${cfg.genLabel}…`);
     try {
+      // This just queues the job (a couple of Firestore writes, seconds not
+      // minutes) — the actual generation runs in the background. The
+      // onSnapshot listener below picks up the "generating" status write this
+      // makes and re-renders the card, which carries its own "this can take a
+      // few minutes" messaging from there.
       await cfg.generate();
-      setStatus(`Your ${cfg.genLabel} is ready.`);
-      // The onSnapshot listener below picks up the Firestore write this just
-      // made and re-renders the cards — no manual refresh needed here.
+      setStatus(`Started — your ${cfg.genLabel} will show up here in a few minutes.`);
     } catch (err) {
       const msg = String(err?.message || err);
       const isPrecondition = /first|required|Complete/i.test(msg);
