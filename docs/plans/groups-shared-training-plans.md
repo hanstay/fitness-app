@@ -2,12 +2,18 @@
 
 ## Status (as of this check-in)
 
-Backend done: schemas, Firestore rules, `onUserCreate` fields,
-`needsGroupFullRegen`, `groundingData.ts` extraction, `groupProgram.ts`
-(Stage A/B generation), `createGroup.ts`, `groupMembership.ts`, wired into
-`index.ts`. Unit tests for the field split and `needsGroupFullRegen` pass;
-emulator smoke tests and the client (`program.html` branch, new
-`groups.html` page) are not built yet — see Testing/client sections below.
+Done: schemas, Firestore rules (+ emulator-verified rules tests),
+`onUserCreate` fields, `needsGroupFullRegen`, `groundingData.ts` extraction,
+`groupProgram.ts` (Stage A/B generation), `createGroup.ts`,
+`groupMembership.ts`, wired into `index.ts`; `program.html`'s
+`activeProgramSource` branch; the new `groups.html` page (create/toggle/leave)
+linked from `dashboard.html`. Unit tests (field-split completeness,
+`needsGroupFullRegen`) and `groups/{groupId}` Firestore rules tests pass.
+
+Not yet done: no live end-to-end run against a real Anthropic key (the
+generation prompts/schemas are untested against actual model output), and no
+one has clicked through `groups.html` in a browser yet — see Testing below
+for what's still manual.
 
 ## Changes from the previous draft (per your feedback)
 
