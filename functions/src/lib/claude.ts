@@ -5,6 +5,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { ZodSchema } from "zod";
 import * as logger from "firebase-functions/logger";
+import { estimateCostUsd } from "./pricing";
 
 let client: Anthropic | null = null;
 function getClient(): Anthropic {
@@ -84,14 +85,21 @@ export async function extractStructuredJson<T>(params: ExtractJsonParams<T>): Pr
       { maxRetries: 6 }
     );
     // Structured so Cloud Logging queries can answer "is our 300s function
-    // timeout / 6-minute stale threshold actually fair?" from real traffic
-    // over time, without needing a one-off synthetic benchmark.
+    // timeout / 6-minute stale threshold actually fair?" — and now cost
+    // questions too — from real traffic, without a one-off synthetic
+    // benchmark or manual token pull.
+    const model = params.model ?? MODEL;
+    const inputTokens = response.usage?.input_tokens ?? null;
+    const outputTokens = response.usage?.output_tokens ?? null;
     logger.info("extractStructuredJson call completed", {
       toolName: params.toolName,
       attempt,
       durationMs: Date.now() - startedAt,
       maxTokens: params.maxTokens ?? 4096,
-      outputTokens: response.usage?.output_tokens ?? null,
+      model,
+      inputTokens,
+      outputTokens,
+      costUsd: estimateCostUsd(model, inputTokens, outputTokens),
       stopReason: response.stop_reason,
     });
 
