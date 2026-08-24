@@ -6,21 +6,12 @@
 // is create -> add teammates -> generate, not one opaque action.
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
-import { z } from "zod";
-import { groupEventInputSchema, groupFixedSessionInputSchema } from "../lib/schemas";
-
-const createGroupInputSchema = z.object({
-  name: z.string().trim().max(100).optional(),
-  goal: z.string().trim().min(1).max(1000),
-  events: z.array(groupEventInputSchema).max(10).optional(),
-  daysPerWeek: z.number().int().min(1).max(7),
-  fixedSessions: z.array(groupFixedSessionInputSchema).max(7).optional(),
-});
+import { groupDetailsInputSchema } from "./groupDetailsInput";
 
 export const createGroup = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
 
-  const parsed = createGroupInputSchema.safeParse(request.data);
+  const parsed = groupDetailsInputSchema.safeParse(request.data);
   if (!parsed.success) {
     throw new HttpsError("invalid-argument", parsed.error.issues[0]?.message ?? "Invalid group details.");
   }

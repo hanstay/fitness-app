@@ -53,7 +53,27 @@
 
   <div class="card" id="groupCard" style="display:none">
     <h2 id="groupTitle" style="margin:0 0 4px; font-size:1.05rem"></h2>
-    <p class="hint" id="groupSummary" style="margin:0 0 16px"></p>
+    <p class="hint" id="groupSummary" style="margin:0 0 8px"></p>
+    <button class="btn secondary small-btn" id="editDetailsBtn" type="button" style="display:none; margin:0 0 16px">Edit details</button>
+
+    <div class="card" id="editDetailsCard" style="display:none; margin-bottom:16px">
+      <h3 style="margin:0 0 12px; font-size:.95rem">Edit group details</h3>
+      <div class="field"><label for="editGroupName">Group name (optional)</label><input class="input" type="text" id="editGroupName" maxlength="100"></div>
+      <div class="field"><label for="editGroupGoal">What are you training together for?</label><textarea class="input" id="editGroupGoal" maxlength="1000"></textarea></div>
+      <div class="field"><label for="editGroupDaysPerWeek">Days/week you train together</label><input class="input" type="number" min="1" max="7" id="editGroupDaysPerWeek"></div>
+      <fieldset class="field-group">
+        <legend>Target events (optional)</legend>
+        <div id="editGroupEventsEditor"></div>
+      </fieldset>
+      <fieldset class="field-group">
+        <legend>Fixed weekly sessions (optional)</legend>
+        <div id="editGroupCommitmentsEditor"></div>
+      </fieldset>
+      <div class="btn-row" style="flex-wrap:wrap">
+        <button class="btn" id="saveDetailsBtn" type="button">Save changes</button>
+        <button class="btn secondary" id="cancelDetailsBtn" type="button">Cancel</button>
+      </div>
+    </div>
 
     <h3 style="margin:0 0 8px; font-size:.9rem">Members</h3>
     <div id="memberList"></div>
@@ -126,6 +146,8 @@
   renderEventsEditor(document.getElementById("groupEventsEditor"), []);
   renderCommitmentsEditor(document.getElementById("groupCommitmentsEditor"), []);
 
+  let currentGroup = null;
+
   async function render() {
     clearMessages();
     const summarySnap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
@@ -143,6 +165,7 @@
 
     const groupSnap = await getDoc(doc(db, "groups", groupId));
     const group = groupSnap.data() || {};
+    currentGroup = group;
     const isLeader = group.leaderUid === user.uid;
     const memberCount = (group.memberUids || []).length;
 
@@ -151,7 +174,10 @@
       group.goal,
       `${group.daysPerWeek ?? "?"} days/week`,
       (group.events || []).map((e) => e.name).join(", "),
+      (group.fixedSessions || []).map((s) => `${s.day}: ${s.activity}`).join(", "),
     ].filter(Boolean).join(" · ");
+    document.getElementById("editDetailsBtn").style.display = isLeader ? "inline-flex" : "none";
+    document.getElementById("editDetailsCard").style.display = "none";
 
     const emailsByUid = group.memberEmails || {};
     const list = document.getElementById("memberList");
@@ -194,6 +220,38 @@
       showSuccess("Group created — now add your teammates.");
       await render();
     }).catch((err) => showError(`Couldn't create group: ${err.message || err}`));
+  });
+
+  document.getElementById("editDetailsBtn").addEventListener("click", () => {
+    clearMessages();
+    document.getElementById("editGroupName").value = currentGroup?.name || "";
+    document.getElementById("editGroupGoal").value = currentGroup?.goal || "";
+    document.getElementById("editGroupDaysPerWeek").value = currentGroup?.daysPerWeek || "";
+    renderEventsEditor(document.getElementById("editGroupEventsEditor"), currentGroup?.events || []);
+    renderCommitmentsEditor(document.getElementById("editGroupCommitmentsEditor"), currentGroup?.fixedSessions || []);
+    document.getElementById("editDetailsCard").style.display = "block";
+  });
+
+  document.getElementById("cancelDetailsBtn").addEventListener("click", () => {
+    document.getElementById("editDetailsCard").style.display = "none";
+  });
+
+  document.getElementById("saveDetailsBtn").addEventListener("click", (e) => {
+    clearMessages();
+    const name = document.getElementById("editGroupName").value.trim();
+    const goal = document.getElementById("editGroupGoal").value.trim();
+    const daysPerWeek = Number(document.getElementById("editGroupDaysPerWeek").value);
+    if (!goal) { showError("Describe what the group is training together for."); return; }
+    if (!daysPerWeek || daysPerWeek < 1 || daysPerWeek > 7) { showError("Enter a valid days/week (1-7)."); return; }
+    const events = collectEvents(document.getElementById("editGroupEventsEditor"));
+    const fixedSessions = collectCommitments(document.getElementById("editGroupCommitmentsEditor"));
+
+    withButtonBusy(e.currentTarget, "Saving…", async () => {
+      const update = httpsCallable(functions, "updateGroup");
+      await update({ name, goal, daysPerWeek, events, fixedSessions });
+      showSuccess("Group details updated — the shared plan will pick this up on the next generation.");
+      await render();
+    }).catch((err) => showError(`Couldn't save changes: ${err.message || err}`));
   });
 
   document.getElementById("addMemberBtn").addEventListener("click", (e) => {

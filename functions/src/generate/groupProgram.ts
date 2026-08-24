@@ -176,8 +176,13 @@ export async function runGenerateGroupProgram(
 
   const fullRegen = needsGroupFullRegen({
     memberAthletes,
+    group: { goal: group.goal, daysPerWeek: group.daysPerWeek, events: group.events, fixedSessions: group.fixedSessions },
     activeProgram: activeGroupProgramDoc
-      ? { profileSnapshots: activeGroupProgram?.profileSnapshots, createdAt: activeGroupProgram?.createdAt }
+      ? {
+          profileSnapshots: activeGroupProgram?.profileSnapshots,
+          groupSnapshot: activeGroupProgram?.groupSnapshot,
+          createdAt: activeGroupProgram?.createdAt,
+        }
       : null,
   });
 
@@ -207,6 +212,7 @@ export async function runGenerateGroupProgram(
       model: MODEL,
       ...sharedProgram,
       profileSnapshots: memberAthletes,
+      groupSnapshot: { goal: group.goal, daysPerWeek: group.daysPerWeek, events: group.events, fixedSessions: group.fixedSessions },
     });
     await batch.commit();
     groupProgramRef = newRef;
