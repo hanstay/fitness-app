@@ -91,6 +91,7 @@ const eventSchema = z.object({
   weeksOut: z.string().nullable(),
   goal: z.string(),
 });
+export type EventOutput = z.infer<typeof eventSchema>;
 
 const eventJsonSchema = {
   type: "object",

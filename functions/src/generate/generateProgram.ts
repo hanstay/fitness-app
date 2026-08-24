@@ -226,14 +226,19 @@ export async function runGenerateProgram(uid: string): Promise<{ programId: stri
   const userSnap = await db.doc(`users/${uid}`).get();
   const athlete = userSnap.data()?.athlete;
 
-  if (!athlete?.training_days_per_week || !athlete?.session_length_minutes) {
-    throw new HttpsError("failed-precondition", "Complete your training profile first (days/week, session length).");
-  }
-
+  // Checked before the days/week precondition below: a group's own
+  // daysPerWeek/fixedSessions drive the shared structure now (see
+  // groupProgram.ts), so a group member's own training_days_per_week/
+  // session_length_minutes — genuinely optional in onboarding — is no
+  // longer required just to check in.
   const summaryForSource = await db.doc(`users/${uid}/state/summary`).get();
   const { groupId, activeProgramSource } = summaryForSource.data() ?? {};
   if (activeProgramSource === "group" && groupId) {
     return runGenerateGroupProgram(uid, groupId, athlete);
+  }
+
+  if (!athlete?.training_days_per_week || !athlete?.session_length_minutes) {
+    throw new HttpsError("failed-precondition", "Complete your training profile first (days/week, session length).");
   }
 
   // The active program doc drives both the full-vs-incremental decision and
