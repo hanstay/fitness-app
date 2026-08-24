@@ -1,5 +1,13 @@
 # Groups: shared training plans for people who train together
 
+**Superseded in part:** group *creation* (`createGroup`'s signature, the
+one-step "enter emails and it generates immediately" flow, and
+`public/groups.html`'s form) is replaced by the staged leader-led flow in
+[groups-creation-staged-leader-flow.md](groups-creation-staged-leader-flow.md)
+— create (with goal/events/schedule) → add teammates → explicitly generate.
+Everything else below (data model, generation, rules, client program
+rendering) is unchanged and still current.
+
 ## Status (as of this check-in)
 
 Done: schemas, Firestore rules (+ emulator-verified rules tests),

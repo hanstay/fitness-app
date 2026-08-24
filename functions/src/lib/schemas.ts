@@ -451,6 +451,23 @@ export const memberLayerJsonSchema = {
   required: ["currentState", "coachNotes", "sportNotes", "nutritionNote", "sessionLoads"],
 };
 
+// Input validation for createGroup — deliberately separate from the
+// LLM-output `eventSchema` above (which also carries weeksOut/goal, computed
+// fields that don't exist on raw user input) and from any per-athlete
+// fixed-session shape, since these are what a group *leader* types into the
+// create form (public/js/events-editor.js / commitments-editor.js).
+export const groupEventInputSchema = z.object({
+  name: z.string().min(1).max(120),
+  date: z.string().nullable(),
+});
+export type GroupEventInput = z.infer<typeof groupEventInputSchema>;
+
+export const groupFixedSessionInputSchema = z.object({
+  day: z.string().min(1),
+  activity: z.string().min(1).max(120),
+});
+export type GroupFixedSessionInput = z.infer<typeof groupFixedSessionInputSchema>;
+
 const mealSchema = z.object({
   name: z.string(),
   items: z.string(),

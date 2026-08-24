@@ -31,14 +31,43 @@
 
   <div class="card" id="noGroupCard" style="display:none">
     <h2 style="margin:0 0 12px; font-size:1.05rem">Create a group</h2>
-    <p class="hint" style="margin:0 0 12px">Enter your training partner's email (comma-separated for more than one). They need an existing account. This generates a fresh shared program from everyone's current profile — it doesn't touch anyone's existing individual plan.</p>
-    <div class="field"><label for="memberEmails">Teammate email(s)</label><input class="input" type="text" id="memberEmails" placeholder="partner@example.com"></div>
+    <p class="hint" style="margin:0 0 12px">Set up what the group is training together for. You'll add teammates and generate the plan as separate steps next — this doesn't touch anyone's existing individual plan.</p>
+
+    <div class="field"><label for="groupName">Group name (optional)</label><input class="input" type="text" id="groupName" maxlength="100" placeholder="e.g. Hyrox crew"></div>
+    <div class="field"><label for="groupGoal">What are you training together for?</label><textarea class="input" id="groupGoal" maxlength="1000" placeholder="e.g. Build strength and conditioning together, aiming for our first Hyrox."></textarea></div>
+    <div class="field"><label for="groupDaysPerWeek">Days/week you train together</label><input class="input" type="number" min="1" max="7" id="groupDaysPerWeek"></div>
+
+    <fieldset class="field-group">
+      <legend>Target events (optional)</legend>
+      <div id="groupEventsEditor"></div>
+    </fieldset>
+
+    <fieldset class="field-group">
+      <legend>Fixed weekly sessions (optional)</legend>
+      <p class="hint" style="margin:0 0 12px">Classes you already do together — these count toward the days/week above.</p>
+      <div id="groupCommitmentsEditor"></div>
+    </fieldset>
+
     <button class="btn full" id="createBtn" type="button">Create group</button>
   </div>
 
   <div class="card" id="groupCard" style="display:none">
-    <h2 style="margin:0 0 12px; font-size:1.05rem">Your group</h2>
+    <h2 id="groupTitle" style="margin:0 0 4px; font-size:1.05rem"></h2>
+    <p class="hint" id="groupSummary" style="margin:0 0 16px"></p>
+
+    <h3 style="margin:0 0 8px; font-size:.9rem">Members</h3>
     <div id="memberList"></div>
+
+    <div id="addMemberSection" style="display:none; margin-top:16px">
+      <div class="field"><label for="addMemberEmail">Add a teammate</label><input class="input" type="email" id="addMemberEmail" placeholder="teammate@example.com"></div>
+      <button class="btn secondary" id="addMemberBtn" type="button">Add</button>
+    </div>
+    <p class="note" id="notLeaderNote" style="display:none">Only the group leader can add members.</p>
+
+    <div id="generateSection" style="margin-top:16px">
+      <button class="btn full" id="generateBtn" type="button">Generate our shared plan</button>
+      <p class="hint" id="generateHint" style="margin:6px 0 0"></p>
+    </div>
 
     <fieldset class="field-group" style="margin-top:16px">
       <legend>Which plan is active</legend>
@@ -67,6 +96,8 @@
   import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
   import { db, functions } from "./js/firebase-init.js";
   import { requireOnboarded } from "./js/auth-guard.js";
+  import { renderEventsEditor, collectEvents } from "./js/events-editor.js";
+  import { renderCommitmentsEditor, collectCommitments } from "./js/commitments-editor.js";
 
   const session = await requireOnboarded();
   if (!session) throw new Error("redirecting");
@@ -92,6 +123,9 @@
 
   const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 
+  renderEventsEditor(document.getElementById("groupEventsEditor"), []);
+  renderCommitmentsEditor(document.getElementById("groupCommitmentsEditor"), []);
+
   async function render() {
     clearMessages();
     const summarySnap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
@@ -108,28 +142,80 @@
     document.getElementById("groupCard").style.display = "block";
 
     const groupSnap = await getDoc(doc(db, "groups", groupId));
-    const group = groupSnap.data();
-    const emailsByUid = group?.memberEmails || {};
+    const group = groupSnap.data() || {};
+    const isLeader = group.leaderUid === user.uid;
+    const memberCount = (group.memberUids || []).length;
+
+    document.getElementById("groupTitle").textContent = group.name || "Your group";
+    document.getElementById("groupSummary").textContent = [
+      group.goal,
+      `${group.daysPerWeek ?? "?"} days/week`,
+      (group.events || []).map((e) => e.name).join(", "),
+    ].filter(Boolean).join(" · ");
+
+    const emailsByUid = group.memberEmails || {};
     const list = document.getElementById("memberList");
-    list.innerHTML = (group?.memberUids || []).map((uid) => `
+    list.innerHTML = (group.memberUids || []).map((uid) => `
       <div class="ex">
-        <div class="row"><span class="name">${esc(emailsByUid[uid] || uid)}</span>${uid === user.uid ? '<span class="sets">you</span>' : ""}</div>
+        <div class="row"><span class="name">${esc(emailsByUid[uid] || uid)}</span>
+          <span class="sets">${uid === group.leaderUid ? "leader" : ""}${uid === user.uid ? (uid === group.leaderUid ? " · you" : "you") : ""}</span>
+        </div>
       </div>`).join("");
+
+    document.getElementById("addMemberSection").style.display = isLeader ? "block" : "none";
+    document.getElementById("notLeaderNote").style.display = isLeader ? "none" : "block";
+
+    const generateBtn = document.getElementById("generateBtn");
+    const generateHint = document.getElementById("generateHint");
+    if (memberCount < 2) {
+      generateBtn.disabled = true;
+      generateHint.textContent = "Add at least one teammate first.";
+    } else {
+      generateBtn.disabled = false;
+      generateHint.textContent = "";
+    }
 
     document.getElementById("sourceSelect").value = summary?.activeProgramSource === "personal" ? "personal" : "group";
   }
 
   document.getElementById("createBtn").addEventListener("click", (e) => {
     clearMessages();
-    const raw = document.getElementById("memberEmails").value.trim();
-    const memberEmails = raw.split(",").map((s) => s.trim()).filter(Boolean);
-    if (!memberEmails.length) { showError("Enter at least one teammate email."); return; }
+    const name = document.getElementById("groupName").value.trim();
+    const goal = document.getElementById("groupGoal").value.trim();
+    const daysPerWeek = Number(document.getElementById("groupDaysPerWeek").value);
+    if (!goal) { showError("Describe what the group is training together for."); return; }
+    if (!daysPerWeek || daysPerWeek < 1 || daysPerWeek > 7) { showError("Enter a valid days/week (1-7)."); return; }
+    const events = collectEvents(document.getElementById("groupEventsEditor"));
+    const fixedSessions = collectCommitments(document.getElementById("groupCommitmentsEditor"));
+
     withButtonBusy(e.currentTarget, "Creating…", async () => {
-      const create = httpsCallable(functions, "createGroup", { timeout: 300000 });
-      await create({ memberEmails });
-      showSuccess("Group created — your shared plan is ready.");
+      const create = httpsCallable(functions, "createGroup");
+      await create({ name, goal, daysPerWeek, events, fixedSessions });
+      showSuccess("Group created — now add your teammates.");
       await render();
     }).catch((err) => showError(`Couldn't create group: ${err.message || err}`));
+  });
+
+  document.getElementById("addMemberBtn").addEventListener("click", (e) => {
+    clearMessages();
+    const email = document.getElementById("addMemberEmail").value.trim();
+    if (!email) { showError("Enter a teammate's email."); return; }
+    withButtonBusy(e.currentTarget, "Adding…", async () => {
+      const add = httpsCallable(functions, "addGroupMember");
+      await add({ email });
+      document.getElementById("addMemberEmail").value = "";
+      showSuccess(`Added ${email}.`);
+      await render();
+    }).catch((err) => showError(`Couldn't add teammate: ${err.message || err}`));
+  });
+
+  document.getElementById("generateBtn").addEventListener("click", (e) => {
+    clearMessages();
+    withButtonBusy(e.currentTarget, "Generating…", async () => {
+      const generate = httpsCallable(functions, "generateProgram", { timeout: 300000 });
+      await generate();
+      location.href = "program.html";
+    }).catch((err) => showError(`Couldn't generate the plan: ${err.message || err}`));
   });
 
   document.getElementById("sourceSelect").addEventListener("change", async (e) => {

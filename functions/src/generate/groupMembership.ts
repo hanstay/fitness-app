@@ -36,6 +36,12 @@ export const leaveGroup = onCall(async (request) => {
     const groupSnap = await tx.get(groupRef);
     if (groupSnap.exists) {
       const memberUids: string[] = groupSnap.data()?.memberUids ?? [];
+      // No leader-reassignment or leader-removes-member flow exists, so a
+      // leader leaving a group that still has other members would orphan it
+      // (nobody left who can add members). Require them to be last out.
+      if (groupSnap.data()?.leaderUid === uid && memberUids.length > 1) {
+        throw new HttpsError("failed-precondition", "You're the group leader — other members need to leave first.");
+      }
       const memberEmails: Record<string, string> = { ...(groupSnap.data()?.memberEmails ?? {}) };
       delete memberEmails[uid];
       tx.update(groupRef, { memberUids: memberUids.filter((m) => m !== uid), memberEmails });

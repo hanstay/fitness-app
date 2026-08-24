@@ -115,6 +115,12 @@ async function main() {
 
   const groupRef = db.collection("groups").doc("demo-group");
   await groupRef.set({
+    name: "Demo crew",
+    goal: "Build a shared strength base while accommodating each person's own constraints.",
+    events: [],
+    daysPerWeek: 4,
+    fixedSessions: [],
+    leaderUid: aliceUid,
     memberUids: [aliceUid, bobUid],
     memberEmails: { [aliceUid]: ALICE.email, [bobUid]: BOB.email },
     createdAt: FieldValue.serverTimestamp(),
