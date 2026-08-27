@@ -91,6 +91,7 @@ const eventSchema = z.object({
   weeksOut: z.string().nullable(),
   goal: z.string(),
 });
+export type EventOutput = z.infer<typeof eventSchema>;
 
 const eventJsonSchema = {
   type: "object",
@@ -359,6 +360,114 @@ export const programUpdateJsonSchema = {
   },
   required: ["currentState", "weeklyStructure", "sessions", "changeSummary", "coachNotes", "nutritionNote", "running"],
 };
+
+// ---------------------------------------------------------------------------
+// Groups — the shared/individual field split used to shard a program between
+// a group's shared structure doc (groups/{groupId}/programs/{id}) and each
+// member's personal layer (groups/{groupId}/members/{uid}). Derived from
+// programJsonSchema/programSchema rather than hand-duplicated, so the split
+// can't drift from the full schema (same principle as the overview/schedule
+// split above).
+// ---------------------------------------------------------------------------
+
+const PROGRAM_SHARED_FIELD_MASK = {
+  title: true, goalSummary: true, split: true, daysPerWeek: true, events: true,
+  roadmap: true, weeklyStructure: true, sessions: true, running: true,
+  progressionRules: true, deloadGuidance: true, warmupNotes: true,
+} as const;
+export const PROGRAM_SHARED_FIELDS = Object.keys(PROGRAM_SHARED_FIELD_MASK) as (keyof ProgramOutput)[];
+export const programSharedSchema = programSchema.pick(PROGRAM_SHARED_FIELD_MASK);
+export type ProgramSharedOutput = z.infer<typeof programSharedSchema>;
+
+export const programSharedJsonSchema = {
+  type: "object",
+  properties: Object.fromEntries(
+    PROGRAM_SHARED_FIELDS.map((k) => [k, (programJsonSchema.properties as Record<string, unknown>)[k]])
+  ),
+  required: PROGRAM_SHARED_FIELDS,
+};
+
+const PROGRAM_INDIVIDUAL_FIELD_MASK = {
+  currentState: true, coachNotes: true, sportNotes: true, nutritionNote: true,
+} as const;
+export const PROGRAM_INDIVIDUAL_FIELDS = Object.keys(PROGRAM_INDIVIDUAL_FIELD_MASK) as (keyof ProgramOutput)[];
+
+// A member's personalized loads for the group's current shared session
+// skeleton — one entry per session day, exercises matched to the shared
+// sessions[] by day + name (in order). load_note is the only thing that
+// varies per member; everything else about the exercise (sets/reps/rir/
+// rest/substitution_note) is shared.
+export const sessionLoadsSchema = z.array(z.object({
+  day: z.string(),
+  exercises: z.array(z.object({
+    name: z.string(),
+    load_note: z.string().nullable(),
+  })),
+}));
+export type SessionLoadsOutput = z.infer<typeof sessionLoadsSchema>;
+
+export const sessionLoadsJsonSchema = {
+  type: "array",
+  description: "One entry per session day in the given shared schedule, with this athlete's personal load_note for each exercise (matched by day + exercise name, same order as given).",
+  items: {
+    type: "object",
+    properties: {
+      day: { type: "string" },
+      exercises: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            load_note: { type: ["string", "null"] },
+          },
+          required: ["name", "load_note"],
+        },
+      },
+    },
+    required: ["day", "exercises"],
+  },
+};
+
+// A group member's generation output: their individual program fields plus
+// their personalized loads for the group's current shared schedule.
+export const memberLayerSchema = z.object({
+  currentState: currentStateSchema,
+  coachNotes: z.string().nullable(),
+  sportNotes: z.string().nullable(),
+  nutritionNote: z.string().nullable(),
+  sessionLoads: sessionLoadsSchema,
+});
+export type MemberLayerOutput = z.infer<typeof memberLayerSchema>;
+
+export const memberLayerJsonSchema = {
+  type: "object",
+  properties: {
+    currentState: currentStateJsonSchema,
+    coachNotes: { type: ["string", "null"] },
+    sportNotes: { type: ["string", "null"] },
+    nutritionNote: { type: ["string", "null"] },
+    sessionLoads: sessionLoadsJsonSchema,
+  },
+  required: ["currentState", "coachNotes", "sportNotes", "nutritionNote", "sessionLoads"],
+};
+
+// Input validation for createGroup — deliberately separate from the
+// LLM-output `eventSchema` above (which also carries weeksOut/goal, computed
+// fields that don't exist on raw user input) and from any per-athlete
+// fixed-session shape, since these are what a group *leader* types into the
+// create form (public/js/events-editor.js / commitments-editor.js).
+export const groupEventInputSchema = z.object({
+  name: z.string().min(1).max(120),
+  date: z.string().nullable(),
+});
+export type GroupEventInput = z.infer<typeof groupEventInputSchema>;
+
+export const groupFixedSessionInputSchema = z.object({
+  day: z.string().min(1),
+  activity: z.string().min(1).max(120),
+});
+export type GroupFixedSessionInput = z.infer<typeof groupFixedSessionInputSchema>;
 
 const mealSchema = z.object({
   name: z.string(),

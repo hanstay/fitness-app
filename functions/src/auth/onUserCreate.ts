@@ -57,6 +57,8 @@ export const onUserCreate = functionsV1.auth.user().onCreate(async (user) => {
     currentProgramId: null,
     currentMealPlanId: null,
     wellness: null,
+    groupId: null,
+    activeProgramSource: "personal",
     integrationsStatus: {
       intervalsIcu: {
         connected: false,

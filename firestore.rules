@@ -31,6 +31,22 @@ service cloud.firestore {
       match /checkins/{id}       { allow read: if isOwner(uid); allow write: if false; }
     }
 
+    match /groups/{groupId} {
+      allow read: if request.auth != null && request.auth.uid in resource.data.memberUids;
+      allow write: if false;   // Functions-only
+
+      match /programs/{id} {
+        allow read: if request.auth != null &&
+          request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberUids;
+        allow write: if false;   // Functions-only
+      }
+      match /members/{uid} {
+        allow read: if request.auth != null &&
+          request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberUids;
+        allow write: if false;   // Functions-only
+      }
+    }
+
     match /credentials/{uid} { allow read, write: if false; }   // Admin SDK only, always
     match /{document=**}     { allow read, write: if false; }   // default-deny
   }

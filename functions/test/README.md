@@ -1,6 +1,39 @@
 # Tests
 
-Everything here runs in CI (`npm run build && npx vitest run --exclude "**/test/rules.test.ts"`, then the Firestore rules suite separately) except one file:
+Everything here runs in CI (`npm run build`, then `npx vitest run --exclude
+"**/test/rules.test.ts" --exclude "**/*.integration.test.ts"`, then two
+emulator-backed suites separately — see below) except one file:
+
+## `*.integration.test.ts` — LLM generation, without any API calls
+
+`groupGeneration`, `generateProgram`, `generateMealPlan`, `parseBodyScan`.
+These exercise the real generation orchestration (full-vs-incremental/Stage
+A-B branching, the archive-and-write batches, `reconcileEvents`,
+`mergeIncrementalSessions`, precondition ordering) against a real Firestore
+emulator, with only the LLM boundary mocked — `vi.mock("../src/lib/claude")`
+swaps `extractStructuredJson` for a fixture lookup keyed by `toolName`
+(`test/fixtures/llmFixtures.ts`; each fixture is validated against its real
+zod schema in `llmFixtures.sanity.test.ts`, so schema drift fails loudly
+instead of silently producing an invalid mock). No `ANTHROPIC_API_KEY`
+needed, nothing billed.
+
+**Run them:**
+
+```bash
+cd functions
+npx firebase-tools emulators:exec --only firestore --project demo-ci "npx vitest run --no-file-parallelism test/*.integration.test.ts"
+# or: npm run test:integration, from inside an already-running emulator
+```
+
+`--no-file-parallelism` is required: all four files share one Firestore
+emulator instance/project (`demo-ci`), and each file's `beforeEach` wipes
+*all* documents in that project — running files concurrently means one
+file's wipe can delete another's mid-test seed data. Within a file, tests
+still run sequentially against the same shared, wiped-between-each state.
+
+Like `rules.test.ts`, these need a live emulator and are excluded from the
+plain `--exclude` unit-test run; unlike `generationLatency.manual.test.ts`
+below, they need no real key and always run in CI.
 
 ## `generationLatency.manual.test.ts`
 
