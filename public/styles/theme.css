@@ -207,6 +207,23 @@ button.item-card{width:100%; text-align:left; cursor:pointer; font-family:inheri
   body{background:#fff}
 }
 
+/* Auth-pending veil — every protected/auth-aware page starts with
+   data-auth="pending" on <body> and an #authVeil element as its first
+   child, so the real page content stays hidden until the auth check
+   resolves (revealPage() in auth-guard.js flips this). Pages that
+   redirect away never flip it, so the veil covers the whole transition
+   instead of flashing the wrong page's content. */
+body[data-auth]:not([data-auth="ready"]) > :not(#authVeil){visibility:hidden}
+#authVeil{
+  position:fixed; inset:0; z-index:9999; background:var(--bg-page);
+  display:flex; align-items:center; justify-content:center;
+}
+body[data-auth="ready"] #authVeil{display:none}
+.veil-spinner{
+  width:32px; height:32px; border:3px solid var(--border);
+  border-top-color:var(--accent); border-radius:50%; animation:spin .7s linear infinite;
+}
+
 /* iOS standalone / safe-area (notch) handling for Add-to-Home-Screen */
 @media (display-mode:standalone),(display-mode:fullscreen){
   header.hero{padding-top:calc(28px + env(safe-area-inset-top,0px))}
