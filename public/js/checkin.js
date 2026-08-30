@@ -7,6 +7,7 @@ import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebas
 import { db, storage, functions } from "./firebase-init.js";
 import { requireOnboarded } from "./auth-guard.js";
 import { connectIntervalsIcuViaOAuth } from "./intervals-oauth.js";
+import { bindMessages } from "./ui-messages.js";
 
 const session = await requireOnboarded();
 if (!session) throw new Error("redirecting"); // requireOnboarded already redirected
@@ -14,22 +15,7 @@ const { user } = session;
 
 /* ---------- shared helpers ---------- */
 
-const errorBox = document.getElementById("errorBox");
-const successBox = document.getElementById("successBox");
-function showError(msg) {
-  errorBox.textContent = msg;
-  errorBox.style.display = "block";
-  successBox.style.display = "none";
-}
-function showSuccess(msg) {
-  successBox.textContent = msg;
-  successBox.style.display = "block";
-  errorBox.style.display = "none";
-}
-function clearMessages() {
-  errorBox.style.display = "none";
-  successBox.style.display = "none";
-}
+const { showError, showSuccess, clearMessages } = bindMessages();
 const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 const setStatus = (id, msg) => { document.getElementById(id).textContent = msg; };
 

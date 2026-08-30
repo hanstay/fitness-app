@@ -25,7 +25,7 @@
   </div>
 </header>
 
-<div class="wrap narrow" style="padding:26px 0 60px">
+<div class="wrap narrow page-content">
   <div id="errorBox" class="error-msg" style="display:none"></div>
   <div id="successBox" class="success-msg" style="display:none"></div>
 
@@ -74,7 +74,7 @@
 
       <fieldset class="field-group">
         <legend>Connect your data (optional)</legend>
-        <p class="hint" style="margin:0 0 12px">Gives your program a head start with real training history.</p>
+        <p class="hint">Gives your program a head start with real training history.</p>
         <button class="btn secondary" id="icuConnectBtn" type="button">Connect with intervals.icu</button>
         <p class="note" id="icuStatus"></p>
         <div class="field" style="margin-top:14px">
@@ -87,7 +87,7 @@
 
       <fieldset class="field-group">
         <legend>Training details</legend>
-        <p class="hint" style="margin:0 0 12px">Days/week and session length are needed to generate a program.</p>
+        <p class="hint">Days/week and session length are needed to generate a program.</p>
         <div class="field"><label for="training_days_per_week">Days/week available <span class="req">for program</span></label><input class="input" type="number" min="1" max="7" id="training_days_per_week"></div>
         <div class="field"><label for="session_length_minutes">Session length (minutes) <span class="req">for program</span></label><input class="input" type="number" id="session_length_minutes"></div>
         <div class="field"><label for="training_experience_years">Years training</label><input class="input" type="number" step="0.5" id="training_experience_years"></div>
@@ -97,13 +97,13 @@
 
       <fieldset class="field-group">
         <legend>Group classes / fixed sessions (optional)</legend>
-        <p class="hint" style="margin:0 0 12px">Regular classes that are already part of your week (these count toward your days/week above). Your program anchors these on their day and builds the rest of the week around them.</p>
+        <p class="hint">Regular classes that are already part of your week (these count toward your days/week above). Your program anchors these on their day and builds the rest of the week around them.</p>
         <div id="commitmentsEditor"></div>
       </fieldset>
 
       <fieldset class="field-group">
         <legend>Target events (optional)</legend>
-        <p class="hint" style="margin:0 0 12px">Races or competitions you're training for, with dates — your program periodizes toward these. Leave blank if you have none.</p>
+        <p class="hint">Races or competitions you're training for, with dates — your program periodizes toward these. Leave blank if you have none.</p>
         <div id="eventsEditor"></div>
       </fieldset>
 
@@ -116,7 +116,7 @@
       <div class="btn-row">
         <button class="btn secondary" id="step2BackBtn" type="button">Back</button>
         <button class="btn secondary" id="step2SkipBtn" type="button">Skip</button>
-        <button class="btn" id="step2ContinueBtn" type="button" style="flex:1">Save &amp; continue</button>
+        <button class="btn grow" id="step2ContinueBtn" type="button">Save &amp; continue</button>
       </div>
     </div>
   </section>
@@ -136,7 +136,7 @@
 
       <fieldset class="field-group">
         <legend>Body scan (optional)</legend>
-        <p class="hint" style="margin:0 0 12px">Upload a Visbody/Evolt PDF and we'll fill your weight and body fat % automatically.</p>
+        <p class="hint">Upload a Visbody/Evolt PDF and we'll fill your weight and body fat % automatically.</p>
         <div class="field">
           <label for="scanFile">Scan PDF</label>
           <input class="input" type="file" id="scanFile" accept="application/pdf">
@@ -158,7 +158,7 @@
 
       <fieldset class="field-group">
         <legend>Stats</legend>
-        <p class="hint" style="margin:0 0 12px">Height, weight, and meals/day are needed to generate targets and a meal plan.</p>
+        <p class="hint">Height, weight, and meals/day are needed to generate targets and a meal plan.</p>
         <div class="field"><label for="height_cm">Height (cm) <span class="req">for meals</span></label><input class="input" type="number" id="height_cm"></div>
         <div class="field"><label for="bodyweight_kg">Weight (kg) <span class="req">for meals</span></label><input class="input" type="number" step="0.1" id="bodyweight_kg"></div>
         <div class="field"><label for="body_fat_pct">Body fat % (optional)</label><input class="input" type="number" step="0.1" id="body_fat_pct"></div>
@@ -216,17 +216,17 @@
       <div class="btn-row">
         <button class="btn secondary" id="step3BackBtn" type="button">Back</button>
         <button class="btn secondary" id="step3SkipBtn" type="button">Skip &amp; finish</button>
-        <button class="btn" id="step3FinishBtn" type="button" style="flex:1">Save &amp; finish</button>
+        <button class="btn grow" id="step3FinishBtn" type="button">Save &amp; finish</button>
       </div>
     </div>
   </section>
 
   <!-- Finishing state -->
   <section id="finishing" class="wizard-card" style="display:none">
-    <div class="wizard-body" style="text-align:center; padding:40px 22px">
-      <div class="spinner" id="finishSpinner" style="width:28px; height:28px; border-width:3px; border-color:var(--border); border-top-color:var(--accent); margin:0 auto 16px"></div>
-      <h3 id="finishTitle" style="justify-content:center">Finishing up…</h3>
-      <p class="lead" id="finishMsg" style="margin:0 auto; max-width:340px">Building your plans — this can take up to a minute.</p>
+    <div class="wizard-body center">
+      <div class="spinner lg" id="finishSpinner"></div>
+      <h3 id="finishTitle">Finishing up…</h3>
+      <p class="lead" id="finishMsg">Building your plans — this can take up to a minute.</p>
     </div>
   </section>
 </div>

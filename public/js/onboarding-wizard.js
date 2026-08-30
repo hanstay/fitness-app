@@ -6,29 +6,14 @@ import { requireAuth } from "./auth-guard.js";
 import { renderEventsEditor, collectEvents } from "./events-editor.js";
 import { renderCommitmentsEditor, collectCommitments } from "./commitments-editor.js";
 import { connectIntervalsIcuViaOAuth } from "./intervals-oauth.js";
+import { bindMessages } from "./ui-messages.js";
 
 const user = await requireAuth();
 if (!user) throw new Error("not authenticated"); // requireAuth already redirected
 
 let uploadedScanId = null;
 
-const errorBox = document.getElementById("errorBox");
-const successBox = document.getElementById("successBox");
-
-function showError(msg) {
-  errorBox.textContent = msg;
-  errorBox.style.display = "block";
-  successBox.style.display = "none";
-}
-function showSuccess(msg) {
-  successBox.textContent = msg;
-  successBox.style.display = "block";
-  errorBox.style.display = "none";
-}
-function clearMessages() {
-  errorBox.style.display = "none";
-  successBox.style.display = "none";
-}
+const { showError, showSuccess, clearMessages } = bindMessages();
 
 const STEP_KEYS = { 1: "basics", 2: "training", 3: "nutrition" };
 

@@ -28,7 +28,7 @@
   </div>
 </header>
 
-<div class="wrap" style="padding:26px 0 60px; max-width:720px">
+<div class="wrap page-content wide">
 
   <section id="trainingLoad" style="display:none">
     <h2><span class="dot"></span>Training load</h2>
@@ -77,6 +77,7 @@
   import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
   import { db, functions } from "./js/firebase-init.js";
   import { requireOnboarded, signOut } from "./js/auth-guard.js";
+  import { showToast } from "./js/ui-messages.js";
 
   const session = await requireOnboarded();
   if (!session) throw new Error("redirecting"); // requireOnboarded already redirected
@@ -242,11 +243,15 @@
       // makes and re-renders the card, which carries its own "this can take a
       // few minutes" messaging from there.
       await cfg.generate();
-      setStatus(`Started — your ${cfg.genLabel} will show up here in a few minutes.`);
+      const doneMsg = `Started — your ${cfg.genLabel} will show up here in a few minutes.`;
+      setStatus(doneMsg);
+      showToast(doneMsg);
     } catch (err) {
       const msg = String(err?.message || err);
       const isPrecondition = /first|required|Complete/i.test(msg);
-      setStatus(isPrecondition ? cfg.missingHint : `Couldn't generate your ${cfg.genLabel}: ${msg}`);
+      const errMsg = isPrecondition ? cfg.missingHint : `Couldn't generate your ${cfg.genLabel}: ${msg}`;
+      setStatus(errMsg);
+      showToast(errMsg, { type: "error" });
       btn.disabled = false;
       btn.style.opacity = "1";
       btn.innerHTML = original;

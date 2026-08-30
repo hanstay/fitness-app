@@ -26,7 +26,7 @@
   </div>
 </header>
 
-<div class="wrap narrow" style="padding:26px 0 60px">
+<div class="wrap narrow page-content">
   <div id="errorBox" class="error-msg" style="display:none"></div>
   <div id="successBox" class="success-msg" style="display:none"></div>
 
@@ -67,13 +67,13 @@
 
     <fieldset class="field-group">
       <legend>Group classes / fixed sessions</legend>
-      <p class="hint" style="margin:0 0 12px">Regular classes that are already part of your week (these count toward your days/week). Your program anchors these on their day and builds the rest of the week around them.</p>
+      <p class="hint">Regular classes that are already part of your week (these count toward your days/week). Your program anchors these on their day and builds the rest of the week around them.</p>
       <div id="commitmentsEditor"></div>
     </fieldset>
 
     <fieldset class="field-group">
       <legend>Target events</legend>
-      <p class="hint" style="margin:0 0 12px">Races or competitions you're training for, with dates — your program periodizes toward these.</p>
+      <p class="hint">Races or competitions you're training for, with dates — your program periodizes toward these.</p>
       <div id="eventsEditor"></div>
     </fieldset>
 
@@ -162,15 +162,13 @@
   import { requireOnboarded } from "./js/auth-guard.js";
   import { renderEventsEditor, collectEvents } from "./js/events-editor.js";
   import { renderCommitmentsEditor, collectCommitments } from "./js/commitments-editor.js";
+  import { bindMessages } from "./js/ui-messages.js";
 
   const session = await requireOnboarded();
   if (!session) throw new Error("redirecting");
   const { user, profile } = session;
 
-  const errorBox = document.getElementById("errorBox");
-  const successBox = document.getElementById("successBox");
-  function showError(msg) { errorBox.textContent = msg; errorBox.style.display = "block"; successBox.style.display = "none"; }
-  function showSuccess(msg) { successBox.textContent = msg; successBox.style.display = "block"; errorBox.style.display = "none"; }
+  const { showError, showSuccess } = bindMessages();
 
   // Pre-fill from the current profile.
   const a = profile.athlete || {};
