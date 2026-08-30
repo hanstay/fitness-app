@@ -207,6 +207,25 @@ button.item-card{width:100%; text-align:left; cursor:pointer; font-family:inheri
   body{background:#fff}
 }
 
+/* Loading skeletons — placeholder blocks shown in place of async content
+   (badges, cards, stats) while the first read/snapshot is in flight, so
+   the page never sits on empty space or "Loading…" text alone. */
+.skeleton{
+  background:linear-gradient(90deg, var(--bg-tint) 25%, #eef1f3 37%, var(--bg-tint) 63%);
+  background-size:400% 100%; animation:skeleton-shimmer 1.4s ease infinite;
+  border-radius:var(--radius-sm);
+}
+@keyframes skeleton-shimmer{0%{background-position:100% 50%}100%{background-position:0 50%}}
+.skeleton-badge{display:inline-block; width:88px; height:26px; border-radius:999px; margin-right:8px}
+.skeleton-card{height:68px; border-radius:var(--radius); margin:0 0 12px}
+
+/* Inline error/empty state for a failed fetch — pairs with a retry action
+   so a failed read doesn't just leave the page stuck on "Loading…". */
+.state-box{
+  text-align:center; padding:28px 20px; color:var(--text-secondary);
+}
+.state-box p{margin:0 0 14px}
+
 /* Auth-pending veil — every protected/auth-aware page starts with
    data-auth="pending" on <body> and an #authVeil element as its first
    child, so the real page content stays hidden until the auth check

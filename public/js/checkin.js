@@ -271,5 +271,11 @@ async function loadSummary() {
   return snap.exists() ? snap.data() : null;
 }
 
-let summary = await loadSummary();
-renderIcuState(summary);
+let summary = null;
+try {
+  summary = await loadSummary();
+  renderIcuState(summary);
+} catch (err) {
+  console.error("[checkin] failed to load summary", err);
+  showError("Couldn't load your intervals.icu status — Hevy import and program updates below still work.");
+}

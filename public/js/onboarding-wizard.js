@@ -324,9 +324,14 @@ async function finishOnboarding() {
 
 /* ---------- Resume where the user left off ---------- */
 (async function init() {
-  const snap = await getDoc(doc(db, "users", user.uid));
-  const profile = snap.exists() ? snap.data() : null;
-  const step = profile?.onboarding?.step;
-  const startStep = { basics: 1, training: 2, nutrition: 3 }[step] || 1;
-  goToStep(startStep);
+  try {
+    const snap = await getDoc(doc(db, "users", user.uid));
+    const profile = snap.exists() ? snap.data() : null;
+    const step = profile?.onboarding?.step;
+    const startStep = { basics: 1, training: 2, nutrition: 3 }[step] || 1;
+    goToStep(startStep);
+  } catch (err) {
+    console.error("[onboarding] failed to resume, starting from step 1", err);
+    goToStep(1);
+  }
 })();

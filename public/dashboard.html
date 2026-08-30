@@ -21,8 +21,10 @@
 <header class="hero">
   <div class="wrap">
     <h1 id="greeting">Your plan</h1>
-    <p class="sub" id="targetsSub">Loading…</p>
-    <div class="badges" id="targetBadges"></div>
+    <p class="sub" id="targetsSub">Loading your targets…</p>
+    <div class="badges" id="targetBadges">
+      <span class="skeleton skeleton-badge"></span><span class="skeleton skeleton-badge"></span><span class="skeleton skeleton-badge"></span>
+    </div>
   </div>
 </header>
 
@@ -45,7 +47,9 @@
 
   <section>
     <h2><span class="dot"></span>Your plan</h2>
-    <div id="planCards"></div>
+    <div id="planCards">
+      <div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div>
+    </div>
     <a class="item-card" href="profile.html">
       <span class="item-thumb">⚙️</span>
       <span class="item-info"><span class="item-title">Profile</span><span class="item-meta">Stats, training, diet prefs</span></span>
@@ -249,14 +253,30 @@
     }
   }
 
+  function renderLoadFailure() {
+    document.getElementById("targetsSub").textContent = "Couldn't load your dashboard.";
+    document.getElementById("targetBadges").innerHTML = "";
+    document.getElementById("planCards").innerHTML = `
+      <div class="state-box">
+        <p>Something went wrong loading your plan.</p>
+        <button class="btn secondary" type="button" onclick="location.reload()">Retry</button>
+      </div>`;
+  }
+
   // Realtime listener (rather than a one-shot fetch) so cards update live —
   // in particular so a "generating" card flips to "view" the moment the
   // background generation trigger finishes, with no manual refresh needed.
+  // The third arg handles listener errors (e.g. a dropped connection) —
+  // without it a failure here just leaves the page on its loading skeleton
+  // forever with no feedback.
   onSnapshot(doc(db, "users", user.uid, "state", "summary"), (snap) => {
     summary = snap.exists() ? snap.data() : null;
     renderTargets(summary);
     renderTrainingLoad(summary);
     renderPlanCards();
+  }, (err) => {
+    console.error("[dashboard] summary listener failed", err);
+    renderLoadFailure();
   });
 
   document.getElementById("signOutBtn").addEventListener("click", () => signOut());

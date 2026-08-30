@@ -269,22 +269,27 @@
     }
   });
 
-  // Body scan history
-  const scansSnap = await getDocs(query(collection(db, "users", user.uid, "bodyScans"), orderBy("extractedAt", "desc")));
-  if (!scansSnap.empty) {
-    document.getElementById("scanHistoryCard").style.display = "block";
-    const list = document.getElementById("scanHistoryList");
-    scansSnap.forEach((d) => {
-      const s = d.data();
-      const e = s.extracted || {};
-      const row = document.createElement("div");
-      row.className = "ex";
-      row.innerHTML = `
-        <div class="row"><span class="name">${s.date || "unknown date"}</span><span class="sets">${s.source}</span></div>
-        <div class="load">${e.weight_kg ?? "?"}kg · ${e.body_fat_pct ?? "?"}% BF${e.muscle_mass_kg ? ` · ${e.muscle_mass_kg}kg muscle` : ""}</div>
-        ${s.confirmedByUser ? "" : '<div class="note">Not yet confirmed</div>'}`;
-      list.appendChild(row);
-    });
+  // Body scan history — optional supplementary content, so a failure here
+  // stays quiet rather than blocking the (already-usable) form above.
+  try {
+    const scansSnap = await getDocs(query(collection(db, "users", user.uid, "bodyScans"), orderBy("extractedAt", "desc")));
+    if (!scansSnap.empty) {
+      document.getElementById("scanHistoryCard").style.display = "block";
+      const list = document.getElementById("scanHistoryList");
+      scansSnap.forEach((d) => {
+        const s = d.data();
+        const e = s.extracted || {};
+        const row = document.createElement("div");
+        row.className = "ex";
+        row.innerHTML = `
+          <div class="row"><span class="name">${s.date || "unknown date"}</span><span class="sets">${s.source}</span></div>
+          <div class="load">${e.weight_kg ?? "?"}kg · ${e.body_fat_pct ?? "?"}% BF${e.muscle_mass_kg ? ` · ${e.muscle_mass_kg}kg muscle` : ""}</div>
+          ${s.confirmedByUser ? "" : '<div class="note">Not yet confirmed</div>'}`;
+        list.appendChild(row);
+      });
+    }
+  } catch (err) {
+    console.error("[profile] failed to load scan history", err);
   }
 </script>
 </body>

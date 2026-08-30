@@ -56,11 +56,12 @@
   if (!session) throw new Error("redirecting");
   const { user } = session;
 
-  const summarySnap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
-  const mealPlanId = summarySnap.data()?.currentMealPlanId;
-
   const main = document.getElementById("mainContent");
   const tocLinks = document.getElementById("tocLinks");
+
+  try {
+  const summarySnap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
+  const mealPlanId = summarySnap.data()?.currentMealPlanId;
 
   if (!mealPlanId) {
     main.innerHTML = `<section><p class="muted">No meal plan generated yet. Go to your <a href="dashboard.html">dashboard</a> and generate one.</p></section>`;
@@ -146,6 +147,15 @@
       });
     }, { rootMargin: "-20% 0px -70% 0px" });
     document.querySelectorAll("main section").forEach((s) => obs.observe(s));
+  }
+  } catch (err) {
+    console.error("[meals] failed to load", err);
+    document.getElementById("pageSub").textContent = "Couldn't load your meal plan.";
+    main.innerHTML = `
+      <section><div class="state-box">
+        <p>Something went wrong loading your meal plan.</p>
+        <button class="btn secondary" type="button" onclick="location.reload()">Retry</button>
+      </div></section>`;
   }
 </script>
 </body>

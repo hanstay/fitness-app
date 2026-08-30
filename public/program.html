@@ -81,13 +81,14 @@
   if (!session) throw new Error("redirecting");
   const { user } = session;
 
-  const summarySnap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
-  const programId = summarySnap.data()?.currentProgramId;
-
   const main = document.getElementById("mainContent");
   const tocLinks = document.getElementById("tocLinks");
 
   const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+  try {
+  const summarySnap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
+  const programId = summarySnap.data()?.currentProgramId;
 
   if (!programId) {
     main.innerHTML = `<section><p class="muted">No program generated yet. Go to your <a href="dashboard.html">dashboard</a> and generate one.</p></section>`;
@@ -243,6 +244,15 @@
       });
     }, { rootMargin: "-20% 0px -70% 0px" });
     document.querySelectorAll("main section").forEach((s) => obs.observe(s));
+  }
+  } catch (err) {
+    console.error("[program] failed to load", err);
+    document.getElementById("pageSub").textContent = "Couldn't load your program.";
+    main.innerHTML = `
+      <section><div class="state-box">
+        <p>Something went wrong loading your program.</p>
+        <button class="btn secondary" type="button" onclick="location.reload()">Retry</button>
+      </div></section>`;
   }
 </script>
 </body>
