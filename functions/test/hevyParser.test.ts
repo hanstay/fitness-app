@@ -1,5 +1,5 @@
 import { readFileSync } from "fs";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { parseHevyCsvToCurrentLifts } from "../src/lib/hevyParser";
 
 // A representative Hevy export committed alongside the tests (resolved relative
@@ -8,6 +8,14 @@ import { parseHevyCsvToCurrentLifts } from "../src/lib/hevyParser";
 const SAMPLE_CSV_PATH = new URL("./fixtures/hevy-sample.csv", import.meta.url);
 
 describe("parseHevyCsvToCurrentLifts", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ now: new Date("2026-08-15") });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("extracts a plausible current-lifts snapshot from a real export", () => {
     const csv = readFileSync(SAMPLE_CSV_PATH, "utf8");
     const lifts = parseHevyCsvToCurrentLifts(csv);
