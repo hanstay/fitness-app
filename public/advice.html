@@ -86,6 +86,16 @@
   const tocLinks = document.getElementById("tocLinks");
 
   const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  // Which roadmap phase today falls into, by startDate/endDate (ISO, inclusive).
+  // Falls back to phase 0 when dates aren't fully structured (older programs).
+  const currentPhaseIndex = (roadmap) => {
+    if (!roadmap || !roadmap.length) return 0;
+    if (!roadmap.every((ph) => ph.startDate && ph.endDate)) return 0;
+    const today = new Date().toISOString().slice(0, 10);
+    const idx = roadmap.findIndex((ph) => today >= ph.startDate && today <= ph.endDate);
+    if (idx !== -1) return idx;
+    return today > roadmap[roadmap.length - 1].endDate ? roadmap.length - 1 : 0;
+  };
 
   if (!programId) {
     main.innerHTML = `<section><p class="muted">No program generated yet. Go to your <a href="dashboard.html">dashboard</a> and generate one.</p></section>`;
@@ -148,8 +158,9 @@
     </tbody></table></div>`;
 
     if ((p.roadmap || []).length) {
+      const curPhase = currentPhaseIndex(p.roadmap);
       const phasesHtml = p.roadmap.map((ph, i) => {
-        const current = i === 0;
+        const current = i === curPhase;
         return `<div class="phase${current ? " open" : ""}">
           <h3 class="ph-head"><span class="ph-title">${esc(ph.phase)}</span>${current ? '<span class="phase-badge">This block</span>' : ""}<span class="muted small ph-dates">${esc(ph.dates || "")}</span><span class="caret">▾</span></h3>
           <div class="ph-body">${phaseSummaryHtml(ph)}</div>

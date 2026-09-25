@@ -72,6 +72,15 @@ WORK IN THIS ORDER:
    Use the given "current phase signal" line to anchor what THIS week's phase should emphasize
    — the other call is building the actual week from the same signal, so stay consistent with it.
 
+   DATE EVERY PHASE: give each roadmap phase a "startDate"/"endDate" (ISO YYYY-MM-DD, inclusive)
+   alongside the human-readable "dates" label. The first phase's startDate MUST be today's date
+   (given above); each later phase's startDate is the day after the previous phase's endDate —
+   phases must be contiguous with no gaps or overlaps. Size phases toward the nearest event's
+   date when one is given (the last phase should end at/around the event), otherwise use
+   sensible 4-8 week blocks. These dates are read by code to detect when the athlete has moved
+   into a new phase, so only leave startDate/endDate null if a phase is genuinely open-ended
+   (e.g. no event at all to anchor a timeline).
+
 3. Fill progressionRules, deloadGuidance, warmupNotes (general warmup philosophy, not day-
    specific). Add coachNotes (injury/mobility), sportNotes (event strategy, e.g. Hyrox station
    splits), and a nutritionNote (fueling around key/hard training days) when relevant; null
@@ -249,7 +258,9 @@ export async function runGenerateProgram(uid: string): Promise<{ programId: stri
 
   const fullRegen = needsFullRegen({
     athlete: athlete as AthleteProfileSnapshot,
-    activeProgram: activeProgramDoc ? { profileSnapshot: activeProgram?.profileSnapshot, createdAt: activeProgram?.createdAt } : null,
+    activeProgram: activeProgramDoc
+      ? { profileSnapshot: activeProgram?.profileSnapshot, createdAt: activeProgram?.createdAt, roadmap: activeProgram?.roadmap }
+      : null,
   });
 
   const { wellness, currentTargets, activitySummary, progressionBlock, adherenceBlock } =

@@ -55,16 +55,60 @@ export function structuralChanged(
 
 const SIX_WEEKS_MS = 6 * 7 * 24 * 60 * 60 * 1000;
 
+export interface RoadmapPhaseForDecision {
+  startDate?: string | null;
+  endDate?: string | null;
+}
+
+/**
+ * Which roadmap phase (by index) a given ISO date falls into, using each
+ * phase's startDate/endDate (inclusive). Returns null when the roadmap can't
+ * be used for this — empty, or any phase missing a date — so callers fall
+ * back to the staleness heuristic instead of guessing. A date past the last
+ * phase's endDate resolves to roadmap.length (a "past the plan" sentinel);
+ * one before the first phase's startDate resolves to -1.
+ */
+function phaseIndexForDate(roadmap: RoadmapPhaseForDecision[], dateStr: string): number | null {
+  if (roadmap.length === 0) return null;
+  if (!roadmap.every((p) => p.startDate && p.endDate)) return null;
+  for (let i = 0; i < roadmap.length; i++) {
+    const phase = roadmap[i];
+    if (dateStr >= (phase.startDate as string) && dateStr <= (phase.endDate as string)) return i;
+  }
+  const last = roadmap[roadmap.length - 1];
+  return dateStr > (last.endDate as string) ? roadmap.length : -1;
+}
+
+/**
+ * True if the athlete has moved into a different roadmap phase than the one
+ * active when the program was generated (e.g. the plan's "Base" phase ended
+ * and today falls in "Hybrid Intensification"). False — never a reason to
+ * force a regen — when the roadmap's dates aren't fully structured, since
+ * the staleness heuristic already covers that case.
+ */
+export function hasEnteredNewPhase(
+  roadmap: RoadmapPhaseForDecision[],
+  createdAtDate: string,
+  nowDate: string
+): boolean {
+  const phaseAtGeneration = phaseIndexForDate(roadmap, createdAtDate);
+  const phaseNow = phaseIndexForDate(roadmap, nowDate);
+  if (phaseAtGeneration == null || phaseNow == null) return false;
+  return phaseNow !== phaseAtGeneration;
+}
+
 export interface ActiveProgramForDecision {
   profileSnapshot?: AthleteProfileSnapshot | null;
   /** Firestore Timestamp-like — anything with toMillis(). */
   createdAt?: { toMillis(): number } | null;
+  roadmap?: RoadmapPhaseForDecision[] | null;
 }
 
 /**
  * Full regen if there's no active program yet, a structural input changed
- * since the active program was generated, or the active program is stale
- * (older than roughly one mesocycle). Incremental otherwise.
+ * since the active program was generated, the athlete has crossed into a
+ * new roadmap phase since generation, or the active program is stale (older
+ * than roughly one mesocycle). Incremental otherwise.
  */
 export function needsFullRegen(params: {
   athlete: AthleteProfileSnapshot;
@@ -76,6 +120,9 @@ export function needsFullRegen(params: {
   if (structuralChanged(athlete, activeProgram.profileSnapshot)) return true;
   const createdAtMs = activeProgram.createdAt?.toMillis?.();
   if (createdAtMs == null) return true; // no reliable timestamp — be conservative
+  const createdAtDate = new Date(createdAtMs).toISOString().slice(0, 10);
+  const nowDate = now.toISOString().slice(0, 10);
+  if (hasEnteredNewPhase(activeProgram.roadmap ?? [], createdAtDate, nowDate)) return true;
   if (now.getTime() - createdAtMs > SIX_WEEKS_MS) return true;
   return false;
 }
@@ -106,6 +153,7 @@ export interface ActiveGroupProgramForDecision {
   /** The group's own goal/daysPerWeek/events/fixedSessions as of that generation. */
   groupSnapshot?: GroupDetailsSnapshot | null;
   createdAt?: { toMillis(): number } | null;
+  roadmap?: RoadmapPhaseForDecision[] | null;
 }
 
 /**
@@ -113,8 +161,9 @@ export interface ActiveGroupProgramForDecision {
  * regenerating if there's no group program yet, the member roster changed
  * (someone joined since the snapshot was taken), any current member's
  * profile changed structurally since their snapshot, the leader edited the
- * group's own goal/schedule/events since the snapshot, or the program is
- * stale — same triggers as the personal path, evaluated across every member.
+ * group's own goal/schedule/events since the snapshot, the group has crossed
+ * into a new roadmap phase since generation, or the program is stale — same
+ * triggers as the personal path, evaluated across every member.
  */
 export function needsGroupFullRegen(params: {
   memberAthletes: Record<string, AthleteProfileSnapshot>;
@@ -132,6 +181,9 @@ export function needsGroupFullRegen(params: {
   }
   const createdAtMs = activeProgram.createdAt?.toMillis?.();
   if (createdAtMs == null) return true;
+  const createdAtDate = new Date(createdAtMs).toISOString().slice(0, 10);
+  const nowDate = now.toISOString().slice(0, 10);
+  if (hasEnteredNewPhase(activeProgram.roadmap ?? [], createdAtDate, nowDate)) return true;
   if (now.getTime() - createdAtMs > SIX_WEEKS_MS) return true;
   return false;
 }

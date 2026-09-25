@@ -94,6 +94,16 @@
 
   const main = document.getElementById("mainContent");
   const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  // Which roadmap phase today falls into, by startDate/endDate (ISO, inclusive).
+  // Falls back to phase 0 when dates aren't fully structured (older programs).
+  const currentPhaseIndex = (roadmap) => {
+    if (!roadmap || !roadmap.length) return 0;
+    if (!roadmap.every((ph) => ph.startDate && ph.endDate)) return 0;
+    const today = new Date().toISOString().slice(0, 10);
+    const idx = roadmap.findIndex((ph) => today >= ph.startDate && today <= ph.endDate);
+    if (idx !== -1) return idx;
+    return today > roadmap[roadmap.length - 1].endDate ? roadmap.length - 1 : 0;
+  };
 
   try {
   const summarySnap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
@@ -185,9 +195,10 @@
 
     // ---- Roadmap: compact, always-visible phase strip ----
     if ((p.roadmap || []).length) {
+      const curPhase = currentPhaseIndex(p.roadmap);
       const phasesHtml = p.roadmap.map((ph, i) => `
-        <div class="ph${i === 0 ? " current" : ""}">
-          <div class="ph-name">${esc(ph.phase)}${i === 0 ? '<span class="phase-badge">This block</span>' : ""}</div>
+        <div class="ph${i === curPhase ? " current" : ""}">
+          <div class="ph-name">${esc(ph.phase)}${i === curPhase ? '<span class="phase-badge">This block</span>' : ""}</div>
           <div class="ph-dates">${esc(ph.dates || "")}</div>
           <div class="ph-focus">${esc(ph.focus)}</div>
         </div>`).join("");

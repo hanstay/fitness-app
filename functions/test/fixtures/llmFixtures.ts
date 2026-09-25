@@ -26,7 +26,7 @@ export const FIXTURES: Record<string, unknown> = {
     },
     events: [{ name: "Spring 10k", date: "2027-04-01", weeksOut: "~20 weeks", goal: "Finish comfortably under 55 minutes." }],
     roadmap: [
-      { phase: "Base", dates: "Weeks 1-6", focus: "Build strength + aerobic base", lifting: "Upper/Lower, moderate volume", running: "2 easy runs/week", nutrition: "Maintenance calories" },
+      { phase: "Base", dates: "Weeks 1-6", startDate: "2026-08-11", endDate: "2026-09-21", focus: "Build strength + aerobic base", lifting: "Upper/Lower, moderate volume", running: "2 easy runs/week", nutrition: "Maintenance calories" },
     ],
     progressionRules: "Add load when reps and RIR targets are hit for two sessions running.",
     deloadGuidance: "Deload volume ~40% every 6th week.",
@@ -85,7 +85,7 @@ export const FIXTURES: Record<string, unknown> = {
     daysPerWeek: 6,
     events: [{ name: "Hyrox Men's Doubles", date: "2026-11-29", weeksOut: "~1 week", goal: "Complete doubles race with strong transitions." }],
     roadmap: [
-      { phase: "Base", dates: "Weeks 1-8", focus: "Build strength + Hyrox conditioning", lifting: "Full-body, moderate volume", running: "2 zone-2 runs/week", nutrition: "Maintenance" },
+      { phase: "Base", dates: "Weeks 1-8", startDate: "2026-08-11", endDate: "2026-10-05", focus: "Build strength + Hyrox conditioning", lifting: "Full-body, moderate volume", running: "2 zone-2 runs/week", nutrition: "Maintenance" },
     ],
     weeklyStructure: [
       { day: "Monday", focus: "Strength", note: null },

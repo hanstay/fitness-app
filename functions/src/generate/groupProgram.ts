@@ -46,6 +46,11 @@ fixed weekly sessions — set by the group leader, not inferred — plus every m
    each event's "weeksOut" as a rough whole-number count of weeks between today's date (given
    below) and the event's date — not a calendar week number. If the group stated no events, build
    an open-ended roadmap that still makes sense for everyone.
+   Give each roadmap phase a "startDate"/"endDate" (ISO YYYY-MM-DD, inclusive) alongside the
+   human-readable "dates" label: the first phase starts today, later phases start the day after
+   the previous phase's endDate (contiguous, no gaps/overlaps), and the last phase ends at/around
+   the nearest event's date when one is given. Code reads these dates to detect a phase change, so
+   only leave them null if a phase is genuinely undatable (no event to anchor a timeline).
 3. "daysPerWeek": set to EXACTLY the group's stated training days/week — this is a hard constraint,
    not a suggestion. "weeklyStructure": the group's stated fixed weekly sessions are already
    committed — place each on its given day, don't stack a conflicting hard session on top of it,
@@ -188,6 +193,7 @@ export async function runGenerateGroupProgram(
           profileSnapshots: activeGroupProgram?.profileSnapshots,
           groupSnapshot: activeGroupProgram?.groupSnapshot,
           createdAt: activeGroupProgram?.createdAt,
+          roadmap: activeGroupProgram?.roadmap,
         }
       : null,
   });

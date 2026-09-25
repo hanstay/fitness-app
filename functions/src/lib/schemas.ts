@@ -107,6 +107,8 @@ const eventJsonSchema = {
 const roadmapPhaseSchema = z.object({
   phase: z.string(),
   dates: z.string(),
+  startDate: z.string().nullable(), // ISO YYYY-MM-DD; drives full-regen-on-phase-change (see programDecisions.ts)
+  endDate: z.string().nullable(),   // ISO YYYY-MM-DD, inclusive
   focus: z.string(),
   lifting: z.string(),
   running: z.string().nullable(),
@@ -117,13 +119,15 @@ const roadmapPhaseJsonSchema = {
   type: "object",
   properties: {
     phase: { type: "string" },
-    dates: { type: "string" },
+    dates: { type: "string", description: "Human-readable date range for display, e.g. 'Sep 21 - Oct 25'." },
+    startDate: { type: ["string", "null"], description: "ISO YYYY-MM-DD start date of this phase, inclusive. Null only if genuinely undatable." },
+    endDate: { type: ["string", "null"], description: "ISO YYYY-MM-DD end date of this phase, inclusive. Null only if genuinely undatable." },
     focus: { type: "string" },
     lifting: { type: "string" },
     running: { type: ["string", "null"] },
     nutrition: { type: ["string", "null"] },
   },
-  required: ["phase", "dates", "focus", "lifting", "running", "nutrition"],
+  required: ["phase", "dates", "startDate", "endDate", "focus", "lifting", "running", "nutrition"],
 };
 
 const weeklyDaySchema = z.object({
