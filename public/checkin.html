@@ -90,6 +90,11 @@
   <section id="regenSection">
     <h2><span class="dot"></span>Update your plan</h2>
     <p class="muted small">Generates a fresh program grounded in your Hevy progression, adherence, and training load.</p>
+    <label class="muted small" style="display:flex; align-items:flex-start; gap:8px; margin:10px 0">
+      <input type="checkbox" id="forceRegenCheck" style="margin-top:2px">
+      <span>Start a new block now — full re-periodization, even if nothing else changed. Use this if your plan's
+        roadmap hasn't moved into the phase it should be in (e.g. it's still showing an old block's dates).</span>
+    </label>
     <button class="btn full" id="regenBtn" type="button">Update my plan</button>
     <p class="status-line" id="regenStatus"></p>
   </section>

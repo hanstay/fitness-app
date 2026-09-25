@@ -166,7 +166,8 @@ function buildGroupContextText(group: GroupInfo): string {
 export async function runGenerateGroupProgram(
   uid: string,
   groupId: string,
-  athlete: AthleteProfileSnapshotFull
+  athlete: AthleteProfileSnapshotFull,
+  opts?: { force?: boolean }
 ): Promise<{ programId: string } & ProgramOutput> {
   const db = getFirestore();
   const group = await loadGroup(db, groupId);
@@ -185,7 +186,7 @@ export async function runGenerateGroupProgram(
   const activeGroupProgramDoc = existingActiveSnap.docs[0] ?? null;
   const activeGroupProgram = activeGroupProgramDoc?.data() ?? null;
 
-  const fullRegen = needsGroupFullRegen({
+  const fullRegen = opts?.force || needsGroupFullRegen({
     memberAthletes,
     group: { goal: group.goal, daysPerWeek: group.daysPerWeek, events: group.events, fixedSessions: group.fixedSessions },
     activeProgram: activeGroupProgramDoc

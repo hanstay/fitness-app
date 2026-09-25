@@ -236,7 +236,8 @@ document.getElementById("regenBtn").addEventListener("click", (e) => {
   document.getElementById("planUpdatedContainer").innerHTML = "";
   setStatus("regenStatus", "Updating your program — this can take a couple of minutes…");
   withButtonBusy(e.currentTarget, "Updating…", async () => {
-    const result = await httpsCallable(functions, "generateProgram", { timeout: 300000 })();
+    const force = document.getElementById("forceRegenCheck")?.checked === true;
+    const result = await httpsCallable(functions, "generateProgram", { timeout: 300000 })({ force });
     setStatus("regenStatus", "");
     showSuccess("Your program is ready.");
     renderPlanUpdated(result.data);
