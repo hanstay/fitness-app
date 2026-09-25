@@ -17,18 +17,22 @@
 <style>
   .adviceLink{display:none; margin-top:10px}
 
-  /* Roadmap: compact, always-visible phase strip — no accordion. */
-  .roadmap{display:flex; flex-wrap:wrap; gap:8px}
-  .roadmap .ph{flex:1 1 160px; border:1px solid var(--border); border-radius:10px; padding:10px 12px; background:var(--card)}
+  /* Roadmap: compact, always-visible phase strip — no accordion.
+     minmax(0,1fr) (not bare 1fr) on every grid below: a plain `1fr` track
+     won't shrink past its content's natural width, so one card with more
+     text (e.g. the "This block" badge) was stealing space from the others
+     and forcing uneven widths / inconsistent header wrapping. */
+  .roadmap{display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px}
+  .roadmap .ph{border:1px solid var(--border); border-radius:10px; padding:10px 12px; background:var(--card)}
   .roadmap .ph.current{border-color:var(--accent); background:var(--accent-soft)}
-  .roadmap .ph .ph-name{font-family:var(--font-head); font-weight:600; font-size:.92rem; display:flex; align-items:center; gap:6px}
+  .roadmap .ph .ph-name{font-family:var(--font-head); font-weight:600; font-size:.92rem; display:flex; align-items:center; gap:6px; flex-wrap:wrap}
   .phase-badge{font-size:.6rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px;
     color:var(--accent-dark); background:var(--accent-soft); border:1px solid #f3cfd0; border-radius:999px; padding:2px 8px}
   .roadmap .ph .ph-dates{font-size:.76rem; color:var(--text-secondary); margin:2px 0 4px}
   .roadmap .ph .ph-focus{font-size:.82rem; color:var(--text-primary)}
 
   /* Week at a glance: single row, always visible, no scroll. */
-  .week-strip{display:grid; grid-template-columns:repeat(7,1fr); gap:6px; margin-top:6px}
+  .week-strip{display:grid; grid-template-columns:repeat(7, minmax(0, 1fr)); gap:6px; margin-top:6px}
   .day-cell{display:flex; flex-direction:column; align-items:center; gap:4px; text-align:center;
     padding:10px 4px; border-radius:10px; cursor:pointer; border:1px solid var(--border); background:var(--card);
     font-family:var(--font-body); -webkit-tap-highlight-color:transparent}
@@ -40,21 +44,41 @@
   .day-cell.selected .d, .day-cell.selected .f{color:#ffffff}
 
   /* Numbered exercise cards. */
-  .ex-grid{display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin-top:14px}
-  .ex-card{border:1px solid var(--border); border-radius:10px; padding:12px 14px; background:var(--card)}
+  .ex-grid{display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; margin-top:14px}
+  .ex-card{border:1px solid var(--border); border-radius:10px; padding:12px 14px; background:var(--card); min-width:0}
   .ex-card .row{display:flex; align-items:center; gap:8px}
   .ex-card .order{flex:0 0 auto; width:20px; height:20px; border-radius:50%; background:var(--accent-soft); color:var(--accent-dark);
     font-size:.68rem; font-weight:700; display:flex; align-items:center; justify-content:center}
-  .ex-card .name{font-weight:600; font-size:.92rem; flex:1}
-  .ex-card .sets{font-weight:700; font-size:.85rem; color:var(--accent-dark); white-space:nowrap}
+  .ex-card .name{font-weight:600; font-size:.92rem; flex:1; min-width:0}
+  /* Its own full-width line rather than sharing the name's row: `reps` can be
+     a short "12" or a long descriptive phrase, and letting it sit inline
+     meant a long one wrapped mid-row in an ugly half-inline, half-wrapped way. */
+  .ex-card .sets{margin-top:4px; margin-left:28px; font-weight:700; font-size:.85rem; color:var(--accent-dark)}
   .ex-card .load{margin-top:7px; margin-left:28px; display:inline-block; background:var(--bg-tint); color:var(--text-secondary);
-    border:1px solid var(--border); border-radius:7px; padding:2px 8px; font-size:.72rem; font-weight:600}
+    border:1px solid var(--border); border-radius:7px; padding:2px 8px; font-size:.72rem; font-weight:600; max-width:calc(100% - 28px)}
   .ex-card .sub{margin-top:6px; margin-left:28px}
   .ex-card .sub .pill{display:inline-block; background:var(--accent-soft); color:var(--accent-dark); border:1px solid #f3cfd0;
-    border-radius:999px; padding:2px 10px; font-size:.72rem; font-weight:700}
+    border-radius:999px; padding:2px 10px; font-size:.72rem; font-weight:700; max-width:calc(100% - 28px)}
 
   @media (max-width:640px){
-    .ex-grid{grid-template-columns:1fr}
+    .ex-grid{grid-template-columns:minmax(0, 1fr)}
+    .roadmap{grid-template-columns:minmax(0, 1fr)}
+  }
+
+  /* Phone-width day strip: 7 columns of full "focus" text (e.g. "Easy Run +
+     Mobility") don't fit at any readable size, and shrinking the font to
+     make them fit just traded overflow for illegibility. Drop the focus
+     preview per-cell in favor of a status dot — the selected day's full
+     name + focus is always shown in the heading right below the strip, so
+     nothing is lost, just deferred to where there's room to read it. */
+  @media (max-width:480px){
+    .week-strip{gap:4px}
+    .day-cell{padding:10px 2px; gap:6px}
+    .day-cell .d{font-size:.7rem}
+    .day-cell .f{display:none}
+    .day-cell::after{content:""; width:6px; height:6px; border-radius:50%; background:var(--accent)}
+    .day-cell.rest::after{background:var(--text-secondary)}
+    .day-cell.selected::after{background:#ffffff}
   }
 </style>
 </head>
@@ -170,8 +194,8 @@
       <div class="row">
         <span class="order">${i + 1}</span>
         <span class="name">${esc(ex.name)}</span>
-        <span class="sets">${ex.sets} × ${esc(ex.reps)}</span>
       </div>
+      <div class="sets">${ex.sets} × ${esc(ex.reps)}</div>
       <div class="load">RIR ${esc(ex.rir)} · rest ${ex.rest_seconds}s${ex.load_note ? ` · ${esc(ex.load_note)}` : ""}</div>
       ${ex.substitution_note ? `<div class="sub"><span class="pill">Sub: ${esc(ex.substitution_note)}</span></div>` : ""}
     </div>`;
