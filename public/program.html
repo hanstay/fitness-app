@@ -17,6 +17,16 @@
 <style>
   .adviceLink{display:none; margin-top:10px}
 
+  /* Target events: a card per event instead of a table — a table's columns
+     (esp. "Goal", which is a full sentence) don't have a width they can
+     shrink to on a phone, so the whole table had to scroll horizontally. */
+  .event-card{border:1px solid var(--border); border-radius:10px; padding:12px 14px; background:var(--card); margin:0 0 10px}
+  .event-card:last-child{margin-bottom:0}
+  .event-card .event-head{display:flex; justify-content:space-between; align-items:baseline; gap:8px 12px; flex-wrap:wrap}
+  .event-card .event-name{font-weight:600; font-size:.94rem}
+  .event-card .event-meta{font-size:.78rem; color:var(--text-secondary); white-space:nowrap}
+  .event-card .event-goal{margin:6px 0 0; font-size:.85rem; color:var(--text-primary)}
+
   /* Roadmap: compact, always-visible phase strip — no accordion.
      minmax(0,1fr) (not bare 1fr) on every grid below: a plain `1fr` track
      won't shrink past its content's natural width, so one card with more
@@ -58,7 +68,7 @@
     border:1px solid var(--border); border-radius:7px; padding:2px 8px; font-size:.72rem; font-weight:600; max-width:calc(100% - 28px)}
   .ex-card .sub{margin-top:6px; margin-left:28px}
   .ex-card .sub .pill{display:inline-block; background:var(--accent-soft); color:var(--accent-dark); border:1px solid #f3cfd0;
-    border-radius:999px; padding:2px 10px; font-size:.72rem; font-weight:700; max-width:calc(100% - 28px)}
+    border-radius:7px; padding:2px 8px; font-size:.72rem; font-weight:600; max-width:calc(100% - 28px)}
 
   @media (max-width:640px){
     .ex-grid{grid-template-columns:minmax(0, 1fr)}
@@ -202,9 +212,17 @@
 
     // ---- Target events ----
     if ((p.events || []).length) {
-      const rows = p.events.map((e) => `<tr><td><b>${esc(e.name)}</b></td><td>${esc(e.date || "—")}</td><td>${esc(e.weeksOut || "—")}</td><td>${esc(e.goal)}</td></tr>`).join("");
-      main.insertAdjacentHTML("beforeend", section("events", "Target events",
-        `<div class="tablescroll"><table><thead><tr><th>Event</th><th>Date</th><th>Out</th><th>Goal</th></tr></thead><tbody>${rows}</tbody></table></div>`));
+      const cards = p.events.map((e) => {
+        const meta = [e.date, e.weeksOut ? `${e.weeksOut} out` : null].filter(Boolean).join(" · ");
+        return `<div class="event-card">
+          <div class="event-head">
+            <span class="event-name">${esc(e.name)}</span>
+            ${meta ? `<span class="event-meta">${esc(meta)}</span>` : ""}
+          </div>
+          ${e.goal ? `<p class="event-goal">${esc(e.goal)}</p>` : ""}
+        </div>`;
+      }).join("");
+      main.insertAdjacentHTML("beforeend", section("events", "Target events", cards));
     }
 
     // ---- Roadmap: compact, always-visible phase strip ----
