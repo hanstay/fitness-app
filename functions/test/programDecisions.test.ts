@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { structuralChanged, needsFullRegen, needsGroupFullRegen, groupDetailsChanged } from "../src/lib/programDecisions";
+import { structuralChanged, needsFullRegen, needsGroupFullRegen, groupDetailsChanged, hasEnteredNewPhase } from "../src/lib/programDecisions";
 
 const baseAthlete = {
   goal: "Hyrox",
@@ -96,6 +96,70 @@ describe("needsFullRegen", () => {
       activeProgram: { profileSnapshot: baseAthlete, createdAt: null },
       now,
     })).toBe(true);
+  });
+
+  const baseRoadmap = [
+    { phase: "Base", startDate: "2026-08-01", endDate: "2026-08-24" },
+    { phase: "Hybrid Intensification", startDate: "2026-08-25", endDate: "2026-09-28" },
+    { phase: "Peak", startDate: "2026-09-29", endDate: "2026-10-19" },
+  ];
+
+  it("is true when the athlete has crossed into a new roadmap phase, even inside the 6-week window", () => {
+    const createdAt = new Date("2026-08-10T00:00:00Z"); // within "Base"
+    expect(needsFullRegen({
+      athlete: baseAthlete,
+      activeProgram: { profileSnapshot: baseAthlete, createdAt: { toMillis: () => createdAt.getTime() }, roadmap: baseRoadmap },
+      now: new Date("2026-09-01T00:00:00Z"), // now within "Hybrid Intensification"
+    })).toBe(true);
+  });
+
+  it("is false when the athlete is still within the same roadmap phase as generation", () => {
+    const createdAt = new Date("2026-08-10T00:00:00Z");
+    expect(needsFullRegen({
+      athlete: baseAthlete,
+      activeProgram: { profileSnapshot: baseAthlete, createdAt: { toMillis: () => createdAt.getTime() }, roadmap: baseRoadmap },
+      now: new Date("2026-08-20T00:00:00Z"), // still within "Base"
+    })).toBe(false);
+  });
+
+  it("falls back to the staleness heuristic when roadmap dates aren't fully structured", () => {
+    const createdAt = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const partiallyDatedRoadmap = [
+      { phase: "Base", startDate: "2026-08-01", endDate: null },
+      { phase: "Hybrid Intensification", startDate: null, endDate: null },
+    ];
+    expect(needsFullRegen({
+      athlete: baseAthlete,
+      activeProgram: { profileSnapshot: baseAthlete, createdAt: { toMillis: () => createdAt.getTime() }, roadmap: partiallyDatedRoadmap },
+      now,
+    })).toBe(false);
+  });
+});
+
+describe("hasEnteredNewPhase", () => {
+  const roadmap = [
+    { phase: "Base", startDate: "2026-08-01", endDate: "2026-08-24" },
+    { phase: "Hybrid Intensification", startDate: "2026-08-25", endDate: "2026-09-28" },
+  ];
+
+  it("is false for an empty roadmap", () => {
+    expect(hasEnteredNewPhase([], "2026-08-10", "2026-09-01")).toBe(false);
+  });
+
+  it("is false when any phase is missing a date", () => {
+    expect(hasEnteredNewPhase([{ phase: "Base", startDate: "2026-08-01", endDate: null }], "2026-08-10", "2026-09-01")).toBe(false);
+  });
+
+  it("is true crossing from one phase to the next", () => {
+    expect(hasEnteredNewPhase(roadmap, "2026-08-10", "2026-09-01")).toBe(true);
+  });
+
+  it("is false within the same phase", () => {
+    expect(hasEnteredNewPhase(roadmap, "2026-08-10", "2026-08-20")).toBe(false);
+  });
+
+  it("is true once past the end of the last phase", () => {
+    expect(hasEnteredNewPhase(roadmap, "2026-08-10", "2026-10-15")).toBe(true);
   });
 });
 
@@ -231,6 +295,24 @@ describe("needsGroupFullRegen", () => {
         createdAt: null,
       },
       now,
+    })).toBe(true);
+  });
+
+  it("is true when the group has crossed into a new roadmap phase, even inside the 6-week window", () => {
+    const roadmap = [
+      { phase: "Base", startDate: "2026-08-01", endDate: "2026-08-24" },
+      { phase: "Hybrid Intensification", startDate: "2026-08-25", endDate: "2026-09-28" },
+    ];
+    expect(needsGroupFullRegen({
+      memberAthletes: { a: baseAthlete, b: partnerAthlete },
+      group,
+      activeProgram: {
+        profileSnapshots: { a: baseAthlete, b: partnerAthlete },
+        groupSnapshot: group,
+        createdAt: { toMillis: () => new Date("2026-08-10T00:00:00Z").getTime() },
+        roadmap,
+      },
+      now: new Date("2026-09-01T00:00:00Z"),
     })).toBe(true);
   });
 });
