@@ -215,7 +215,13 @@ function computePhaseSignal(
 export const generateProgram = onCall({ secrets: ["ANTHROPIC_API_KEY"], timeoutSeconds: 300 }, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
   try {
-    return await runGenerateProgram(request.auth.uid);
+    // Explicit escape hatch for needsFullRegen's automatic triggers: lets the
+    // check-in "Start a new block now" checkbox force a full re-periodization
+    // even when nothing structural changed and the program isn't stale yet —
+    // e.g. an athlete whose active program predates phase-boundary tracking
+    // (see programDecisions.ts) and so has no roadmap dates to detect against.
+    const force = request.data?.force === true;
+    return await runGenerateProgram(request.auth.uid, { force });
   } catch (err) {
     if (err instanceof HttpsError) throw err;
     const message = err instanceof Error ? err.message : String(err);
@@ -230,7 +236,10 @@ export const generateProgram = onCall({ secrets: ["ANTHROPIC_API_KEY"], timeoutS
  * background trigger that runs queued onboarding generations
  * (onProgramGenerationRequested.ts) — same logic either way.
  */
-export async function runGenerateProgram(uid: string): Promise<{ programId: string } & ProgramOutput & { changeSummary?: string[] }> {
+export async function runGenerateProgram(
+  uid: string,
+  opts?: { force?: boolean }
+): Promise<{ programId: string } & ProgramOutput & { changeSummary?: string[] }> {
   const db = getFirestore();
   const userSnap = await db.doc(`users/${uid}`).get();
   const athlete = userSnap.data()?.athlete;
@@ -243,7 +252,7 @@ export async function runGenerateProgram(uid: string): Promise<{ programId: stri
   const summaryForSource = await db.doc(`users/${uid}/state/summary`).get();
   const { groupId, activeProgramSource } = summaryForSource.data() ?? {};
   if (activeProgramSource === "group" && groupId) {
-    return runGenerateGroupProgram(uid, groupId, athlete);
+    return runGenerateGroupProgram(uid, groupId, athlete, opts);
   }
 
   if (!athlete?.training_days_per_week || !athlete?.session_length_minutes) {
@@ -256,7 +265,7 @@ export async function runGenerateProgram(uid: string): Promise<{ programId: stri
   const activeProgramDoc = existingActiveSnap.docs[0] ?? null;
   const activeProgram = activeProgramDoc?.data() ?? null;
 
-  const fullRegen = needsFullRegen({
+  const fullRegen = opts?.force || needsFullRegen({
     athlete: athlete as AthleteProfileSnapshot,
     activeProgram: activeProgramDoc
       ? { profileSnapshot: activeProgram?.profileSnapshot, createdAt: activeProgram?.createdAt, roadmap: activeProgram?.roadmap }

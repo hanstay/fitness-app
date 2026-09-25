@@ -1,6 +1,6 @@
 // Offline cache for the training plan PWA.
 // Bump CACHE when you republish updated pages so phones fetch the new version.
-const CACHE = 'trainer-2026-08-02-phase1';
+const CACHE = 'trainer-2026-09-25-phase-dates';
 const ASSETS = [
   './', 'login.html', 'onboarding.html', 'dashboard.html', 'program.html', 'meals.html', 'profile.html',
   'styles/theme.css',
