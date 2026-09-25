@@ -3,11 +3,35 @@
 <head>
 <meta charset="UTF-8">
 <meta name="robots" content="noindex, nofollow">
-<meta http-equiv="refresh" content="0; url=login.html">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
 <title>Hybrid Training Plan</title>
+<link rel="stylesheet" href="styles/theme.css">
 </head>
-<body>
-<script>location.replace('login.html');</script>
-<p>Redirecting to <a href="login.html">sign in</a>…</p>
+<body data-auth="pending">
+<div id="authVeil"><div class="veil-spinner"></div></div>
+
+<script type="module">
+  import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+  import { db } from "./js/firebase-init.js";
+  import { waitForAuthState } from "./js/auth-guard.js";
+
+  // Route straight to the right page in one hop instead of always landing
+  // on login.html first — that used to force a second redirect (and a
+  // second page paint) for every already-signed-in user.
+  const user = await waitForAuthState();
+  if (!user) {
+    location.replace("login.html");
+  } else {
+    let profile = null;
+    try {
+      const snap = await getDoc(doc(db, "users", user.uid));
+      profile = snap.exists() ? snap.data() : null;
+    } catch {
+      profile = null;
+    }
+    location.replace(profile?.onboarding?.completed ? "dashboard.html" : "onboarding.html");
+  }
+</script>
 </body>
 </html>

@@ -15,17 +15,20 @@
 <title>Dashboard — Hybrid Training Plan</title>
 <link rel="stylesheet" href="styles/theme.css">
 </head>
-<body>
+<body data-auth="pending">
+<div id="authVeil"><div class="veil-spinner"></div></div>
 
 <header class="hero">
   <div class="wrap">
     <h1 id="greeting">Your plan</h1>
-    <p class="sub" id="targetsSub">Loading…</p>
-    <div class="badges" id="targetBadges"></div>
+    <p class="sub" id="targetsSub">Loading your targets…</p>
+    <div class="badges" id="targetBadges">
+      <span class="skeleton skeleton-badge"></span><span class="skeleton skeleton-badge"></span><span class="skeleton skeleton-badge"></span>
+    </div>
   </div>
 </header>
 
-<div class="wrap" style="padding:26px 0 60px; max-width:720px">
+<div class="wrap page-content wide">
 
   <section id="trainingLoad" style="display:none">
     <h2><span class="dot"></span>Training load</h2>
@@ -44,7 +47,9 @@
 
   <section>
     <h2><span class="dot"></span>Your plan</h2>
-    <div id="planCards"></div>
+    <div id="planCards">
+      <div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div>
+    </div>
     <a class="item-card" href="profile.html">
       <span class="item-thumb">⚙️</span>
       <span class="item-info"><span class="item-title">Profile</span><span class="item-meta">Stats, training, diet prefs</span></span>
@@ -77,6 +82,7 @@
   import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
   import { db, functions } from "./js/firebase-init.js";
   import { requireOnboarded, signOut } from "./js/auth-guard.js";
+  import { showToast } from "./js/ui-messages.js";
 
   const session = await requireOnboarded();
   if (!session) throw new Error("redirecting"); // requireOnboarded already redirected
@@ -242,25 +248,45 @@
       // makes and re-renders the card, which carries its own "this can take a
       // few minutes" messaging from there.
       await cfg.generate();
-      setStatus(`Started — your ${cfg.genLabel} will show up here in a few minutes.`);
+      const doneMsg = `Started — your ${cfg.genLabel} will show up here in a few minutes.`;
+      setStatus(doneMsg);
+      showToast(doneMsg);
     } catch (err) {
       const msg = String(err?.message || err);
       const isPrecondition = /first|required|Complete/i.test(msg);
-      setStatus(isPrecondition ? cfg.missingHint : `Couldn't generate your ${cfg.genLabel}: ${msg}`);
+      const errMsg = isPrecondition ? cfg.missingHint : `Couldn't generate your ${cfg.genLabel}: ${msg}`;
+      setStatus(errMsg);
+      showToast(errMsg, { type: "error" });
       btn.disabled = false;
       btn.style.opacity = "1";
       btn.innerHTML = original;
     }
   }
 
+  function renderLoadFailure() {
+    document.getElementById("targetsSub").textContent = "Couldn't load your dashboard.";
+    document.getElementById("targetBadges").innerHTML = "";
+    document.getElementById("planCards").innerHTML = `
+      <div class="state-box">
+        <p>Something went wrong loading your plan.</p>
+        <button class="btn secondary" type="button" onclick="location.reload()">Retry</button>
+      </div>`;
+  }
+
   // Realtime listener (rather than a one-shot fetch) so cards update live —
   // in particular so a "generating" card flips to "view" the moment the
   // background generation trigger finishes, with no manual refresh needed.
+  // The third arg handles listener errors (e.g. a dropped connection) —
+  // without it a failure here just leaves the page on its loading skeleton
+  // forever with no feedback.
   onSnapshot(doc(db, "users", user.uid, "state", "summary"), (snap) => {
     summary = snap.exists() ? snap.data() : null;
     renderTargets(summary);
     renderTrainingLoad(summary);
     renderPlanCards();
+  }, (err) => {
+    console.error("[dashboard] summary listener failed", err);
+    renderLoadFailure();
   });
 
   document.getElementById("signOutBtn").addEventListener("click", () => signOut());

@@ -40,7 +40,8 @@
   .day-h{margin:0 0 6px; font-family:var(--font-head); font-size:1rem; font-weight:600}
 </style>
 </head>
-<body>
+<body data-auth="pending">
+<div id="authVeil"><div class="veil-spinner"></div></div>
 
 <header class="hero">
   <div class="wrap">
@@ -80,13 +81,14 @@
   if (!session) throw new Error("redirecting");
   const { user } = session;
 
-  const summarySnap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
-  const summary = summarySnap.data();
-
   const main = document.getElementById("mainContent");
   const tocLinks = document.getElementById("tocLinks");
 
   const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+  try {
+  const summarySnap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
+  const summary = summarySnap.data();
 
   // A group's shared session skeleton has load_note stripped; overlay this
   // member's own sessionLoads (from groups/{groupId}/members/{uid}) onto it
@@ -287,6 +289,15 @@
       });
     }, { rootMargin: "-20% 0px -70% 0px" });
     document.querySelectorAll("main section").forEach((s) => obs.observe(s));
+  }
+  } catch (err) {
+    console.error("[program] failed to load", err);
+    document.getElementById("pageSub").textContent = "Couldn't load your program.";
+    main.innerHTML = `
+      <section><div class="state-box">
+        <p>Something went wrong loading your program.</p>
+        <button class="btn secondary" type="button" onclick="location.reload()">Retry</button>
+      </div></section>`;
   }
 </script>
 </body>
