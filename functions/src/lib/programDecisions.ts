@@ -79,3 +79,59 @@ export function needsFullRegen(params: {
   if (now.getTime() - createdAtMs > SIX_WEEKS_MS) return true;
   return false;
 }
+
+export interface GroupDetailsSnapshot {
+  goal?: string | null;
+  daysPerWeek?: number | null;
+  events?: Array<{ name: string; date?: string | null }> | null;
+  fixedSessions?: Array<{ day: string; activity: string }> | null;
+}
+
+/** True if the group leader changed goal/daysPerWeek/events/fixedSessions since the snapshot was taken. */
+export function groupDetailsChanged(
+  group: GroupDetailsSnapshot,
+  snapshot: GroupDetailsSnapshot | null | undefined
+): boolean {
+  if (!snapshot) return true;
+  if ((group.goal ?? null) !== (snapshot.goal ?? null)) return true;
+  if ((group.daysPerWeek ?? null) !== (snapshot.daysPerWeek ?? null)) return true;
+  if (!sameEvents(group.events, snapshot.events)) return true;
+  if (!sameFixedSessions(group.fixedSessions, snapshot.fixedSessions)) return true;
+  return false;
+}
+
+export interface ActiveGroupProgramForDecision {
+  /** Every member's athlete snapshot as of when this group program's shared structure was generated. */
+  profileSnapshots?: Record<string, AthleteProfileSnapshot | null | undefined> | null;
+  /** The group's own goal/daysPerWeek/events/fixedSessions as of that generation. */
+  groupSnapshot?: GroupDetailsSnapshot | null;
+  createdAt?: { toMillis(): number } | null;
+}
+
+/**
+ * Group analogue of needsFullRegen: the shared structure (Stage A) needs
+ * regenerating if there's no group program yet, the member roster changed
+ * (someone joined since the snapshot was taken), any current member's
+ * profile changed structurally since their snapshot, the leader edited the
+ * group's own goal/schedule/events since the snapshot, or the program is
+ * stale — same triggers as the personal path, evaluated across every member.
+ */
+export function needsGroupFullRegen(params: {
+  memberAthletes: Record<string, AthleteProfileSnapshot>;
+  group: GroupDetailsSnapshot;
+  activeProgram: ActiveGroupProgramForDecision | null;
+  now?: Date;
+}): boolean {
+  const { memberAthletes, group, activeProgram, now = new Date() } = params;
+  if (!activeProgram) return true;
+  if (groupDetailsChanged(group, activeProgram.groupSnapshot)) return true;
+  const snapshots = activeProgram.profileSnapshots ?? {};
+  for (const [uid, athlete] of Object.entries(memberAthletes)) {
+    if (!(uid in snapshots)) return true; // new member, never snapshotted
+    if (structuralChanged(athlete, snapshots[uid])) return true;
+  }
+  const createdAtMs = activeProgram.createdAt?.toMillis?.();
+  if (createdAtMs == null) return true;
+  if (now.getTime() - createdAtMs > SIX_WEEKS_MS) return true;
+  return false;
+}

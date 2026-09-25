@@ -224,6 +224,62 @@ describe("credentials/{uid} — Admin SDK only, never client-reachable", () => {
   });
 });
 
+describe("groups/{groupId} — read gated on membership, writes Functions-only", () => {
+  const GROUP_ID = "group1";
+  const THIRD_UID = "third-uid";
+
+  beforeEach(async () => {
+    await seedAsAdmin(`groups/${GROUP_ID}`, { memberUids: [OWNER_UID, OTHER_UID], memberEmails: {} });
+    await seedAsAdmin(`groups/${GROUP_ID}/programs/p1`, { status: "active" });
+    await seedAsAdmin(`groups/${GROUP_ID}/members/${OWNER_UID}`, { currentState: null });
+  });
+
+  it("a member can read the group doc", async () => {
+    const owner = testEnv.authenticatedContext(OWNER_UID);
+    await assertSucceeds(getDoc(doc(owner.firestore(), `groups/${GROUP_ID}`)));
+  });
+
+  it("a non-member cannot read the group doc", async () => {
+    const outsider = testEnv.authenticatedContext(THIRD_UID);
+    await assertFails(getDoc(doc(outsider.firestore(), `groups/${GROUP_ID}`)));
+  });
+
+  it("a member can read the group's shared program", async () => {
+    const other = testEnv.authenticatedContext(OTHER_UID);
+    await assertSucceeds(getDoc(doc(other.firestore(), `groups/${GROUP_ID}/programs/p1`)));
+  });
+
+  it("a non-member cannot read the group's shared program", async () => {
+    const outsider = testEnv.authenticatedContext(THIRD_UID);
+    await assertFails(getDoc(doc(outsider.firestore(), `groups/${GROUP_ID}/programs/p1`)));
+  });
+
+  it("a member can read a teammate's individual layer doc", async () => {
+    const other = testEnv.authenticatedContext(OTHER_UID);
+    await assertSucceeds(getDoc(doc(other.firestore(), `groups/${GROUP_ID}/members/${OWNER_UID}`)));
+  });
+
+  it("a non-member cannot read a member's individual layer doc", async () => {
+    const outsider = testEnv.authenticatedContext(THIRD_UID);
+    await assertFails(getDoc(doc(outsider.firestore(), `groups/${GROUP_ID}/members/${OWNER_UID}`)));
+  });
+
+  it("a member cannot write the group doc directly", async () => {
+    const owner = testEnv.authenticatedContext(OWNER_UID);
+    await assertFails(updateDoc(doc(owner.firestore(), `groups/${GROUP_ID}`), { memberUids: [OWNER_UID] }));
+  });
+
+  it("a member cannot write the shared program doc directly", async () => {
+    const owner = testEnv.authenticatedContext(OWNER_UID);
+    await assertFails(setDoc(doc(owner.firestore(), `groups/${GROUP_ID}/programs/p1`), { status: "active" }));
+  });
+
+  it("a member cannot write their own individual layer doc directly", async () => {
+    const owner = testEnv.authenticatedContext(OWNER_UID);
+    await assertFails(setDoc(doc(owner.firestore(), `groups/${GROUP_ID}/members/${OWNER_UID}`), { currentState: null }));
+  });
+});
+
 describe("default-deny for anything else", () => {
   it("rejects reads on an undeclared top-level collection", async () => {
     const owner = testEnv.authenticatedContext(OWNER_UID);

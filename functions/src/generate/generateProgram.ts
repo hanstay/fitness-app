@@ -8,9 +8,10 @@ import {
   programUpdateJsonSchema, programUpdateSchema,
   SessionOutput,
 } from "../lib/schemas";
-import { identifyKeyLifts, computeLiftProgression, PROGRESSION_CONFIG } from "../lib/hevyDerivedData";
 import { needsFullRegen, AthleteProfileSnapshot } from "../lib/programDecisions";
 import { mergeIncrementalSessions } from "../lib/programMerge";
+import { gatherGroundingData } from "./groundingData";
+import { runGenerateGroupProgram } from "./groupProgram";
 
 // Shared framing every path needs: goal-driven training style and how to
 // ground the program in the athlete's actual data.
@@ -173,15 +174,6 @@ WORK IN THIS ORDER:
 
 Call the tool with the adjusted current week; do not respond in prose.`;
 
-interface ActivityDoc {
-  date?: string | null;
-  type?: string;
-  distance_km?: number | null;
-  pace?: string | null;
-  duration_s?: number | null;
-  training_load?: number | null;
-}
-
 // Deterministic (no LLM) one-line signal both the overview and schedule
 // calls receive verbatim, so they anchor on the same "what should this block
 // emphasize" framing rather than each inferring it independently — see the
@@ -234,26 +226,24 @@ export async function runGenerateProgram(uid: string): Promise<{ programId: stri
   const userSnap = await db.doc(`users/${uid}`).get();
   const athlete = userSnap.data()?.athlete;
 
+  // Checked before the days/week precondition below: a group's own
+  // daysPerWeek/fixedSessions drive the shared structure now (see
+  // groupProgram.ts), so a group member's own training_days_per_week/
+  // session_length_minutes — genuinely optional in onboarding — is no
+  // longer required just to check in.
+  const summaryForSource = await db.doc(`users/${uid}/state/summary`).get();
+  const { groupId, activeProgramSource } = summaryForSource.data() ?? {};
+  if (activeProgramSource === "group" && groupId) {
+    return runGenerateGroupProgram(uid, groupId, athlete);
+  }
+
   if (!athlete?.training_days_per_week || !athlete?.session_length_minutes) {
     throw new HttpsError("failed-precondition", "Complete your training profile first (days/week, session length).");
   }
 
-  // Gather grounding data: training load + recent activities (from intervals.icu
-  // sync), the active program, and Hevy progression history. None of these
-  // four reads depends on another's result, so fetch them concurrently
-  // rather than paying for four sequential round trips.
-  const [summarySnap, activitiesSnap, existingActiveSnap, sessionsSnap] = await Promise.all([
-    db.doc(`users/${uid}/state/summary`).get(),
-    db.collection(`users/${uid}/activities`).orderBy("date", "desc").limit(15).get().catch(() => null),
-    db.collection(`users/${uid}/programs`).where("status", "==", "active").get(),
-    db.collection(`users/${uid}/strengthSessions`).orderBy("date", "desc").limit(500).get().catch(() => null),
-  ]);
-  const summary = summarySnap.data();
-  const wellness = summary?.wellness ?? null;
-  const currentTargets = summary?.currentTargets ?? null;
-
-  const activities: ActivityDoc[] = activitiesSnap ? activitiesSnap.docs.map((d) => d.data() as ActivityDoc) : [];
-
+  // The active program doc drives both the full-vs-incremental decision and
+  // (as "comparisonProgram") the adherence block below, so fetch it first.
+  const existingActiveSnap = await db.collection(`users/${uid}/programs`).where("status", "==", "active").get();
   const activeProgramDoc = existingActiveSnap.docs[0] ?? null;
   const activeProgram = activeProgramDoc?.data() ?? null;
 
@@ -262,131 +252,10 @@ export async function runGenerateProgram(uid: string): Promise<{ programId: stri
     activeProgram: activeProgramDoc ? { profileSnapshot: activeProgram?.profileSnapshot, createdAt: activeProgram?.createdAt } : null,
   });
 
-  // Build progression/adherence text from the already-fetched strengthSessions.
-  let progressionBlock = "";
-  let adherenceBlock = "";
-
-  try {
-    const sessions = sessionsSnap
-      ? sessionsSnap.docs.map((d) => ({
-          id: d.id,
-          date: d.data().date as string,
-          title: d.data().title ?? "",
-          start_time: d.data().start_time ?? "",
-          end_time: d.data().end_time ?? "",
-          exercises: d.data().exercises ?? [],
-          source: "hevy",
-        } as any))
-      : [];
-
-    // Build progression block if sessions exist
-    if (sessions.length > 0) {
-      const keyLifts = identifyKeyLifts(sessions, PROGRESSION_CONFIG);
-
-      if (keyLifts.length > 0) {
-        const progressionLines: string[] = ["Performance & progression (from Hevy):"];
-
-        for (const exercise of keyLifts) {
-          try {
-            const prog = computeLiftProgression(exercise, sessions, PROGRESSION_CONFIG);
-            const lines: string[] = [exercise];
-
-            if (prog.e1RM.current) {
-              lines.push(`Current ${Math.round(prog.e1RM.current)}kg e1RM`);
-            }
-            if (prog.e1RM.pr) {
-              lines.push(`PR ${Math.round(prog.e1RM.pr.weight_kg)}kg (${prog.e1RM.pr.date})`);
-            }
-            if (prog.e1RM.trend_6w) {
-              lines.push(`6w trend ${prog.e1RM.trend_6w.direction} ${prog.e1RM.trend_6w.percent_change > 0 ? '+' : ''}${prog.e1RM.trend_6w.percent_change}%`);
-            }
-            if (prog.frequency.last_trained) {
-              lines.push(`last trained ${prog.frequency.last_trained}`);
-            }
-
-            progressionLines.push(`- ${lines.join(", ")}`);
-          } catch {
-            // Skip this exercise if computation fails
-            progressionLines.push(`- ${exercise} (incomplete data)`);
-          }
-        }
-
-        if (sessions.length > 0) {
-          const weeksInData = Math.max(1, Math.round((Date.now() - new Date(sessions[sessions.length - 1].date).getTime()) / (7 * 86400000)));
-          const freqPerWeek = (sessions.length / Math.max(weeksInData, 1)).toFixed(1);
-          progressionLines.push(`Frequency: ${freqPerWeek} sessions/week`);
-        }
-
-        progressionBlock = progressionLines.join("\n");
-      } else {
-        progressionBlock = "Performance & progression: No key lifts identified yet.";
-      }
-    } else {
-      progressionBlock = "Performance & progression: No Hevy data connected yet.";
-    }
-
-    // Build adherence block: compare last program to recent Hevy data
-    if (activeProgram && sessions.length > 0) {
-      const lastWeekDate = new Date();
-      lastWeekDate.setDate(lastWeekDate.getDate() - 7);
-      const lastWeekDateStr = lastWeekDate.toISOString().slice(0, 10);
-
-      const recentSessions = sessions.filter((s) => s.date >= lastWeekDateStr);
-      const plannedExercises = new Set<string>();
-      if (activeProgram.sessions) {
-        for (const session of activeProgram.sessions) {
-          for (const ex of session.exercises || []) {
-            plannedExercises.add(ex.name?.toLowerCase() || "");
-          }
-        }
-      }
-
-      const actualExercises = new Set<string>();
-      for (const session of recentSessions) {
-        // Sessions are stored nested (exercises[].sets[]); the exercise name
-        // lives on the exercise, not the set.
-        for (const ex of session.exercises || []) {
-          if (ex.name) actualExercises.add(ex.name.toLowerCase());
-        }
-      }
-
-      const plannedStr = plannedExercises.size > 0
-        ? Array.from(plannedExercises).slice(0, 5).join(", ")
-        : "N/A";
-      const actualStr = actualExercises.size > 0
-        ? Array.from(actualExercises).slice(0, 5).join(", ")
-        : "N/A";
-
-      adherenceBlock = [
-        "Adherence & deviations (vs last block):",
-        `PLANNED: ${activeProgram.title || "last program"} — key exercises: ${plannedStr}`,
-        `ACTUAL (last 7 days Hevy): ${recentSessions.length} sessions — exercises: ${actualStr}`,
-        recentSessions.length >= 3
-          ? "Status: Good adherence — keeping most planned exercises."
-          : "Status: Below plan — fewer sessions, consider recovery or adjust load.",
-      ].join("\n");
-    } else {
-      adherenceBlock = "Adherence & deviations: No previous program or Hevy data to compare against.";
-    }
-  } catch (err) {
-    // Graceful failure: Hevy data is optional
-    progressionBlock = "Performance & progression: Unable to load Hevy data (continue without it).";
-    adherenceBlock = "Adherence & deviations: Unable to load history (will generate fresh plan).";
-  }
+  const { wellness, currentTargets, activitySummary, progressionBlock, adherenceBlock } =
+    await gatherGroundingData(db, uid, activeProgram);
 
   const today = new Date().toISOString().slice(0, 10);
-
-  const activitySummary = activities.length
-    ? activities
-        .map((a) => {
-          const bits = [a.date, a.type];
-          if (a.distance_km) bits.push(`${a.distance_km}km`);
-          if (a.pace) bits.push(a.pace);
-          if (a.training_load) bits.push(`load ${a.training_load}`);
-          return `- ${bits.filter(Boolean).join(" · ")}`;
-        })
-        .join("\n")
-    : "none synced";
 
   const liftLines = (athlete.current_lifts || [])
     .map((l: { exercise: string; weight_kg: number | null; reps: number | null; date?: string }) =>
