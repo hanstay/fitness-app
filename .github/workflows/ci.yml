@@ -38,12 +38,20 @@ jobs:
       - name: Typecheck / build
         run: npm run build
 
-      # Everything except the emulator-dependent rules suite.
+      # Everything except the emulator-dependent suites (rules + LLM-fixture
+      # integration tests).
       - name: Unit tests
-        run: npx vitest run --exclude "**/test/rules.test.ts"
+        run: npx vitest run --exclude "**/test/rules.test.ts" --exclude "**/*.integration.test.ts"
 
       # Rules suite needs a live Firestore emulator; emulators:exec boots a
       # throwaway one, runs the tests, and tears it down. A demo-* project id
       # keeps the CLI fully offline (no auth / production calls).
       - name: Firestore rules tests
         run: npx firebase-tools emulators:exec --only firestore --project demo-ci "npx vitest run test/rules.test.ts"
+
+      # LLM-backed generation, fixture-mocked (see test/fixtures/llmFixtures.ts
+      # and test/README.md) — real Firestore emulator, no Anthropic API calls,
+      # no key needed. --no-file-parallelism: all four files share one
+      # emulator instance/project, so they must not run concurrently.
+      - name: LLM generation integration tests
+        run: npx firebase-tools emulators:exec --only firestore --project demo-ci "npx vitest run --no-file-parallelism test/*.integration.test.ts"
