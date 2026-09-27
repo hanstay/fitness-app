@@ -116,10 +116,28 @@ export async function extractStructuredJson<T>(params: ExtractJsonParams<T>): Pr
     // correction message -- the Anthropic API requires strictly alternating
     // user/assistant roles, so two consecutive `user` messages (the previous
     // version of this loop) get rejected with a 400 instead of retrying.
+    //
+    // When that assistant turn contains a tool_use block (the model called
+    // the tool but its input failed our zod validator), the API additionally
+    // requires the very next user message to carry a matching tool_result —
+    // a plain-text user message here gets rejected with "tool_use ids were
+    // found without tool_result blocks immediately after". Report the
+    // validation failure through that tool_result (marked as an error)
+    // instead. If the model didn't call the tool at all, there's no tool_use
+    // to pair, so plain text is fine.
     messages.push({ role: "assistant", content: response.content });
     messages.push({
       role: "user",
-      content: `Your previous response failed validation: ${lastError}. Please call the tool again with corrected values.`,
+      content: toolUse
+        ? [
+            {
+              type: "tool_result",
+              tool_use_id: toolUse.id,
+              content: `Your previous response failed validation: ${lastError}. Please call the tool again with corrected values.`,
+              is_error: true,
+            },
+          ]
+        : `Your previous response failed validation: ${lastError}. Please call the tool again with corrected values.`,
     });
   }
 
