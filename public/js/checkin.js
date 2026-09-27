@@ -275,7 +275,14 @@ if (summary?.integrationsStatus?.intervalsIcu?.connected) {
       summary = await loadSummary();
       renderIcuState(summary);
     })
-    .catch((err) => {
+    .catch(async (err) => {
       console.error("[checkin] background intervals.icu sync failed", err);
+      try {
+        summary = await loadSummary();
+        renderIcuState(summary);
+      } catch {
+        // Re-render attempt failed too — the original console.error above
+        // already logged the underlying sync failure; nothing more to do.
+      }
     });
 }
