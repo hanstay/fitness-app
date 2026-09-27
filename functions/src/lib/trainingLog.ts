@@ -276,3 +276,20 @@ export function formatPrescription(program: PrescriptionProgram | null): string 
   });
   return [header, week, ...sessions].filter(Boolean).join("\n");
 }
+
+// ---------------------------------------------------------------------------
+// Cardio activity formatting (intervals.icu)
+// ---------------------------------------------------------------------------
+
+/**
+ * Labels an activity's average HR against the athlete's HR zone boundaries
+ * (intervals.icu's per-zone upper bounds, e.g. [157,167,176,186,191,197,206]
+ * for Z1..Z7). Returns null if either input is missing — callers should omit
+ * the label rather than show a wrong one.
+ */
+export function hrZoneLabel(avgHr: number | null | undefined, hrZones: number[] | null | undefined): string | null {
+  if (avgHr == null || !hrZones || hrZones.length === 0) return null;
+  const idx = hrZones.findIndex((upperBound) => avgHr <= upperBound);
+  const zone = idx === -1 ? hrZones.length : idx + 1;
+  return `Z${zone}`;
+}

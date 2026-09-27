@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   exercisesMatch, formatRecentLog, weeklySessionCounts, formatBestSetsByMonth,
-  buildExerciseVocabulary, formatPrescription,
+  buildExerciseVocabulary, formatPrescription, hrZoneLabel,
 } from "../src/lib/trainingLog";
 import type { StrengthSession, HevySet } from "../src/lib/hevyDerivedData";
 
@@ -120,5 +120,32 @@ describe("formatPrescription", () => {
 
   it("handles no plan", () => {
     expect(formatPrescription(null)).toBe("No current plan to compare against.");
+  });
+});
+
+describe("hrZoneLabel", () => {
+  const zones = [157, 167, 176, 186, 191, 197, 206];
+
+  it.each([
+    [150, "Z1"],
+    [157, "Z1"],
+    [158, "Z2"],
+    [167, "Z2"],
+    [172, "Z3"],
+    [206, "Z7"],
+    [220, "Z7"],
+  ])("labels avg HR %d as %s", (hr, label) => {
+    expect(hrZoneLabel(hr, zones)).toBe(label);
+  });
+
+  it("returns null when hrZones is missing or empty", () => {
+    expect(hrZoneLabel(160, null)).toBeNull();
+    expect(hrZoneLabel(160, undefined)).toBeNull();
+    expect(hrZoneLabel(160, [])).toBeNull();
+  });
+
+  it("returns null when avgHr is missing", () => {
+    expect(hrZoneLabel(null, zones)).toBeNull();
+    expect(hrZoneLabel(undefined, zones)).toBeNull();
   });
 });
