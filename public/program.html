@@ -147,22 +147,27 @@
 
   // A group's shared session skeleton has load_note stripped; overlay this
   // member's own sessionLoads (from groups/{groupId}/members/{uid}) onto it
-  // by day + exercise name — mirrors functions/src/lib/sessionLoads.ts.
+  // by day + exercise name + occurrence order (the Nth "Running" in a session
+  // gets the Nth "Running" load) — mirrors functions/src/lib/sessionLoads.ts.
   function applySessionLoads(sessions, sessionLoads) {
     const loadsByDay = new Map();
     for (const day of sessionLoads || []) {
       const byName = new Map();
-      for (const ex of day.exercises || []) byName.set(ex.name, ex.load_note);
+      for (const ex of day.exercises || []) byName.set(ex.name, [...(byName.get(ex.name) || []), ex.load_note]);
       loadsByDay.set(day.day, byName);
     }
     return (sessions || []).map((session) => {
       const byName = loadsByDay.get(session.day);
       if (!byName) return session;
+      const seen = new Map();
       return {
         ...session,
-        exercises: (session.exercises || []).map((ex) =>
-          byName.has(ex.name) ? { ...ex, load_note: byName.get(ex.name) } : ex
-        ),
+        exercises: (session.exercises || []).map((ex) => {
+          const n = seen.get(ex.name) || 0;
+          seen.set(ex.name, n + 1);
+          const loads = byName.get(ex.name);
+          return loads && n < loads.length ? { ...ex, load_note: loads[n] ?? null } : ex;
+        }),
       };
     });
   }
@@ -212,13 +217,22 @@
         ${innerHtml}
       </section>`;
 
+    // RIR/rest only mean something for sets with a rep target — runs and
+    // conditioning come through as rir "n/a" / rest 0, so leave those out.
+    const loadLine = (ex) => {
+      const bits = [];
+      if (ex.rir && !/^n\/?a$/i.test(String(ex.rir).trim())) bits.push(`RIR ${esc(ex.rir)}`);
+      if (ex.rest_seconds > 0) bits.push(`rest ${ex.rest_seconds}s`);
+      if (ex.load_note) bits.push(esc(ex.load_note));
+      return bits.length ? `<div class="load">${bits.join(" · ")}</div>` : "";
+    };
     const exHtml = (ex, i) => `<div class="ex-card">
       <div class="row">
         <span class="order">${i + 1}</span>
         <span class="name">${esc(ex.name)}</span>
       </div>
       <div class="sets">${ex.sets} × ${esc(ex.reps)}</div>
-      <div class="load">RIR ${esc(ex.rir)} · rest ${ex.rest_seconds}s${ex.load_note ? ` · ${esc(ex.load_note)}` : ""}</div>
+      ${loadLine(ex)}
       ${ex.substitution_note ? `<div class="sub"><span class="pill">Sub: ${esc(ex.substitution_note)}</span></div>` : ""}
     </div>`;
 

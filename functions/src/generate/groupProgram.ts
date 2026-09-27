@@ -77,7 +77,11 @@ fixed weekly sessions — set by the group leader, not inferred — plus every m
    Name every exercise exactly as those lists spell it — prefer the spelling most members use —
    since members log the plan in Hevy and it's compared against their logs by name. For an
    exercise nobody has logged, use Hevy's pattern "Exercise (Equipment)", e.g. "Romanian
-   Deadlift (Dumbbell)". Runs and conditioning items can use plain names.
+   Deadlift (Dumbbell)". That's for lifts: runs and conditioning items get a descriptive name,
+   and every item within one session must have its own distinct name — e.g. "Warm-up jog",
+   "Tempo run", "Cool-down jog", never "Running" three times over. With load_note left null here,
+   put shared pace/intensity targets in "reps" (e.g. "2 km @ tempo pace"); "substitution_note" is
+   only for an alternative exercise, not for cues.
 5. progressionRules/deloadGuidance/warmupNotes: general guidance that works for the group.
 
 Call the tool with the complete shared structure; do not respond in prose.`;
@@ -95,8 +99,9 @@ log with an old import date as a missed upload, not missed training. Your job:
    (their working weight/intensity/pace — e.g. "work up to a top set of 5 at ~82kg", "zone 2,
    conversational pace") grounded in their actual recent sets in the log (the same lift may be
    logged under a slightly different name, e.g. "Barbell Squat" for "Squat (Barbell)" — use
-   those sets). Match every day/name in the skeleton exactly — do not add, remove, or rename
-   days/exercises.
+   those sets). Match every day/name in the skeleton exactly and in the same order, one entry
+   per exercise (if a name appears twice in a day, give two entries in that order) — do not add,
+   remove, or rename days/exercises.
 2. "currentState": this athlete's own honest, data-grounded snapshot (same rules as a solo
    program: cite the actual sets behind a stall or PR, aerobic base from CTL, gaps).
 3. "coachNotes"/"sportNotes"/"nutritionNote": this athlete's own individual guidance (injury/
