@@ -1,5 +1,5 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { extractStructuredJson, MODEL } from "../lib/claude";
 import {
   programSchema, ProgramOutput,
@@ -8,7 +8,10 @@ import {
   programUpdateJsonSchema, programUpdateSchema,
   SessionOutput,
 } from "../lib/schemas";
-import { needsFullRegen, buildContinuationText, AthleteProfileSnapshot } from "../lib/programDecisions";
+import {
+  decideRegen, personalStructuralChange, inferBlockStart, roadmapForAdvance, buildContinuationText,
+  normalizeRoadmap, AthleteProfileSnapshot,
+} from "../lib/programDecisions";
 import { mergeIncrementalSessions } from "../lib/programMerge";
 import { gatherGroundingData } from "./groundingData";
 import { runGenerateGroupProgram } from "./groupProgram";
@@ -86,14 +89,19 @@ WORK IN THIS ORDER:
    Use the given "current phase signal" line to anchor what THIS week's phase should emphasize
    — the other call is building the actual week from the same signal, so stay consistent with it.
 
-   CONTINUING AN EXISTING PLAN: when a "Previous plan" section is given, the athlete is already
-   partway through a macrocycle. Do NOT restart at the first phase (e.g. "Base") or repeat phases
-   marked COMPLETED. The new roadmap's first phase is the block marked "PROGRAM THIS BLOCK NOW",
-   followed by the phases still remaining (re-size/re-date them from the fresh data if needed).
-   Only step back to an earlier emphasis if the data clearly shows a long layoff or regression,
-   and say so explicitly in currentState. Title, goalSummary, currentState, progressionRules,
-   deloadGuidance, warmupNotes, coachNotes, sportNotes and nutritionNote must all be written for
-   THIS block — not copied from, or phrased as if still in, a completed phase.
+   MOVING TO THE NEXT PHASE: when a "Current plan — MOVING TO ITS NEXT PHASE" section is given,
+   the roadmap is FIXED — copy it into "roadmap" exactly as given (same phases, names and dates)
+   and keep "events" consistent with it. Everything else is for the phase marked "PROGRAM THIS
+   BLOCK NOW": title, currentState, progressionRules, deloadGuidance, warmupNotes, coachNotes,
+   sportNotes and nutritionNote describe how to train THIS phase, following that phase's
+   focus/lifting/running/nutrition — not the phase just completed.
+
+   REDESIGNING AN EXISTING PLAN: when a "Previous plan (REDESIGN ...)" section is given, the
+   athlete is partway through a macrocycle. Do NOT restart at the first phase (e.g. "Base") or
+   repeat phases marked COMPLETED: the new roadmap's first phase is the block marked "PROGRAM
+   THIS BLOCK NOW" (or, if every phase is complete, the next logical block), followed by the
+   phases still needed. Only step back to an earlier emphasis if the data clearly shows a long
+   layoff or regression, and say so in currentState. Write all guidance for THIS block.
 
    DATE EVERY PHASE: give each roadmap phase a "startDate"/"endDate" (ISO YYYY-MM-DD, inclusive)
    alongside the human-readable "dates" label. The first phase's startDate MUST be today's date
@@ -120,8 +128,8 @@ the same athlete data — you won't see its output, so ground your decisions in 
 data and the same "current phase signal" line you're given, rather than inventing your own
 framing.
 
-If a "Previous plan" section is given, build the week for the block marked "PROGRAM THIS BLOCK
-NOW" — the athlete has completed the earlier phases, so don't program a repeat of them.
+If a plan section marks a phase "PROGRAM THIS BLOCK NOW", build the week for that phase — follow
+its focus/lifting/running guidance, and don't program a repeat of the phases marked COMPLETED.
 
 WORK IN THIS ORDER:
 
@@ -243,11 +251,9 @@ function computePhaseSignal(
 export const generateProgram = onCall({ secrets: ["ANTHROPIC_API_KEY"], timeoutSeconds: 300 }, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
   try {
-    // Explicit escape hatch for needsFullRegen's automatic triggers: lets the
-    // check-in "Start a new block now" checkbox force a full re-periodization
-    // even when nothing structural changed and the program isn't stale yet —
-    // e.g. an athlete whose active program predates phase-boundary tracking
-    // (see programDecisions.ts) and so has no roadmap dates to detect against.
+    // The check-in "Move to the next phase now" checkbox: advance to the next
+    // phase of the existing roadmap now rather than waiting for the phase's
+    // dates to end (see decideRegen in programDecisions.ts).
     const force = request.data?.force === true;
     return await runGenerateProgram(request.auth.uid, { force });
   } catch (err) {
@@ -293,14 +299,25 @@ export async function runGenerateProgram(
   const activeProgramDoc = existingActiveSnap.docs[0] ?? null;
   const activeProgram = activeProgramDoc?.data() ?? null;
 
-  const fullRegen = opts?.force || needsFullRegen({
-    athlete: athlete as AthleteProfileSnapshot,
-    activeProgram: activeProgramDoc
-      ? { profileSnapshot: activeProgram?.profileSnapshot, createdAt: activeProgram?.createdAt, roadmap: activeProgram?.roadmap }
-      : null,
+  const createdAtMs = activeProgram?.createdAt?.toMillis?.();
+  // Programs saved before blockStartedAt existed have only createdAt, which
+  // every weekly update reset — recover the real block start from history.
+  let blockStartedAtMs: number | null = activeProgram?.blockStartedAt?.toMillis?.() ?? null;
+  if (activeProgram && blockStartedAtMs == null) {
+    const history = await db.collection(`users/${uid}/programs`).orderBy("createdAt", "desc").limit(30).get();
+    blockStartedAtMs = inferBlockStart(history.docs.map((d) => ({
+      createdAtMs: d.data().createdAt?.toMillis?.() ?? null,
+      roadmap: d.data().roadmap,
+      blockStartedAtMs: d.data().blockStartedAt?.toMillis?.() ?? null,
+    })));
+  }
+  const decision = decideRegen({
+    hasActiveProgram: activeProgram != null,
+    structuralChange: activeProgram != null && personalStructuralChange(athlete as AthleteProfileSnapshot, activeProgram),
+    state: { roadmap: activeProgram?.roadmap, currentPhaseIndex: activeProgram?.currentPhaseIndex, blockStartedAtMs },
+    force: opts?.force === true,
   });
 
-  const createdAtMs = activeProgram?.createdAt?.toMillis?.();
   const { wellness, currentTargets, freshnessBlock, activitySummary, trainingLogBlock, prescriptionBlock, exerciseVocabulary, hasHevyLog } =
     await gatherGroundingData(db, uid, activeProgram
       ? { ...activeProgram, createdAtDate: createdAtMs != null ? new Date(createdAtMs).toISOString().slice(0, 10) : null }
@@ -323,14 +340,14 @@ export async function runGenerateProgram(
 
   const phaseSignal = computePhaseSignal(athlete.events || [], wellness, today);
 
-  // Full regens continue the active program's roadmap rather than rebuilding
-  // the macrocycle from its first phase — see resolveContinuation.
-  const continuationText = fullRegen && activeProgram
+  // Where the athlete is in their existing plan: for "advance", the fixed
+  // roadmap and the phase to program; for a redesign, where to continue from.
+  const continuationText = decision.mode !== "incremental" && activeProgram
     ? buildContinuationText({
+        mode: decision.mode,
         roadmap: activeProgram.roadmap,
-        createdAtDate: createdAtMs != null ? new Date(createdAtMs).toISOString().slice(0, 10) : null,
-        nowDate: today,
-        force: opts?.force === true,
+        targetIndex: decision.targetPhaseIndex ?? 0,
+        reason: decision.reason,
       })
     : "";
 
@@ -381,7 +398,7 @@ export async function runGenerateProgram(
   let mergedProgram: ProgramOutput;
   let changeSummary: string[] | undefined;
 
-  if (fullRegen) {
+  if (decision.mode !== "incremental") {
     const [overview, schedule] = await Promise.all([
       extractStructuredJson({
         system: OVERVIEW_SYSTEM_PROMPT,
@@ -404,6 +421,18 @@ export async function runGenerateProgram(
     ]);
 
     const candidate = { ...overview, ...schedule };
+    if (decision.mode === "advance") {
+      // Moving to the next phase keeps the athlete's periodization: the
+      // roadmap is carried over (only re-dated if they moved on early), not
+      // whatever the model wrote for it.
+      const from = activeProgram!.roadmap[decision.fromPhaseIndex!];
+      const to = activeProgram!.roadmap[decision.targetPhaseIndex!];
+      candidate.roadmap = roadmapForAdvance(normalizeRoadmap(activeProgram!.roadmap), decision.targetPhaseIndex!, today);
+      changeSummary = [
+        `Moved to the next phase of your plan: ${from?.phase ?? "previous phase"} → ${to?.phase ?? "next phase"}.`,
+        ...(overview.currentState?.highlights ?? []),
+      ];
+    }
     const parsed = programSchema.safeParse(candidate);
     if (!parsed.success) {
       throw new Error(`Merged program failed validation: ${parsed.error.message}`);
@@ -448,7 +477,7 @@ export async function runGenerateProgram(
       split: activeProgram!.split,
       daysPerWeek: activeProgram!.daysPerWeek,
       events: activeProgram!.events,
-      roadmap: activeProgram!.roadmap,
+      roadmap: normalizeRoadmap(activeProgram!.roadmap),
       progressionRules: activeProgram!.progressionRules,
       deloadGuidance: activeProgram!.deloadGuidance,
       warmupNotes: activeProgram!.warmupNotes,
@@ -478,6 +507,14 @@ export async function runGenerateProgram(
     ...mergedProgram,
     ...(changeSummary ? { changeSummary } : {}),
     profileSnapshot: athlete,
+    // Where this program is in its periodization. A weekly update carries
+    // both forward unchanged (so the block's age isn't reset every week);
+    // moving to a new phase or a redesign starts a new block today.
+    currentPhaseIndex: decision.mode === "incremental" ? decision.fromPhaseIndex ?? 0
+      : decision.mode === "advance" ? decision.targetPhaseIndex : 0,
+    blockStartedAt: decision.mode === "incremental" && blockStartedAtMs != null
+      ? Timestamp.fromMillis(blockStartedAtMs)
+      : FieldValue.serverTimestamp(),
   });
   batch.update(db.doc(`users/${uid}/state/summary`), {
     currentProgramId: newRef.id,

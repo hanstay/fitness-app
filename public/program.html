@@ -128,10 +128,12 @@
 
   const main = document.getElementById("mainContent");
   const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-  // Which roadmap phase today falls into, by startDate/endDate (ISO, inclusive).
-  // Falls back to phase 0 when dates aren't fully structured (older programs).
-  const currentPhaseIndex = (roadmap) => {
+  // Which roadmap phase the plan is programming: the phase stored on the
+  // program (set whenever it moves to a new phase), else by startDate/endDate
+  // (ISO, inclusive) for older programs, else the first phase.
+  const currentPhaseIndex = (roadmap, storedIndex) => {
     if (!roadmap || !roadmap.length) return 0;
+    if (Number.isInteger(storedIndex)) return Math.min(Math.max(storedIndex, 0), roadmap.length - 1);
     if (!roadmap.every((ph) => ph.startDate && ph.endDate)) return 0;
     const today = new Date().toISOString().slice(0, 10);
     const idx = roadmap.findIndex((ph) => today >= ph.startDate && today <= ph.endDate);
@@ -237,7 +239,7 @@
 
     // ---- Roadmap: compact, always-visible phase strip ----
     if ((p.roadmap || []).length) {
-      const curPhase = currentPhaseIndex(p.roadmap);
+      const curPhase = currentPhaseIndex(p.roadmap, p.currentPhaseIndex);
       const phasesHtml = p.roadmap.map((ph, i) => `
         <div class="ph${i === curPhase ? " current" : ""}">
           <div class="ph-name">${esc(ph.phase)}${i === curPhase ? '<span class="phase-badge">This block</span>' : ""}</div>

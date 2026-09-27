@@ -12,7 +12,9 @@ import {
   memberLayerSchema, memberLayerJsonSchema,
   ProgramOutput,
 } from "../lib/schemas";
-import { needsGroupFullRegen, buildContinuationText, resolveContinuation, AthleteProfileSnapshot } from "../lib/programDecisions";
+import {
+  decideRegen, groupStructuralChange, roadmapForAdvance, buildContinuationText, normalizeRoadmap, AthleteProfileSnapshot,
+} from "../lib/programDecisions";
 import { gatherGroundingData, loadExerciseVocabulary } from "./groundingData";
 import type { PrescriptionProgram } from "../lib/trainingLog";
 import { applySessionLoads } from "../lib/sessionLoads";
@@ -52,11 +54,13 @@ fixed weekly sessions — set by the group leader, not inferred — plus every m
    the previous phase's endDate (contiguous, no gaps/overlaps), and the last phase ends at/around
    the nearest event's date when one is given. Code reads these dates to detect a phase change, so
    only leave them null if a phase is genuinely undatable (no event to anchor a timeline).
-   CONTINUING AN EXISTING PLAN: when a "Previous plan" section is given, the group is already
-   partway through a macrocycle. Do NOT restart at the first phase (e.g. "Base") or repeat phases
-   marked COMPLETED: the new roadmap starts with the block marked "PROGRAM THIS BLOCK NOW",
-   followed by the phases still remaining, and weeklyStructure/sessions build that block's week.
-   Write title, goalSummary, progressionRules, deloadGuidance and warmupNotes for THIS block.
+   MOVING TO THE NEXT PHASE: when a "Current plan — MOVING TO ITS NEXT PHASE" section is given,
+   the roadmap is FIXED — copy it into "roadmap" exactly as given. weeklyStructure/sessions build
+   the week for the phase marked "PROGRAM THIS BLOCK NOW" (following its focus/lifting/running),
+   and title, progressionRules, deloadGuidance and warmupNotes are written for that phase.
+   REDESIGNING AN EXISTING PLAN: when a "Previous plan (REDESIGN ...)" section is given, don't
+   restart at the first phase or repeat COMPLETED phases — the new roadmap starts with the block
+   marked "PROGRAM THIS BLOCK NOW" (or the next logical block if all are complete).
 3. "daysPerWeek": set to EXACTLY the group's stated training days/week — this is a hard constraint,
    not a suggestion. "weeklyStructure": the group's stated fixed weekly sessions are already
    committed — place each on its given day, don't stack a conflicting hard session on top of it,
@@ -214,7 +218,7 @@ export async function runGenerateGroupProgram(
   groupId: string,
   athlete: AthleteProfileSnapshotFull,
   opts?: { force?: boolean }
-): Promise<{ programId: string } & ProgramOutput> {
+): Promise<{ programId: string } & ProgramOutput & { changeSummary?: string[] }> {
   const db = getFirestore();
   const group = await loadGroup(db, groupId);
   const memberUids = group.memberUids;
@@ -232,37 +236,40 @@ export async function runGenerateGroupProgram(
   const activeGroupProgramDoc = existingActiveSnap.docs[0] ?? null;
   const activeGroupProgram = activeGroupProgramDoc?.data() ?? null;
 
-  const fullRegen = opts?.force || needsGroupFullRegen({
-    memberAthletes,
-    group: { goal: group.goal, daysPerWeek: group.daysPerWeek, events: group.events, fixedSessions: group.fixedSessions },
-    activeProgram: activeGroupProgramDoc
-      ? {
-          profileSnapshots: activeGroupProgram?.profileSnapshots,
-          groupSnapshot: activeGroupProgram?.groupSnapshot,
-          createdAt: activeGroupProgram?.createdAt,
-          roadmap: activeGroupProgram?.roadmap,
-        }
-      : null,
+  // A group program's createdAt only changes when Stage A runs (weekly
+  // check-ins only redo Stage B), so it's a sound block start for programs
+  // saved before blockStartedAt existed.
+  const blockStartedAtMs: number | null =
+    activeGroupProgram?.blockStartedAt?.toMillis?.() ?? activeGroupProgram?.createdAt?.toMillis?.() ?? null;
+  const decision = decideRegen({
+    hasActiveProgram: activeGroupProgram != null,
+    structuralChange: activeGroupProgram != null && groupStructuralChange({
+      memberAthletes,
+      group: { goal: group.goal, daysPerWeek: group.daysPerWeek, events: group.events, fixedSessions: group.fixedSessions },
+      activeProgram: { profileSnapshots: activeGroupProgram.profileSnapshots, groupSnapshot: activeGroupProgram.groupSnapshot },
+    }),
+    state: { roadmap: activeGroupProgram?.roadmap, currentPhaseIndex: activeGroupProgram?.currentPhaseIndex, blockStartedAtMs },
+    force: opts?.force === true,
   });
+  const today = new Date().toISOString().slice(0, 10);
 
   let sharedProgram: ProgramSharedOutput;
   let groupProgramRef = activeGroupProgramDoc?.ref ?? null;
 
-  if (fullRegen) {
+  if (decision.mode !== "incremental") {
     const groupContextText = buildGroupContextText(group);
     const memberVocabularies = Object.fromEntries(
       await Promise.all(memberUids.map(async (muid) => [muid, await loadExerciseVocabulary(db, muid)] as const))
     );
     const groupProfileText = buildGroupProfileText(memberAthletes, memberVocabularies);
-    // Continue the active group program's roadmap rather than rebuilding the
-    // macrocycle from its first phase — see resolveContinuation.
-    const createdAtMs = activeGroupProgram?.createdAt?.toMillis?.();
+    // Where the group is in its existing plan: for "advance", the fixed
+    // roadmap and the phase to program; for a redesign, where to continue from.
     const continuationText = activeGroupProgram
       ? buildContinuationText({
+          mode: decision.mode,
           roadmap: activeGroupProgram.roadmap,
-          createdAtDate: createdAtMs != null ? new Date(createdAtMs).toISOString().slice(0, 10) : null,
-          nowDate: new Date().toISOString().slice(0, 10),
-          force: opts?.force === true,
+          targetIndex: decision.targetPhaseIndex ?? 0,
+          reason: decision.reason,
         })
       : "";
     const overview = await extractStructuredJson({
@@ -279,6 +286,10 @@ export async function runGenerateGroupProgram(
     // Which events appear and their weeksOut are enforced in code, not left
     // to the model — see eventReconciliation.ts for why.
     sharedProgram = { ...overview, events: reconcileEvents(overview.events, group.events) };
+    if (decision.mode === "advance") {
+      // Moving to the next phase keeps the group's periodization — see generateProgram.ts.
+      sharedProgram.roadmap = roadmapForAdvance(normalizeRoadmap(activeGroupProgram!.roadmap), decision.targetPhaseIndex!, today);
+    }
 
     const batch = db.batch();
     existingActiveSnap.forEach((d) => batch.update(d.ref, { status: "archived" }));
@@ -290,12 +301,15 @@ export async function runGenerateGroupProgram(
       ...sharedProgram,
       profileSnapshots: memberAthletes,
       groupSnapshot: { goal: group.goal, daysPerWeek: group.daysPerWeek, events: group.events, fixedSessions: group.fixedSessions },
+      currentPhaseIndex: decision.mode === "advance" ? decision.targetPhaseIndex : 0,
+      blockStartedAt: FieldValue.serverTimestamp(),
     });
     await batch.commit();
     groupProgramRef = newRef;
   } else {
     sharedProgram = activeGroupProgram as ProgramSharedOutput;
   }
+  const currentPhaseIndex = decision.mode === "advance" ? decision.targetPhaseIndex! : decision.mode === "full" ? 0 : decision.fromPhaseIndex ?? 0;
 
   // Stage B: this member's own layer, grounded in their own data, against
   // the (possibly just-regenerated) shared skeleton.
@@ -310,9 +324,7 @@ export async function runGenerateGroupProgram(
   // it which block the shared program is in — otherwise those notes can keep
   // describing a phase the group has already moved past.
   const currentBlock = (() => {
-    const roadmap = sharedProgram.roadmap ?? [];
-    const resolved = resolveContinuation({ roadmap, createdAtDate: null, nowDate: new Date().toISOString().slice(0, 10), force: false });
-    const phase = resolved ? roadmap[Math.min(resolved.targetIndex, roadmap.length - 1)] : null;
+    const phase = (sharedProgram.roadmap ?? [])[currentPhaseIndex];
     return phase ? `${phase.phase}${phase.dates ? ` (${phase.dates})` : ""} — focus: ${phase.focus}` : "not specified";
   })();
 
@@ -381,5 +393,13 @@ export async function runGenerateGroupProgram(
     coachNotes: memberLayer.coachNotes,
     sportNotes: memberLayer.sportNotes,
     nutritionNote: memberLayer.nutritionNote,
+    ...(decision.mode === "advance"
+      ? {
+          changeSummary: [
+            `Moved to the next phase of the group plan: ${activeGroupProgram?.roadmap?.[decision.fromPhaseIndex!]?.phase ?? "previous phase"} → ${sharedProgram.roadmap[currentPhaseIndex]?.phase ?? "next phase"}.`,
+            ...(memberLayer.currentState?.highlights ?? []),
+          ],
+        }
+      : {}),
   };
 }
