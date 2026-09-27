@@ -293,3 +293,14 @@ export function hrZoneLabel(avgHr: number | null | undefined, hrZones: number[] 
   const zone = idx === -1 ? hrZones.length : idx + 1;
   return `Z${zone}`;
 }
+
+/** "Z1 ≤157, Z2 158-167, ..." — the athlete's HR zone boundaries, shown once above the activity list. */
+export function formatHrZoneLegend(hrZones: number[]): string {
+  const ranges = hrZones.map((upper, i) => {
+    if (i === 0) return `Z1 ≤${upper}`;
+    const lower = hrZones[i - 1] + 1;
+    const isLast = i === hrZones.length - 1;
+    return `Z${i + 1} ${isLast ? `${lower}+` : `${lower}-${upper}`}`;
+  });
+  return `HR zones (bpm, per most recent activity): ${ranges.join(", ")}`;
+}

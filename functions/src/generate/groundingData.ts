@@ -12,7 +12,7 @@ import type { StrengthSession } from "../lib/hevyDerivedData";
 import {
   formatRecentLog, formatBestSetsByMonth, weeklySessionCounts,
   buildExerciseVocabulary, formatExerciseVocabulary, formatPrescription, PrescriptionProgram,
-  hrZoneLabel,
+  hrZoneLabel, formatHrZoneLegend,
 } from "../lib/trainingLog";
 
 export interface ActivityDoc {
@@ -54,16 +54,6 @@ function tsToDate(ts: unknown): string | null {
 
 function daysBetween(from: string, to: string): number {
   return Math.round((new Date(to).getTime() - new Date(from).getTime()) / DAY_MS);
-}
-
-/** "Z1 0-157, Z2 158-167, ..." — the athlete's HR zone boundaries, shown once above the activity list. */
-function formatHrZoneLegend(hrZones: number[]): string {
-  const ranges = hrZones.map((upper, i) => {
-    const lower = i === 0 ? 0 : hrZones[i - 1] + 1;
-    const isLast = i === hrZones.length - 1;
-    return `Z${i + 1} ${lower}-${upper}${isLast ? "+" : ""}`;
-  });
-  return `HR zones (bpm): ${ranges.join(", ")}`;
 }
 
 function toStrengthSessions(docs: QueryDocumentSnapshot[]): StrengthSession[] {

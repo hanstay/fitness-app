@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   exercisesMatch, formatRecentLog, weeklySessionCounts, formatBestSetsByMonth,
-  buildExerciseVocabulary, formatPrescription, hrZoneLabel,
+  buildExerciseVocabulary, formatPrescription, hrZoneLabel, formatHrZoneLegend,
 } from "../src/lib/trainingLog";
 import type { StrengthSession, HevySet } from "../src/lib/hevyDerivedData";
 
@@ -147,5 +147,19 @@ describe("hrZoneLabel", () => {
   it("returns null when avgHr is missing", () => {
     expect(hrZoneLabel(null, zones)).toBeNull();
     expect(hrZoneLabel(undefined, zones)).toBeNull();
+  });
+});
+
+describe("formatHrZoneLegend", () => {
+  it("formats a 7-zone boundary array with an open bottom and top zone", () => {
+    expect(formatHrZoneLegend([157, 167, 176, 186, 191, 197, 206])).toBe(
+      "HR zones (bpm, per most recent activity): Z1 ≤157, Z2 158-167, Z3 168-176, Z4 177-186, Z5 187-191, Z6 192-197, Z7 198+"
+    );
+  });
+
+  it("works with fewer than 7 zones", () => {
+    expect(formatHrZoneLegend([157, 167, 176])).toBe(
+      "HR zones (bpm, per most recent activity): Z1 ≤157, Z2 158-167, Z3 168+"
+    );
   });
 });
