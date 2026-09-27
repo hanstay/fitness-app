@@ -266,3 +266,16 @@ try {
   console.error("[checkin] failed to load summary", err);
   showError("Couldn't load your intervals.icu status — Hevy import and program updates below still work.");
 }
+
+// Fire-and-forget: runs in parallel with the user's own Hevy CSV export/
+// upload instead of adding latency later, at "Update my plan" time.
+if (summary?.integrationsStatus?.intervalsIcu?.connected) {
+  httpsCallable(functions, "syncIntervalsActivities")()
+    .then(async () => {
+      summary = await loadSummary();
+      renderIcuState(summary);
+    })
+    .catch((err) => {
+      console.error("[checkin] background intervals.icu sync failed", err);
+    });
+}
