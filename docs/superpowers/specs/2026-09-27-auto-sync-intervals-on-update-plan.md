@@ -1,37 +1,59 @@
-# Auto-Sync intervals.icu on "Update My Plan"
+# Auto-Sync intervals.icu on Check-In Page Load
 
 **Date**: 2026-09-27
 **Status**: Approved, ready for implementation
-**Scope**: Trigger an intervals.icu activity sync automatically when the user taps "Update my plan" on the check-in page, so program generation grounds on fresh cardio data without a separate manual "Sync Now" step. No other trigger point (dashboard, onboarding background generation) is touched.
+**Scope**: Trigger an intervals.icu activity sync automatically the moment the check-in page loads (client-side), rather than only on manual "Sync Now" or bundled into the "Update my plan" click. No other page or trigger point is touched.
+
+**Revision note:** this replaces the original design (sync triggered server-side, bundled into the `generateProgram` onCall when "Update my plan" is clicked). The user pointed out that syncing on page-load instead lets the intervals.icu network round-trip run in parallel with the user's own Hevy CSV export/upload — which takes real wall-clock time on their end — rather than adding that latency later, at generation time.
 
 ## Motivation
 
-`HANDOFF-check-in-and-plan-updates.md`'s open-work list (section 6, "Next up: better run data from intervals.icu") names this as priority 1: *"Auto-sync intervals.icu when 'Update my plan' is tapped. Today it only syncs on 'Sync now'."* Right now, a user who hasn't separately pressed "Sync Now" gets a plan update grounded on whatever intervals.icu data happened to be synced last — which could be stale by however long it's been since their last manual sync, undermining the point of the HR-zone/interval-summary work that just shipped (2026-09-27-run-hr-zone-interval-context).
+`HANDOFF-check-in-and-plan-updates.md`'s open-work list (section 6) names this as priority 1: *"Auto-sync intervals.icu when 'Update my plan' is tapped. Today it only syncs on 'Sync now'."* A user who hasn't separately pressed "Sync Now" gets a plan update grounded on however-stale intervals.icu data. Firing the sync on page entry instead of on the update-plan click means: by the time the user has exported/uploaded their Hevy CSV and pressed "Update my plan," the intervals.icu sync has very likely already finished in the background — a free parallelism win, since the two are otherwise-independent slow operations happening on the same page visit.
 
 ## Where this hooks in
 
-`functions/src/generate/generateProgram.ts` exports exactly one client-callable entry point, `generateProgram` (an `onCall` handler). Client-side, it has exactly one caller: `public/js/checkin.js`'s `regenBtn` click handler ("Update my plan"). A separate, unrelated path — `onProgramGenerationRequested.ts`, a background Firestore trigger — handles the *initial* onboarding generation asynchronously and calls the shared `runGenerateProgram(uid, opts)` function directly, never through the `generateProgram` onCall. So hooking the sync into the `generateProgram` onCall handler itself (not into `runGenerateProgram`) scopes this exactly to "user tapped Update my plan," with zero risk of touching the onboarding background path.
+`public/js/checkin.js`'s init section already does, on every page load:
+
+```javascript
+let summary = null;
+try {
+  summary = await loadSummary();
+  renderIcuState(summary);
+} catch (err) {
+  console.error("[checkin] failed to load summary", err);
+  showError("Couldn't load your intervals.icu status — Hevy import and program updates below still work.");
+}
+```
+
+This is purely a client-side change. `functions/src/generate/generateProgram.ts` (and everything server-side) is untouched — this spec supersedes the prior one's server-side hook entirely, it doesn't add to it.
 
 ## Change
 
-In `functions/src/generate/generateProgram.ts`'s `generateProgram` onCall handler, immediately after the `request.auth` check and before calling `runGenerateProgram`:
+Immediately after the existing `try { summary = await loadSummary(); renderIcuState(summary); } catch {...}` block in `checkin.js`'s init section, add:
 
-1. Read `credentials/{uid}.intervalsIcu.accessToken` from Firestore.
-2. If no token is stored (intervals.icu never connected), skip straight to `runGenerateProgram` — no wasted call, no error.
-3. If a token exists, call the existing `syncIntervalsActivitiesForUser(uid, accessToken)` (from `lib/intervalsClient.ts` — the same function `syncIntervalsActivities.ts`'s manual "Sync Now" callable already uses) inside a try/catch.
-   - On success: proceed to `runGenerateProgram` as normal. Nothing else changes.
-   - On failure: soft-fail, mirroring `syncIntervalsActivities.ts`'s existing error handling exactly — update `users/{uid}/state/summary.integrationsStatus.intervalsIcu.lastError` with the error message, and additionally set `connected: false` if the failure looks like an auth error (message contains `"(401)"` or `"(403)"`, same substring check already used in `syncIntervalsActivities.ts`). Then proceed to `runGenerateProgram` regardless — a sync failure never blocks plan generation.
+```javascript
+if (summary?.integrationsStatus?.intervalsIcu?.connected) {
+  httpsCallable(functions, "syncIntervalsActivities")()
+    .then(async () => {
+      summary = await loadSummary();
+      renderIcuState(summary);
+    })
+    .catch((err) => {
+      console.error("[checkin] background intervals.icu sync failed", err);
+    });
+}
+```
 
-No client-side change: `checkin.js`'s `regenBtn` handler is untouched — it already just calls `generateProgram` and renders the result. The sync becomes invisible extra work the server does before generating, per the "silent" UX decision below.
+This is fire-and-forget: it does not block page render or any other init-section work, and it is only attempted when the user has intervals.icu connected already (`summary.integrationsStatus.intervalsIcu.connected`) — no stored token means nothing to sync, so nothing is called.
 
-## UX decision
+On success, `renderIcuState` re-renders using the existing logic already used everywhere else in this file (the manual "Sync Now" button, the "Connect" button) — updating the last-synced timestamp and wellness (CTL/ATL/TSB) stats in place, silently, exactly as agreed. No loading indicator, no status text, no success/error message shown to the user for this specific call.
 
-The "Update my plan" success message stays exactly as it is today (no "synced N activities" note added). The sync is invisible plumbing, not a separate user-facing step — consistent with the existing UX, where the user asked for a plan update and got one; whether intervals.icu happened to have new data first is an implementation detail.
+The existing manual "Sync Now" button (`icuSyncBtn`) is untouched and stays fully independent — a user can still press it any time, even while (or after) the background sync has run. `syncIntervalsActivitiesForUser` is idempotent (each sync does a full `batch.set` per activity), so two syncs racing or running back-to-back is harmless, just mildly redundant network/API usage — not worth guarding against for a page that's realistically visited a few times a week.
 
 ## Error handling
 
-Soft-fail only, as specified above. This introduces no new failure mode: worst case, a sync failure leaves `runGenerateProgram` grounding on the same (already-there) data it would have used if this feature didn't exist at all — never worse than today's behavior, and typically better since most calls will pull fresh data first.
+Silent per the agreed UX: on failure, `console.error` only — no `showError`, no change to the intervals.icu section's displayed state (it simply keeps showing whatever was last successfully synced). This is deliberately different from the manual "Sync Now" button's error handling (which does show an error, since that's a click the user is actively waiting on) — a background sync the user didn't ask for shouldn't surface an error they didn't cause and can't immediately act on. `integrationsStatus.intervalsIcu.lastError` still gets updated server-side by `syncIntervalsActivities`'s own existing error handling regardless of what the client does with it, so the failure isn't lost — it's just not surfaced on this particular page load.
 
 ## Testing
 
-`generateProgram.ts`'s `generateProgram` onCall wrapper is a thin, currently-untested wrapper around the already-tested `runGenerateProgram` (covered by `test/generateProgram.integration.test.ts`, LLM mocked). The new code added here calls `syncIntervalsActivitiesForUser`, which is itself not independently unit tested (real intervals.icu API dependency, same convention already established for the rest of `lib/intervalsClient.ts` — see the prior HR-zone-context spec's Testing section). No new unit tests are planned for this change; verification is live: deploy, tap "Update my plan" on the real check-in page, and confirm via Cloud Functions logs and/or the Firestore `integrationsStatus.intervalsIcu.lastSyncedAt` timestamp that a sync ran immediately before generation.
+`checkin.js` has no unit test suite (this project's client-side JS is manually verified, consistent with every other change to this file this session). Verification is live: open the check-in page with intervals.icu connected, confirm (via Cloud Functions logs or the Firestore `integrationsStatus.intervalsIcu.lastSyncedAt` timestamp) that a sync fires immediately on load, and confirm the page's intervals.icu stats update in place once it completes, with no visible loading/error state either way.
