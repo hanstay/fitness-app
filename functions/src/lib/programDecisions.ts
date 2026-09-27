@@ -187,3 +187,85 @@ export function needsGroupFullRegen(params: {
   if (now.getTime() - createdAtMs > SIX_WEEKS_MS) return true;
   return false;
 }
+
+export interface RoadmapPhaseForContinuation extends RoadmapPhaseForDecision {
+  phase: string;
+  dates?: string | null;
+  focus?: string | null;
+}
+
+/**
+ * Where a full regeneration should pick the periodization back up, given
+ * the roadmap it's replacing. Without this, a full regen only saw the
+ * athlete's profile and rebuilt the macrocycle from its first phase
+ * starting today — so "Start a new block" (or crossing a phase boundary)
+ * dropped the athlete back into "Base" instead of moving them forward.
+ *
+ * targetIndex is the roadmap phase to program now: the phase today falls
+ * in, or — when forced ("start a new block now") — at least the phase
+ * after the one active at generation, so a forced regen always advances.
+ * A value equal to roadmap.length means every phase is complete. Returns
+ * null when there is no previous roadmap to continue from.
+ */
+export function resolveContinuation(params: {
+  roadmap: RoadmapPhaseForContinuation[] | null | undefined;
+  createdAtDate: string | null;
+  nowDate: string;
+  force: boolean;
+}): { targetIndex: number; datesStructured: boolean } | null {
+  const roadmap = params.roadmap ?? [];
+  if (roadmap.length === 0) return null;
+  const datesStructured = roadmap.every((p) => p.startDate && p.endDate);
+  // Undated (legacy) roadmaps: assume the program was generated at its first
+  // phase — the same fallback program.html/advice.html use for "This block".
+  const clamp = (i: number | null, fallback: number) => (i == null ? fallback : Math.max(0, i));
+  const atGeneration = clamp(params.createdAtDate ? phaseIndexForDate(roadmap, params.createdAtDate) : null, 0);
+  const now = clamp(phaseIndexForDate(roadmap, params.nowDate), atGeneration);
+  const target = params.force ? Math.max(now, atGeneration + 1) : now;
+  return { targetIndex: Math.min(target, roadmap.length), datesStructured };
+}
+
+/**
+ * Prompt text telling a full regeneration to continue the previous roadmap
+ * (see resolveContinuation) rather than restart it. Empty string when there
+ * is nothing to continue from.
+ */
+export function buildContinuationText(params: {
+  roadmap: RoadmapPhaseForContinuation[] | null | undefined;
+  createdAtDate: string | null;
+  nowDate: string;
+  force: boolean;
+}): string {
+  const resolved = resolveContinuation(params);
+  if (!resolved) return "";
+  const roadmap = params.roadmap as RoadmapPhaseForContinuation[];
+  const { targetIndex, datesStructured } = resolved;
+
+  const phaseLines = roadmap.map((p, i) => {
+    const range = p.startDate && p.endDate ? ` [${p.startDate} → ${p.endDate}]` : "";
+    const status = i < targetIndex ? " (COMPLETED)" : i === targetIndex ? " (← PROGRAM THIS BLOCK NOW)" : "";
+    return `- ${p.phase}${p.dates ? ` (${p.dates})` : ""}${range}${p.focus ? ` — focus: ${p.focus}` : ""}${status}`;
+  });
+
+  let targetLine: string;
+  if (targetIndex >= roadmap.length) {
+    targetLine = "Every phase of the previous roadmap is complete — plan the next logical block that follows it " +
+      "(e.g. the next build toward a remaining/new event, or a post-event transition), NOT a restart at Base.";
+  } else {
+    const why = params.force
+      ? "the athlete explicitly asked to start the next block now"
+      : "today falls in this phase";
+    targetLine = `Block to program now: "${roadmap[targetIndex].phase}" (${why}).`;
+  }
+
+  return [
+    `Previous plan (CONTINUE it — do not restart the periodization from the first phase):`,
+    `Previous program generated on: ${params.createdAtDate ?? "unknown"}`,
+    `Previous roadmap:`,
+    ...phaseLines,
+    targetLine,
+    ...(datesStructured || params.force
+      ? []
+      : ["(The previous roadmap's phases weren't precisely dated — use their date labels and the time elapsed since it was generated to confirm which phase the athlete is actually in now.)"]),
+  ].join("\n");
+}

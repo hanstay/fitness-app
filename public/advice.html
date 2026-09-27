@@ -71,7 +71,7 @@
 
 <script src="update.js"></script>
 <script type="module">
-  import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+  import { doc, getDoc, getDocs, collection, query, where, limit } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
   import { db } from "./js/firebase-init.js";
   import { requireOnboarded } from "./js/auth-guard.js";
 
@@ -80,7 +80,35 @@
   const { user } = session;
 
   const summarySnap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
-  const programId = summarySnap.data()?.currentProgramId;
+  const summary = summarySnap.data();
+
+  // Same source selection as program.html: a group member's plan lives in the
+  // group's active program + their own member layer, not their personal
+  // currentProgramId (which would be a stale, pre-group or previous-cycle plan).
+  let p = null;
+  if (summary?.activeProgramSource === "group" && summary?.groupId) {
+    const activeSnap = await getDocs(query(
+      collection(db, "groups", summary.groupId, "programs"),
+      where("status", "==", "active"),
+      limit(1)
+    ));
+    const sharedDoc = activeSnap.docs[0];
+    if (sharedDoc) {
+      const shared = sharedDoc.data();
+      const memberSnap = await getDoc(doc(db, "groups", summary.groupId, "members", user.uid));
+      const member = memberSnap.exists() ? memberSnap.data() : null;
+      p = {
+        ...shared,
+        currentState: member?.currentState ?? null,
+        coachNotes: member?.coachNotes ?? null,
+        sportNotes: member?.sportNotes ?? null,
+        nutritionNote: member?.nutritionNote ?? null,
+      };
+    }
+  } else if (summary?.currentProgramId) {
+    const programSnap = await getDoc(doc(db, "users", user.uid, "programs", summary.currentProgramId));
+    p = programSnap.data() ?? null;
+  }
 
   const main = document.getElementById("mainContent");
   const tocLinks = document.getElementById("tocLinks");
@@ -97,13 +125,10 @@
     return today > roadmap[roadmap.length - 1].endDate ? roadmap.length - 1 : 0;
   };
 
-  if (!programId) {
+  if (!p) {
     main.innerHTML = `<section><p class="muted">No program generated yet. Go to your <a href="dashboard.html">dashboard</a> and generate one.</p></section>`;
     document.getElementById("pageSub").textContent = "No program yet";
   } else {
-    const programSnap = await getDoc(doc(db, "users", user.uid, "programs", programId));
-    const p = programSnap.data();
-
     document.getElementById("pageSub").textContent = `${p.goalSummary || p.split} · coaching notes behind your ${p.title || p.split} program`;
     const eventBadges = (p.events || []).map((e) => `<span class="badge">📅 <b>${esc(e.name)}</b>${e.date ? ` · ${esc(e.date)}` : ""}</span>`).join("");
     document.getElementById("headerBadges").innerHTML =

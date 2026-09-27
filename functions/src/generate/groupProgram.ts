@@ -12,7 +12,7 @@ import {
   memberLayerSchema, memberLayerJsonSchema,
   ProgramOutput,
 } from "../lib/schemas";
-import { needsGroupFullRegen, AthleteProfileSnapshot } from "../lib/programDecisions";
+import { needsGroupFullRegen, buildContinuationText, resolveContinuation, AthleteProfileSnapshot } from "../lib/programDecisions";
 import { gatherGroundingData } from "./groundingData";
 import { applySessionLoads } from "../lib/sessionLoads";
 import { reconcileEvents } from "../lib/eventReconciliation";
@@ -51,6 +51,11 @@ fixed weekly sessions — set by the group leader, not inferred — plus every m
    the previous phase's endDate (contiguous, no gaps/overlaps), and the last phase ends at/around
    the nearest event's date when one is given. Code reads these dates to detect a phase change, so
    only leave them null if a phase is genuinely undatable (no event to anchor a timeline).
+   CONTINUING AN EXISTING PLAN: when a "Previous plan" section is given, the group is already
+   partway through a macrocycle. Do NOT restart at the first phase (e.g. "Base") or repeat phases
+   marked COMPLETED: the new roadmap starts with the block marked "PROGRAM THIS BLOCK NOW",
+   followed by the phases still remaining, and weeklyStructure/sessions build that block's week.
+   Write title, goalSummary, progressionRules, deloadGuidance and warmupNotes for THIS block.
 3. "daysPerWeek": set to EXACTLY the group's stated training days/week — this is a hard constraint,
    not a suggestion. "weeklyStructure": the group's stated fixed weekly sessions are already
    committed — place each on its given day, don't stack a conflicting hard session on top of it,
@@ -205,9 +210,22 @@ export async function runGenerateGroupProgram(
   if (fullRegen) {
     const groupContextText = buildGroupContextText(group);
     const groupProfileText = buildGroupProfileText(memberAthletes);
+    // Continue the active group program's roadmap rather than rebuilding the
+    // macrocycle from its first phase — see resolveContinuation.
+    const createdAtMs = activeGroupProgram?.createdAt?.toMillis?.();
+    const continuationText = activeGroupProgram
+      ? buildContinuationText({
+          roadmap: activeGroupProgram.roadmap,
+          createdAtDate: createdAtMs != null ? new Date(createdAtMs).toISOString().slice(0, 10) : null,
+          nowDate: new Date().toISOString().slice(0, 10),
+          force: opts?.force === true,
+        })
+      : "";
     const overview = await extractStructuredJson({
       system: GROUP_SYSTEM_PROMPT,
-      userText: `${groupContextText}\n\nGroup members:\n\n${groupProfileText}\n\nGenerate the shared program structure.`,
+      userText: `${groupContextText}\n\nGroup members:\n\n${groupProfileText}${
+        continuationText ? `\n\n${continuationText}` : ""
+      }\n\nGenerate the shared program structure.`,
       toolName: "record_group_program",
       toolDescription: "Record the group's shared training program structure.",
       inputSchema: programSharedJsonSchema,
@@ -244,7 +262,19 @@ export async function runGenerateGroupProgram(
     .map((l) => `- ${l.exercise}: ${l.weight_kg ?? "?"}kg × ${l.reps ?? "?"}${l.date ? ` (${l.date})` : ""}`)
     .join("\n") || "none logged yet";
 
+  // The member layer writes this athlete's coach/event/fueling notes, so tell
+  // it which block the shared program is in — otherwise those notes can keep
+  // describing a phase the group has already moved past.
+  const currentBlock = (() => {
+    const roadmap = sharedProgram.roadmap ?? [];
+    const resolved = resolveContinuation({ roadmap, createdAtDate: null, nowDate: new Date().toISOString().slice(0, 10), force: false });
+    const phase = resolved ? roadmap[Math.min(resolved.targetIndex, roadmap.length - 1)] : null;
+    return phase ? `${phase.phase}${phase.dates ? ` (${phase.dates})` : ""} — focus: ${phase.focus}` : "not specified";
+  })();
+
   const memberProfileText = [
+    `Group program: ${sharedProgram.title}`,
+    `Current block: ${currentBlock} — write coachNotes/sportNotes/nutritionNote for THIS block`,
     `Training days/week: ${athlete.training_days_per_week}`,
     `Goal: ${athlete.goal || "general fitness"}`,
     `Injuries/constraints: ${athlete.injuries_constraints || "none reported"}`,

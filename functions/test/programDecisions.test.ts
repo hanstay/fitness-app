@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { structuralChanged, needsFullRegen, needsGroupFullRegen, groupDetailsChanged, hasEnteredNewPhase } from "../src/lib/programDecisions";
+import { structuralChanged, needsFullRegen, needsGroupFullRegen, groupDetailsChanged, hasEnteredNewPhase, resolveContinuation, buildContinuationText } from "../src/lib/programDecisions";
 
 const baseAthlete = {
   goal: "Hyrox",
@@ -314,5 +314,65 @@ describe("needsGroupFullRegen", () => {
       },
       now: new Date("2026-09-01T00:00:00Z"),
     })).toBe(true);
+  });
+});
+
+describe("resolveContinuation", () => {
+  const roadmap = [
+    { phase: "Base", startDate: "2026-09-01", endDate: "2026-09-28" },
+    { phase: "Build", startDate: "2026-09-29", endDate: "2026-10-26" },
+    { phase: "Peak", startDate: "2026-10-27", endDate: "2026-11-15" },
+  ];
+
+  it("is null with no previous roadmap", () => {
+    expect(resolveContinuation({ roadmap: [], createdAtDate: "2026-09-01", nowDate: "2026-09-10", force: false })).toBeNull();
+    expect(resolveContinuation({ roadmap: null, createdAtDate: "2026-09-01", nowDate: "2026-09-10", force: false })).toBeNull();
+  });
+
+  it("continues into the phase today falls in once the boundary is crossed", () => {
+    expect(resolveContinuation({ roadmap, createdAtDate: "2026-09-01", nowDate: "2026-10-01", force: false })?.targetIndex).toBe(1);
+  });
+
+  it("forcing a new block advances past the generation phase even before its end date", () => {
+    expect(resolveContinuation({ roadmap, createdAtDate: "2026-09-01", nowDate: "2026-09-26", force: true })?.targetIndex).toBe(1);
+  });
+
+  it("forcing doesn't double-advance when the boundary was already crossed", () => {
+    expect(resolveContinuation({ roadmap, createdAtDate: "2026-09-01", nowDate: "2026-10-01", force: true })?.targetIndex).toBe(1);
+  });
+
+  it("forcing an undated (legacy) roadmap advances from its first phase", () => {
+    const undated = [{ phase: "Base" }, { phase: "Build" }];
+    expect(resolveContinuation({ roadmap: undated, createdAtDate: "2026-08-01", nowDate: "2026-09-26", force: true }))
+      .toEqual({ targetIndex: 1, datesStructured: false });
+  });
+
+  it("reports every phase complete once past the end of the roadmap", () => {
+    expect(resolveContinuation({ roadmap, createdAtDate: "2026-09-01", nowDate: "2026-12-01", force: false })?.targetIndex).toBe(3);
+  });
+});
+
+describe("buildContinuationText", () => {
+  const roadmap = [
+    { phase: "Base", dates: "Sep 1 - Sep 28", startDate: "2026-09-01", endDate: "2026-09-28", focus: "Aerobic base" },
+    { phase: "Build", dates: "Sep 29 - Oct 26", startDate: "2026-09-29", endDate: "2026-10-26", focus: "Threshold work" },
+  ];
+
+  it("is empty with no previous roadmap", () => {
+    expect(buildContinuationText({ roadmap: [], createdAtDate: null, nowDate: "2026-09-26", force: true })).toBe("");
+  });
+
+  it("marks completed phases and names the next block when forced", () => {
+    const text = buildContinuationText({ roadmap, createdAtDate: "2026-09-01", nowDate: "2026-09-26", force: true });
+    expect(text).toContain("Base (Sep 1 - Sep 28) [2026-09-01 → 2026-09-28] — focus: Aerobic base (COMPLETED)");
+    expect(text).toContain("Build (Sep 29 - Oct 26)");
+    expect(text).toContain("(← PROGRAM THIS BLOCK NOW)");
+    expect(text).toContain('Block to program now: "Build" (the athlete explicitly asked to start the next block now).');
+  });
+
+  it("asks for the next logical block rather than a restart once the roadmap is exhausted", () => {
+    const text = buildContinuationText({ roadmap, createdAtDate: "2026-09-01", nowDate: "2026-11-30", force: false });
+    expect(text).toContain("Every phase of the previous roadmap is complete");
+    expect(text).not.toContain("PROGRAM THIS BLOCK NOW");
   });
 });

@@ -8,7 +8,7 @@ import {
   programUpdateJsonSchema, programUpdateSchema,
   SessionOutput,
 } from "../lib/schemas";
-import { needsFullRegen, AthleteProfileSnapshot } from "../lib/programDecisions";
+import { needsFullRegen, buildContinuationText, AthleteProfileSnapshot } from "../lib/programDecisions";
 import { mergeIncrementalSessions } from "../lib/programMerge";
 import { gatherGroundingData } from "./groundingData";
 import { runGenerateGroupProgram } from "./groupProgram";
@@ -72,6 +72,15 @@ WORK IN THIS ORDER:
    Use the given "current phase signal" line to anchor what THIS week's phase should emphasize
    — the other call is building the actual week from the same signal, so stay consistent with it.
 
+   CONTINUING AN EXISTING PLAN: when a "Previous plan" section is given, the athlete is already
+   partway through a macrocycle. Do NOT restart at the first phase (e.g. "Base") or repeat phases
+   marked COMPLETED. The new roadmap's first phase is the block marked "PROGRAM THIS BLOCK NOW",
+   followed by the phases still remaining (re-size/re-date them from the fresh data if needed).
+   Only step back to an earlier emphasis if the data clearly shows a long layoff or regression,
+   and say so explicitly in currentState. Title, goalSummary, currentState, progressionRules,
+   deloadGuidance, warmupNotes, coachNotes, sportNotes and nutritionNote must all be written for
+   THIS block — not copied from, or phrased as if still in, a completed phase.
+
    DATE EVERY PHASE: give each roadmap phase a "startDate"/"endDate" (ISO YYYY-MM-DD, inclusive)
    alongside the human-readable "dates" label. The first phase's startDate MUST be today's date
    (given above); each later phase's startDate is the day after the previous phase's endDate —
@@ -96,6 +105,9 @@ every detailed session. A separate call is writing the goal/roadmap/coaching-not
 the same athlete data — you won't see its output, so ground your decisions in the same raw
 data and the same "current phase signal" line you're given, rather than inventing your own
 framing.
+
+If a "Previous plan" section is given, build the week for the block marked "PROGRAM THIS BLOCK
+NOW" — the athlete has completed the earlier phases, so don't program a repeat of them.
 
 WORK IN THIS ORDER:
 
@@ -292,6 +304,18 @@ export async function runGenerateProgram(
 
   const phaseSignal = computePhaseSignal(athlete.events || [], wellness, today);
 
+  // Full regens continue the active program's roadmap rather than rebuilding
+  // the macrocycle from its first phase — see resolveContinuation.
+  const createdAtMs = activeProgram?.createdAt?.toMillis?.();
+  const continuationText = fullRegen && activeProgram
+    ? buildContinuationText({
+        roadmap: activeProgram.roadmap,
+        createdAtDate: createdAtMs != null ? new Date(createdAtMs).toISOString().slice(0, 10) : null,
+        nowDate: today,
+        force: opts?.force === true,
+      })
+    : "";
+
   const profileText = [
     `Today's date: ${today}`,
     `Current phase signal: ${phaseSignal}`,
@@ -328,6 +352,7 @@ export async function runGenerateProgram(
     `Current macro targets: ${
       currentTargets ? `${currentTargets.target_calories} kcal, ${currentTargets.protein_g}P/${currentTargets.carbs_g}C/${currentTargets.fat_g}F` : "not calculated"
     }`,
+    ...(continuationText ? [``, continuationText] : []),
   ].join("\n");
 
   let mergedProgram: ProgramOutput;
