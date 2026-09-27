@@ -4,7 +4,7 @@
 // generateProgram.ts's full/incremental split, applied at the group level:
 // Stage A is the group analogue of a full regen, Stage B always runs for the
 // triggering member (roughly analogous cost to an incremental regen).
-import { getFirestore, FieldValue, Firestore } from "firebase-admin/firestore";
+import { getFirestore, FieldValue, Firestore, DocumentData } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import { extractStructuredJson, MODEL } from "../lib/claude";
 import {
@@ -13,7 +13,8 @@ import {
   ProgramOutput,
 } from "../lib/schemas";
 import { needsGroupFullRegen, buildContinuationText, resolveContinuation, AthleteProfileSnapshot } from "../lib/programDecisions";
-import { gatherGroundingData } from "./groundingData";
+import { gatherGroundingData, loadExerciseVocabulary } from "./groundingData";
+import type { PrescriptionProgram } from "../lib/trainingLog";
 import { applySessionLoads } from "../lib/sessionLoads";
 import { reconcileEvents } from "../lib/eventReconciliation";
 
@@ -68,21 +69,32 @@ fixed weekly sessions — set by the group leader, not inferred — plus every m
    "substitution_note" to cover equipment/injury differences across the group (e.g. "if no
    barbell, use DB variant"; "if shoulder issue, use neutral-grip press") so the ONE session list
    still works for everyone.
+   EXERCISE NAMES: each member's profile lists the exercise names they actually log in Hevy.
+   Name every exercise exactly as those lists spell it — prefer the spelling most members use —
+   since members log the plan in Hevy and it's compared against their logs by name. For an
+   exercise nobody has logged, use Hevy's pattern "Exercise (Equipment)", e.g. "Romanian
+   Deadlift (Dumbbell)". Runs and conditioning items can use plain names.
 5. progressionRules/deloadGuidance/warmupNotes: general guidance that works for the group.
 
 Call the tool with the complete shared structure; do not respond in prose.`;
 
 export const MEMBER_LAYER_SYSTEM_PROMPT = `You are a strength coach personalizing ONE athlete's loads within a training program their
-group already shares. You are given their own grounding data (progression, adherence, wellness)
-and the group's current session skeleton (exercises/sets/reps already fixed — not yours to
-change). Your job:
+group already shares. You are given their own grounding data — their Hevy training log (every
+working set, with RPE when logged) next to the week they were prescribed, intervals.icu load and
+activities, and when each source was last refreshed — plus the group's current session skeleton
+(exercises/sets/reps already fixed — not yours to change). Read the log like a coach: judge
+progress from the pattern across sessions (load climbing with reps holding vs reps falling or
+RPE rising at the same load), never from one light session, and treat a gap at the end of the
+log with an old import date as a missed upload, not missed training. Your job:
 
 1. "sessionLoads": for every exercise in the given skeleton, write this athlete's own load_note
    (their working weight/intensity/pace — e.g. "work up to a top set of 5 at ~82kg", "zone 2,
-   conversational pace") grounded in their progression/current-lifts data. Match every day/name
-   in the skeleton exactly — do not add, remove, or rename days/exercises.
+   conversational pace") grounded in their actual recent sets in the log (the same lift may be
+   logged under a slightly different name, e.g. "Barbell Squat" for "Squat (Barbell)" — use
+   those sets). Match every day/name in the skeleton exactly — do not add, remove, or rename
+   days/exercises.
 2. "currentState": this athlete's own honest, data-grounded snapshot (same rules as a solo
-   program: cite lift stalls/PRs by name and number, aerobic base from CTL, gaps).
+   program: cite the actual sets behind a stall or PR, aerobic base from CTL, gaps).
 3. "coachNotes"/"sportNotes"/"nutritionNote": this athlete's own individual guidance (injury/
    mobility, event strategy, fueling); null when not relevant.
 
@@ -93,7 +105,10 @@ Call the tool with the complete personal layer; do not respond in prose.`;
 // (see GroupInfo/buildGroupContextText) rather than inferred from combining
 // each member's own, which was a poor proxy for "how many days do you
 // actually train together."
-function buildGroupProfileText(memberAthletes: Record<string, AthleteProfileSnapshotFull>): string {
+function buildGroupProfileText(
+  memberAthletes: Record<string, AthleteProfileSnapshotFull>,
+  memberVocabularies: Record<string, string>
+): string {
   return Object.entries(memberAthletes)
     .map(([uid, a], i) => {
       const eventLines = (a.events || []).map((e) => `  - ${e.name}${e.date ? ` on ${e.date}` : ""}`).join("\n") || "  none listed";
@@ -104,6 +119,8 @@ function buildGroupProfileText(memberAthletes: Record<string, AthleteProfileSnap
         `  Injuries/constraints: ${a.injuries_constraints || "none reported"}`,
         `  Own target events (only used for "events" if the group stated none at all — see instructions):`,
         eventLines,
+        `  Exercise names they log in Hevy (most used first):`,
+        (memberVocabularies[uid] ?? "none logged yet").split("\n").map((l) => `  ${l}`).join("\n"),
       ].join("\n");
     })
     .join("\n\n");
@@ -160,6 +177,30 @@ function buildGroupContextText(group: GroupInfo): string {
 }
 
 /**
+ * The week this member was actually meant to follow — the group program that
+ * was active before this run (Stage A may have just replaced it) with their
+ * own previous loads applied — for comparing against their Hevy log.
+ */
+async function followedPrescription(
+  db: Firestore,
+  groupId: string,
+  uid: string,
+  previousGroupProgram: DocumentData | null,
+  currentSharedProgram: ProgramSharedOutput
+): Promise<PrescriptionProgram> {
+  const base = previousGroupProgram ?? currentSharedProgram;
+  const memberSnap = await db.doc(`groups/${groupId}/members/${uid}`).get().catch(() => null);
+  const sessionLoads = memberSnap?.data()?.sessionLoads;
+  const createdAtMs = previousGroupProgram?.createdAt?.toMillis?.();
+  return {
+    title: base.title,
+    createdAtDate: createdAtMs != null ? new Date(createdAtMs).toISOString().slice(0, 10) : null,
+    weeklyStructure: base.weeklyStructure,
+    sessions: Array.isArray(sessionLoads) ? applySessionLoads(base.sessions, sessionLoads) : base.sessions,
+  };
+}
+
+/**
  * Group analogue of generateProgram.ts's runGenerateProgram. Called for the
  * triggering member (`uid`); regenerates the group's shared structure
  * (Stage A) only if it's missing/stale/structurally out of date for any
@@ -209,7 +250,10 @@ export async function runGenerateGroupProgram(
 
   if (fullRegen) {
     const groupContextText = buildGroupContextText(group);
-    const groupProfileText = buildGroupProfileText(memberAthletes);
+    const memberVocabularies = Object.fromEntries(
+      await Promise.all(memberUids.map(async (muid) => [muid, await loadExerciseVocabulary(db, muid)] as const))
+    );
+    const groupProfileText = buildGroupProfileText(memberAthletes, memberVocabularies);
     // Continue the active group program's roadmap rather than rebuilding the
     // macrocycle from its first phase — see resolveContinuation.
     const createdAtMs = activeGroupProgram?.createdAt?.toMillis?.();
@@ -255,8 +299,8 @@ export async function runGenerateGroupProgram(
 
   // Stage B: this member's own layer, grounded in their own data, against
   // the (possibly just-regenerated) shared skeleton.
-  const { wellness, currentTargets, activitySummary, progressionBlock, adherenceBlock } =
-    await gatherGroundingData(db, uid, { title: sharedProgram.title, sessions: sharedProgram.sessions });
+  const { wellness, currentTargets, freshnessBlock, activitySummary, trainingLogBlock, prescriptionBlock, exerciseVocabulary, hasHevyLog } =
+    await gatherGroundingData(db, uid, await followedPrescription(db, groupId, uid, activeGroupProgram, sharedProgram));
 
   const liftLines = (athlete.current_lifts || [])
     .map((l) => `- ${l.exercise}: ${l.weight_kg ?? "?"}kg × ${l.reps ?? "?"}${l.date ? ` (${l.date})` : ""}`)
@@ -278,18 +322,21 @@ export async function runGenerateGroupProgram(
     `Training days/week: ${athlete.training_days_per_week}`,
     `Goal: ${athlete.goal || "general fitness"}`,
     `Injuries/constraints: ${athlete.injuries_constraints || "none reported"}`,
+    freshnessBlock,
+    ``,
     `Training load (from intervals.icu): ${
       wellness ? `CTL ${wellness.ctl}, ATL ${wellness.atl}, TSB ${wellness.tsb} (as of ${wellness.asOf})` : "not connected"
     }`,
-    `Recent activities (most recent first):`,
+    `Recent activities (intervals.icu, most recent first):`,
     activitySummary,
     ``,
-    `Current lifts (most recent working sets):`,
-    liftLines,
+    ...(hasHevyLog ? [] : [`Current lifts (from profile):`, liftLines, ``]),
+    trainingLogBlock,
     ``,
-    progressionBlock,
+    prescriptionBlock,
     ``,
-    adherenceBlock,
+    `Exercise names this athlete logs in Hevy:`,
+    exerciseVocabulary,
     ``,
     `Current macro targets: ${
       currentTargets ? `${currentTargets.target_calories} kcal, ${currentTargets.protein_g}P/${currentTargets.carbs_g}C/${currentTargets.fat_g}F` : "not calculated"

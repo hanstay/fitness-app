@@ -1,19 +1,21 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { getFirestore, FieldValue, Firestore } from "firebase-admin/firestore";
+import { getFirestore, FieldValue, Firestore, DocumentData } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { parseHevyCsvToCurrentLifts } from "../lib/hevyParser";
 import { parseHevyCsvToSessions, StrengthSession } from "../lib/hevyAnalyzer";
 import { identifyKeyLifts, computeLiftProgression, PROGRESSION_CONFIG } from "../lib/hevyDerivedData";
+import { exercisesMatch } from "../lib/trainingLog";
 
 interface Input {
   storagePath: string;
 }
 
 /**
- * Build a client-facing progression summary from freshly-parsed sessions, using
- * the same hevyDerivedData functions generateProgram grounds its prompt in — so
- * the check-in view and the coach see identical numbers. Never throws: any
- * computation failure degrades to null so a successful import is never blocked.
+ * Build a client-facing progression summary (e1RM table) from freshly-parsed
+ * sessions, for the athlete to read on the check-in screen. Generation doesn't
+ * use these numbers — it reads the raw log instead (see lib/trainingLog.ts).
+ * Never throws: any computation failure degrades to null so a successful
+ * import is never blocked.
  */
 function buildProgressionSummary(sessions: StrengthSession[]) {
   try {
@@ -65,14 +67,20 @@ function normalizeExercise(name: string): string {
  */
 async function buildAdherenceSummary(db: Firestore, uid: string, sessions: StrengthSession[]) {
   try {
-    // Compare against the program the app actually shows (summary.currentProgramId),
-    // not just any active doc, so the adherence matches the user's current plan.
-    const summarySnap = await db.doc(`users/${uid}/state/summary`).get();
-    const currentProgramId = summarySnap.data()?.currentProgramId;
-    if (!currentProgramId) return null;
-    const progSnap = await db.doc(`users/${uid}/programs/${currentProgramId}`).get();
-    if (!progSnap.exists) return null;
-    const program = progSnap.data()!;
+    // Compare against the program the app actually shows: the group's active
+    // shared program for a group member (as program.html does), otherwise
+    // summary.currentProgramId — not just any active doc.
+    const summary = (await db.doc(`users/${uid}/state/summary`).get()).data();
+    let program: DocumentData | undefined;
+    if (summary?.activeProgramSource === "group" && summary?.groupId) {
+      const activeSnap = await db.collection(`groups/${summary.groupId}/programs`).where("status", "==", "active").limit(1).get();
+      const shared = activeSnap.docs[0]?.data();
+      // Group docs carry every member's snapshot; this member's fixed sessions come from their own profile.
+      if (shared) program = { ...shared, profileSnapshot: shared.profileSnapshots?.[uid] };
+    } else if (summary?.currentProgramId) {
+      program = (await db.doc(`users/${uid}/programs/${summary.currentProgramId}`).get()).data();
+    }
+    if (!program) return null;
 
     // Classes / fixed sessions (e.g. a weekly Hyrox or CrossFit class) aren't
     // logged in Hevy, so they must not count as "planned" work — otherwise they
@@ -110,17 +118,19 @@ async function buildAdherenceSummary(db: Firestore, uid: string, sessions: Stren
       }
     }
 
-    const plannedKeys = [...plannedDisplay.keys()];
-    const plannedSet = new Set(plannedKeys);
-    const actualKeys = new Set(actualDisplay.keys());
+    // Word-set matching (lib/trainingLog.ts), so "Barbell Squat" in the plan
+    // counts as "Squat (Barbell)" in Hevy.
+    const planned = [...plannedDisplay.values()];
+    const actual = [...actualDisplay.values()];
+    const loggedAsPlanned = (p: string) => actual.some((a) => exercisesMatch(p, a));
 
     return {
       programTitle: (program.title as string) ?? null,
       since,
       sessionsLogged: windowSessions.length,
-      hit: plannedKeys.filter((k) => actualKeys.has(k)).map((k) => plannedDisplay.get(k)!),
-      missed: plannedKeys.filter((k) => !actualKeys.has(k)).map((k) => plannedDisplay.get(k)!),
-      added: [...actualKeys].filter((k) => !plannedSet.has(k)).map((k) => actualDisplay.get(k)!),
+      hit: planned.filter(loggedAsPlanned),
+      missed: planned.filter((p) => !loggedAsPlanned(p)),
+      added: actual.filter((a) => !planned.some((p) => exercisesMatch(p, a))),
     };
   } catch {
     return null;
