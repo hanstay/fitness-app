@@ -12,6 +12,7 @@ import type { StrengthSession } from "../lib/hevyDerivedData";
 import {
   formatRecentLog, formatBestSetsByMonth, weeklySessionCounts,
   buildExerciseVocabulary, formatExerciseVocabulary, formatPrescription, PrescriptionProgram,
+  hrZoneLabel,
 } from "../lib/trainingLog";
 
 export interface ActivityDoc {
@@ -23,6 +24,8 @@ export interface ActivityDoc {
   duration_s?: number | null;
   avg_hr?: number | null;
   training_load?: number | null;
+  hrZones?: number[] | null;
+  intervalSummary?: string[] | null;
 }
 
 export interface GroundingData {
@@ -51,6 +54,16 @@ function tsToDate(ts: unknown): string | null {
 
 function daysBetween(from: string, to: string): number {
   return Math.round((new Date(to).getTime() - new Date(from).getTime()) / DAY_MS);
+}
+
+/** "Z1 0-157, Z2 158-167, ..." — the athlete's HR zone boundaries, shown once above the activity list. */
+function formatHrZoneLegend(hrZones: number[]): string {
+  const ranges = hrZones.map((upper, i) => {
+    const lower = i === 0 ? 0 : hrZones[i - 1] + 1;
+    const isLast = i === hrZones.length - 1;
+    return `Z${i + 1} ${lower}-${upper}${isLast ? "+" : ""}`;
+  });
+  return `HR zones (bpm): ${ranges.join(", ")}`;
 }
 
 function toStrengthSessions(docs: QueryDocumentSnapshot[]): StrengthSession[] {
@@ -130,18 +143,22 @@ export async function gatherGroundingData(
   const activities: ActivityDoc[] = activitiesSnap
     ? activitiesSnap.docs.map((d) => d.data() as ActivityDoc).filter((a) => !a.date || a.date >= logSince)
     : [];
+  const hrZoneLegend = activities.find((a) => a.hrZones && a.hrZones.length > 0)?.hrZones ?? null;
+  const activityLines = activities.map((a) => {
+    const bits = [a.date, a.type, a.name && a.name !== a.type ? `"${a.name}"` : null];
+    if (a.duration_s) bits.push(`${Math.round(a.duration_s / 60)} min`);
+    if (a.distance_km) bits.push(`${a.distance_km}km`);
+    if (a.pace) bits.push(a.pace);
+    if (a.avg_hr) {
+      const zone = hrZoneLabel(a.avg_hr, a.hrZones);
+      bits.push(`avg HR ${a.avg_hr}${zone ? ` (${zone})` : ""}`);
+    }
+    if (a.training_load) bits.push(`load ${a.training_load}`);
+    if (a.intervalSummary?.length) bits.push(`intervals: ${a.intervalSummary.join(", ")}`);
+    return `- ${bits.filter(Boolean).join(" · ")}`;
+  });
   const activitySummary = activities.length
-    ? activities
-        .map((a) => {
-          const bits = [a.date, a.type, a.name && a.name !== a.type ? `"${a.name}"` : null];
-          if (a.duration_s) bits.push(`${Math.round(a.duration_s / 60)} min`);
-          if (a.distance_km) bits.push(`${a.distance_km}km`);
-          if (a.pace) bits.push(a.pace);
-          if (a.avg_hr) bits.push(`avg HR ${a.avg_hr}`);
-          if (a.training_load) bits.push(`load ${a.training_load}`);
-          return `- ${bits.filter(Boolean).join(" · ")}`;
-        })
-        .join("\n")
+    ? [...(hrZoneLegend ? [formatHrZoneLegend(hrZoneLegend), ""] : []), ...activityLines].join("\n")
     : `none in the last ${LOG_DAYS} days`;
 
   // ---- Hevy training log.
