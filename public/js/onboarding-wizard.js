@@ -2,6 +2,7 @@ import { doc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.1.
 import { ref as storageRef, uploadBytes } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-storage.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
 import { db, storage, functions } from "./firebase-init.js";
+import { analyzeHevyCsv } from "./generated/hevy-checkin.js";
 import { requireAuth } from "./auth-guard.js";
 import { renderEventsEditor, collectEvents } from "./events-editor.js";
 import { renderCommitmentsEditor, collectCommitments } from "./commitments-editor.js";
@@ -101,14 +102,13 @@ document.getElementById("hevyUploadBtn").addEventListener("click", async () => {
   const status = document.getElementById("hevyStatus");
   if (!file) return showError("Choose a CSV file first.");
   clearMessages();
-  status.textContent = "Uploading and parsing…";
+  status.textContent = "Importing…";
   const btn = document.getElementById("hevyUploadBtn");
   btn.disabled = true;
   try {
-    const path = `users/${user.uid}/hevy/latest.csv`;
-    await uploadBytes(storageRef(storage, path), file);
-    const parseHevy = httpsCallable(functions, "parseHevyCsv");
-    const result = await parseHevy({ storagePath: path });
+    // Parsed in the browser; only the parsed sessions go to the server.
+    const { sessions, lifts } = analyzeHevyCsv(await file.text());
+    const result = await httpsCallable(functions, "saveHevySessions")({ sessions, lifts });
     status.textContent = `Imported ${result.data.liftsImported ?? 0} recent lifts.`;
   } catch (err) {
     status.textContent = "";

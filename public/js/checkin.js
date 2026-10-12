@@ -1,10 +1,10 @@
 // Weekly check-in view: import Hevy → sync intervals.icu → regenerate program.
 // One-shot reads only (no listeners), per-page message boxes, dot-path writes —
 // matching the conventions in dashboard.html / onboarding-wizard.js.
-import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
-import { ref as storageRef, uploadBytes } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-storage.js";
+import { doc, getDoc, collection, query, where, limit, getDocs } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
-import { db, storage, functions } from "./firebase-init.js";
+import { db, functions } from "./firebase-init.js";
+import { analyzeHevyCsv, buildAdherenceSummary } from "./generated/hevy-checkin.js";
 import { requireOnboarded } from "./auth-guard.js";
 import { connectIntervalsIcuViaOAuth } from "./intervals-oauth.js";
 import { bindMessages } from "./ui-messages.js";
@@ -22,7 +22,7 @@ const setStatus = (id, msg) => { document.getElementById(id).textContent = msg; 
 // Guards a control that fires a side-effectful / costly API call. The control is
 // clickable ONLY before its first send (idle) or after a failed attempt (retry).
 // While the request is in flight — and after it succeeds — the control stays
-// disabled, so an expensive call (generateProgram, parseHevyCsv, credential
+// disabled, so an expensive call (generateProgram, saveHevySessions, credential
 // writes) can't be double-fired or spammed. Reload the page to run it again
 // after a success.
 async function withButtonBusy(btn, busyLabel, fn) {
@@ -56,7 +56,7 @@ const TREND_CLASS = { "↑": "trend-up", "→": "trend-flat", "↓": "trend-down
 
 function progressionHtml(progression, sessionsImported) {
   if (!progression) {
-    return `<p class="muted small">Imported ${sessionsImported} session${sessionsImported === 1 ? "" : "s"}. Not enough data yet to chart progression.</p>`;
+    return `<p class="muted small">Found ${sessionsImported} session${sessionsImported === 1 ? "" : "s"}. Not enough data yet to chart progression.</p>`;
   }
   const { dateRange, frequencyPerWeek, keyLifts } = progression;
   const rangeStr = dateRange ? `${esc(dateRange.first)} — ${esc(dateRange.last)}` : "";
@@ -77,7 +77,7 @@ function progressionHtml(progression, sessionsImported) {
 
   return `
     <div class="stats">
-      <div class="stat"><div class="k">Sessions imported</div><div class="v">${sessionsImported}</div></div>
+      <div class="stat"><div class="k">Sessions in export</div><div class="v">${sessionsImported}</div></div>
       <div class="stat"><div class="k">Frequency</div><div class="v">${frequencyPerWeek}/wk</div></div>
       <div class="stat"><div class="k">Date range</div><div class="v" style="font-size:.9rem">${rangeStr}</div></div>
     </div>
@@ -115,25 +115,49 @@ function renderImportSummary(container, { sessionsImported, progression, adheren
   container.style.display = "block";
 }
 
+// The program the app shows this athlete: the group's active shared program
+// for a group member (as program.html does), otherwise their own current one.
+// Adherence is a nice-to-have, so any read failure just hides it.
+async function loadActiveProgram() {
+  try {
+    const summary = (await getDoc(doc(db, "users", user.uid, "state", "summary"))).data();
+    if (summary?.activeProgramSource === "group" && summary?.groupId) {
+      const snap = await getDocs(query(collection(db, "groups", summary.groupId, "programs"), where("status", "==", "active"), limit(1)));
+      const shared = snap.docs[0]?.data();
+      // Group docs carry every member's snapshot; this member's fixed sessions come from their own profile.
+      return shared ? { ...shared, profileSnapshot: shared.profileSnapshots?.[user.uid] } : null;
+    }
+    if (summary?.currentProgramId) {
+      return (await getDoc(doc(db, "users", user.uid, "programs", summary.currentProgramId))).data() ?? null;
+    }
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
+// The CSV is parsed and analyzed here in the browser, so the results show
+// straight away; only the parsed sessions go to the server to be saved.
 document.getElementById("hevyUploadBtn").addEventListener("click", (e) => {
   const btn = e.currentTarget;
   const file = document.getElementById("hevyFile").files[0];
   if (!file) return showError("Choose a Hevy CSV export first.");
   clearMessages();
-  setStatus("hevyStatus", "Uploading and analyzing…");
+  setStatus("hevyStatus", "Analyzing…");
   withButtonBusy(btn, "Analyzing…", async () => {
-    const path = `users/${user.uid}/hevy/latest.csv`;
-    await uploadBytes(storageRef(storage, path), file);
-    const parseHevy = httpsCallable(functions, "parseHevyCsv");
-    const result = await parseHevy({ storagePath: path });
-    const { sessionsImported, progression, adherence } = result.data;
-    setStatus("hevyStatus", "");
-    renderImportSummary(document.getElementById("hevyResults"), { sessionsImported: sessionsImported ?? 0, progression, adherence });
-    showSuccess(`Imported ${sessionsImported ?? 0} training session${sessionsImported === 1 ? "" : "s"}.`);
+    const { sessions, lifts, progression } = analyzeHevyCsv(await file.text());
+    const adherence = buildAdherenceSummary(await loadActiveProgram(), sessions);
+    renderImportSummary(document.getElementById("hevyResults"), { sessionsImported: sessions.length, progression, adherence });
     document.getElementById("hevyResults").scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+    setStatus("hevyStatus", "Saving…");
+    const result = await httpsCallable(functions, "saveHevySessions")({ sessions, lifts });
+    const { sessionsImported } = result.data;
+    setStatus("hevyStatus", "");
+    showSuccess(`Imported ${sessionsImported ?? 0} training session${sessionsImported === 1 ? "" : "s"}.`);
   }).catch((err) => {
     setStatus("hevyStatus", "");
-    showError(`Couldn't process that CSV: ${err.message || err}`);
+    showError(`Couldn't import that CSV: ${err.message || err}`);
   });
 });
 

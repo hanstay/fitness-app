@@ -17,7 +17,7 @@ export interface HevyExercise {
 }
 
 export interface StrengthSession {
-  id: string;
+  id?: string; // Firestore doc id; absent on sessions parsed in the browser
   date: string; // YYYY-MM-DD
   title: string;
   start_time: string;

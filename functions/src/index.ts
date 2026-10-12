@@ -10,13 +10,13 @@ dotenv.config();
 // The Admin SDK's default bucket is `{projectId}.appspot.com`, but this project
 // (and the web SDK config in public/js/firebase-init.js) uses the newer
 // `.firebasestorage.app` bucket. Without setting this, getStorage().bucket()
-// resolves to the wrong bucket and every storage read (Hevy CSV, body-scan PDF)
+// resolves to the wrong bucket and every storage read (body-scan PDF)
 // 404s with "No such object". Keep this in sync with firebase-init.js.
 initializeApp({
   storageBucket: "fitness-app-47a06.firebasestorage.app",
 });
 
-export { parseHevyCsv } from "./integrations/parseHevyCsv";
+export { saveHevySessions } from "./integrations/saveHevySessions";
 export { connectIntervalsIcuOAuth } from "./integrations/connectIntervalsIcuOAuth";
 export { syncIntervalsActivities } from "./integrations/syncIntervalsActivities";
 export { parseBodyScan } from "./scans/parseBodyScan";

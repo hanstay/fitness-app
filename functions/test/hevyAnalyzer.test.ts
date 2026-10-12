@@ -3,10 +3,10 @@ import { join } from "path";
 import { describe, it, expect } from "vitest";
 import {
   groupRowsBySession,
-  generateSessionId,
   rowsToStrengthSession,
   parseHevyCsvToSessions,
 } from "../src/lib/hevyAnalyzer";
+import { generateSessionId } from "../src/integrations/saveHevySessions";
 
 const FIXTURE_PATH = join(__dirname, "fixtures", "hevy-sample.csv");
 
@@ -64,7 +64,7 @@ describe("hevyAnalyzer", () => {
       const rows = [
         { title: "", start_time: "Aug 10, 7:00 PM", end_time: "Aug 10, 8:30 PM", exercise_title: "Squat", set_index: "0", set_type: "normal", weight_kg: "85", reps: "6" } as any,
       ];
-      const session = rowsToStrengthSession(rows, "user123");
+      const session = rowsToStrengthSession(rows);
       expect(session).toBeNull();
     });
 
@@ -72,7 +72,7 @@ describe("hevyAnalyzer", () => {
       const rows = [
         { title: "Test", start_time: "Aug 10, 2026, 7:00 PM", end_time: "Aug 10, 2026, 8:30 PM", exercise_title: "Squat", set_index: "0", set_type: "normal", weight_kg: "85", reps: "6" } as any,
       ];
-      const session = rowsToStrengthSession(rows, "user123");
+      const session = rowsToStrengthSession(rows);
       expect(session).toBeDefined();
       expect(session!.exercises).toBeInstanceOf(Array);
       expect(session!.exercises.length).toBe(1);
@@ -84,7 +84,7 @@ describe("hevyAnalyzer", () => {
         { title: "Test", start_time: "Aug 10, 2026, 7:00 PM", end_time: "Aug 10, 2026, 8:30 PM", exercise_title: "Squat", set_index: "0", set_type: "warmup", weight_kg: "20", reps: "10" } as any,
         { title: "Test", start_time: "Aug 10, 2026, 7:00 PM", end_time: "Aug 10, 2026, 8:30 PM", exercise_title: "Squat", set_index: "1", set_type: "normal", weight_kg: "85", reps: "6" } as any,
       ];
-      const session = rowsToStrengthSession(rows, "user123");
+      const session = rowsToStrengthSession(rows);
       expect(session!.exercises[0].sets.length).toBe(2);
       expect(session!.exercises[0].sets[0].type).toBe("warmup");
       expect(session!.exercises[0].sets[1].type).toBe("normal");
@@ -94,7 +94,7 @@ describe("hevyAnalyzer", () => {
       const rows = [
         { title: "Test", start_time: "Aug 10, 2026, 7:00 PM", end_time: "Aug 10, 2026, 8:30 PM", exercise_title: "Deadlift", set_index: "0", set_type: "normal", weight_lbs: "220", reps: "5" } as any,
       ];
-      const session = rowsToStrengthSession(rows, "user123");
+      const session = rowsToStrengthSession(rows);
       expect(session!.exercises[0].sets[0].weight_kg).toBeCloseTo(99.8, 1);
     });
 
@@ -102,7 +102,7 @@ describe("hevyAnalyzer", () => {
       const rows = [
         { title: "Test", start_time: "Aug 10, 2026, 7:00 PM", end_time: "Aug 10, 2026, 8:30 PM", exercise_title: "Pull Up", set_index: "0", set_type: "normal", weight_kg: "", reps: "8" } as any,
       ];
-      const session = rowsToStrengthSession(rows, "user123");
+      const session = rowsToStrengthSession(rows);
       expect(session!.exercises[0].sets[0].weight_kg).toBeNull();
     });
 
@@ -110,7 +110,7 @@ describe("hevyAnalyzer", () => {
       const rows = [
         { title: "Conditioning", start_time: "Aug 5, 2026, 5:45 PM", end_time: "Aug 5, 2026, 6:15 PM", exercise_title: "Running", set_index: "0", set_type: "normal", distance_km: "0.5", duration_seconds: "240" } as any,
       ];
-      const session = rowsToStrengthSession(rows, "user123");
+      const session = rowsToStrengthSession(rows);
       expect(session!.exercises[0].sets[0].distance_km).toBe(0.5);
       expect(session!.exercises[0].sets[0].duration_seconds).toBe(240);
     });
@@ -119,7 +119,7 @@ describe("hevyAnalyzer", () => {
       const rows = [
         { title: "Test", start_time: "Aug 10, 2026, 7:00 PM", end_time: "Aug 10, 2026, 8:30 PM", exercise_title: "Squat", set_index: "0", set_type: "normal", weight_kg: "85", reps: "6", rpe: "8" } as any,
       ];
-      const session = rowsToStrengthSession(rows, "user123");
+      const session = rowsToStrengthSession(rows);
       expect(session!.exercises[0].sets[0].rpe).toBe(8);
     });
 
@@ -128,7 +128,7 @@ describe("hevyAnalyzer", () => {
         { title: "Test", start_time: "Aug 10, 2026, 7:00 PM", end_time: "Aug 10, 2026, 8:30 PM", exercise_title: "Squat", set_index: "0", set_type: "warmup", weight_kg: "20", reps: "10" } as any,
         { title: "Test", start_time: "Aug 10, 2026, 7:00 PM", end_time: "Aug 10, 2026, 8:30 PM", exercise_title: "Squat", set_index: "1", set_type: "normal", weight_kg: "85", reps: "6" } as any,
       ];
-      const session = rowsToStrengthSession(rows, "user123");
+      const session = rowsToStrengthSession(rows);
       expect(session!.exercises[0].sets[0].index).toBe(0);
       expect(session!.exercises[0].sets[1].index).toBe(1);
     });
@@ -138,7 +138,7 @@ describe("hevyAnalyzer", () => {
         { title: "Test", start_time: "Aug 10, 2026, 7:00 PM", end_time: "Aug 10, 2026, 8:30 PM", exercise_title: "Squat", set_index: "0", set_type: "normal", weight_kg: "85", reps: "6" } as any,
         { title: "Test", start_time: "Aug 10, 2026, 7:00 PM", end_time: "Aug 10, 2026, 8:30 PM", exercise_title: "", set_index: "1", set_type: "normal", weight_kg: "90", reps: "5" } as any,
       ];
-      const session = rowsToStrengthSession(rows, "user123");
+      const session = rowsToStrengthSession(rows);
       expect(session!.exercises.length).toBe(1);
     });
 
@@ -146,44 +146,33 @@ describe("hevyAnalyzer", () => {
       const rows = [
         { title: "Legs", start_time: "Aug 10, 2026, 7:00 PM", end_time: "Aug 10, 2026, 8:30 PM", exercise_title: "Squat", set_index: "0", set_type: "normal", weight_kg: "85", reps: "6" } as any,
       ];
-      const session = rowsToStrengthSession(rows, "user123");
+      const session = rowsToStrengthSession(rows);
       expect(session!.title).toBe("Legs");
       expect(session!.date).toBe("2026-08-10");
       expect(session!.start_time).toBe("Aug 10, 2026, 7:00 PM");
       expect(session!.end_time).toBe("Aug 10, 2026, 8:30 PM");
       expect(session!.source).toBe("hevy");
-      expect(session!.createdAt).toBeDefined();
     });
 
-    it("generates deterministic session ID", () => {
-      const rows = [
-        { title: "Test", start_time: "Aug 10, 2026, 7:00 PM", end_time: "Aug 10, 2026, 8:30 PM", exercise_title: "Squat", set_index: "0", set_type: "normal", weight_kg: "85", reps: "6" } as any,
-      ];
-      const session1 = rowsToStrengthSession(rows, "user123");
-      const session2 = rowsToStrengthSession(rows, "user123");
-      expect(session1!.id).toBe(session2!.id);
-    });
   });
 
   describe("parseHevyCsvToSessions", () => {
     it("parses real Hevy CSV fixture", () => {
       const csv = readFileSync(FIXTURE_PATH, "utf8");
-      const sessions = parseHevyCsvToSessions(csv, "testuser");
+      const sessions = parseHevyCsvToSessions(csv);
       expect(sessions.length).toBeGreaterThan(0);
       expect(sessions.length).toBeLessThanOrEqual(10);
     });
 
     it("end-to-end CSV parsing produces correct structure", () => {
       const csv = readFileSync(FIXTURE_PATH, "utf8");
-      const sessions = parseHevyCsvToSessions(csv, "testuser");
+      const sessions = parseHevyCsvToSessions(csv);
       for (const session of sessions) {
-        expect(session.id).toBeDefined();
         expect(session.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
         expect(session.title).toBeTruthy();
         expect(session.start_time).toBeTruthy();
         expect(session.end_time).toBeTruthy();
         expect(session.exercises).toBeInstanceOf(Array);
-        expect(session.createdAt).toBeDefined();
         expect(session.source).toBe("hevy");
         for (const exercise of session.exercises) {
           expect(exercise.name).toBeTruthy();
@@ -203,7 +192,7 @@ describe("hevyAnalyzer", () => {
 
     it("correctly parses Legs Session", () => {
       const csv = readFileSync(FIXTURE_PATH, "utf8");
-      const sessions = parseHevyCsvToSessions(csv, "testuser");
+      const sessions = parseHevyCsvToSessions(csv);
       const legsSession = sessions.find((s) => s.title === "Legs Session");
       expect(legsSession).toBeDefined();
       expect(legsSession!.date).toBe("2026-08-10");
@@ -214,7 +203,7 @@ describe("hevyAnalyzer", () => {
 
     it("parses conditioning with distance and duration", () => {
       const csv = readFileSync(FIXTURE_PATH, "utf8");
-      const sessions = parseHevyCsvToSessions(csv, "testuser");
+      const sessions = parseHevyCsvToSessions(csv);
       const condSession = sessions.find((s) => s.title === "Conditioning");
       expect(condSession).toBeDefined();
       const running = condSession!.exercises.find((e) => e.name === "Running");
@@ -228,7 +217,7 @@ describe("hevyAnalyzer", () => {
         "title,start_time,end_time,exercise_title,set_index,set_type,weight_kg,reps,distance_km,duration_seconds,rpe",
         '"Test","Aug 10, 2026, 7:00 PM","Aug 10, 2026, 8:30 PM","Bench",0,"normal","85","5","","",""',
       ].join("\n");
-      const sessions = parseHevyCsvToSessions(csv, "user");
+      const sessions = parseHevyCsvToSessions(csv);
       expect(sessions.length).toBe(1);
       expect(sessions[0].exercises[0].sets[0].distance_km).toBeNull();
       expect(sessions[0].exercises[0].sets[0].duration_seconds).toBeNull();
@@ -237,7 +226,7 @@ describe("hevyAnalyzer", () => {
 
     it("returns empty array for empty CSV", () => {
       const csv = "title,start_time,end_time,exercise_title,set_index,set_type,weight_kg,reps";
-      const sessions = parseHevyCsvToSessions(csv, "user");
+      const sessions = parseHevyCsvToSessions(csv);
       expect(sessions.length).toBe(0);
     });
 
@@ -250,7 +239,7 @@ describe("hevyAnalyzer", () => {
       const rowA = '"A","Aug 1, 2026, 10:00 AM","Aug 1, 2026, 11:00 AM","Bench",0,"normal","80","5","","",""';
       const rowB = '"B","Aug 2, 2026, 10:00 AM","Aug 2, 2026, 11:00 AM","Squat",0,"normal","95","4","","",""';
       const csv = [header, rowA].join("\r\n") + "\n" + rowB + "\r\n";
-      const sessions = parseHevyCsvToSessions(csv, "user");
+      const sessions = parseHevyCsvToSessions(csv);
       expect(sessions.map((s) => s.title).sort()).toEqual(["A", "B"]);
     });
 
@@ -260,18 +249,19 @@ describe("hevyAnalyzer", () => {
         '"Session A","Aug 10, 2026, 7:00 PM","Aug 10, 2026, 8:30 PM","Exercise 1",0,"normal","50","10","","",""',
         '"Session A","Aug 10, 2026, 7:00 PM","Aug 10, 2026, 8:30 PM","Exercise 2",0,"normal","60","8","","",""',
       ].join("\n");
-      const sessions = parseHevyCsvToSessions(csv, "user");
+      const sessions = parseHevyCsvToSessions(csv);
       expect(sessions.length).toBe(1);
       expect(sessions[0].exercises.length).toBe(2);
     });
 
     it("generates deterministic IDs for re-uploads", () => {
       const csv = readFileSync(FIXTURE_PATH, "utf8");
-      const sessions1 = parseHevyCsvToSessions(csv, "testuser");
-      const sessions2 = parseHevyCsvToSessions(csv, "testuser");
+      const sessions1 = parseHevyCsvToSessions(csv);
+      const sessions2 = parseHevyCsvToSessions(csv);
       expect(sessions1.length).toBe(sessions2.length);
       for (let i = 0; i < sessions1.length; i++) {
-        expect(sessions1[i].id).toBe(sessions2[i].id);
+        const id = (s: typeof sessions1[number]) => generateSessionId("testuser", s.start_time, s.title);
+        expect(id(sessions1[i])).toBe(id(sessions2[i]));
       }
     });
   });

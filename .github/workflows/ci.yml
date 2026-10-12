@@ -1,7 +1,7 @@
 name: CI
 
 # Runs the functions build + test suites on every PR and on pushes to main.
-# The web app (public/**) is static — no build step — so it is not built here.
+# The web app (public/**) is static; its one generated file is checked below.
 on:
   pull_request:
   push:
@@ -37,6 +37,11 @@ jobs:
 
       - name: Typecheck / build
         run: npm run build
+
+      # The check-in page parses Hevy CSVs with a bundle built from src/web and
+      # committed under public/js/generated. Fail if it wasn't rebuilt.
+      - name: Browser bundle is up to date
+        run: npm run build:web && git diff --exit-code -- ../public/js/generated
 
       # Everything except the emulator-dependent suites (rules + LLM-fixture
       # integration tests).
