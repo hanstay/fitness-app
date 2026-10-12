@@ -16,7 +16,6 @@ initializeApp({
   storageBucket: "fitness-app-47a06.firebasestorage.app",
 });
 
-export { onUserCreate } from "./auth/onUserCreate";
 export { parseHevyCsv } from "./integrations/parseHevyCsv";
 export { connectIntervalsIcuOAuth } from "./integrations/connectIntervalsIcuOAuth";
 export { syncIntervalsActivities } from "./integrations/syncIntervalsActivities";
