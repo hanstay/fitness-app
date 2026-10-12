@@ -6,8 +6,6 @@ import { parseHevyCsvToSessions } from "../lib/hevyAnalyzer";
 import { parseHevyCsvToCurrentLifts } from "../lib/hevyParser";
 import { buildProgressionSummary } from "../lib/hevyCheckinSummary";
 
-export { buildAdherenceSummary } from "../lib/hevyCheckinSummary";
-
 /**
  * Parse a Hevy CSV export entirely in the browser. Returns the sessions and
  * current lifts to send to the saveHevySessions function, plus the progression

@@ -1,10 +1,10 @@
 // Weekly check-in view: import Hevy → sync intervals.icu → regenerate program.
 // One-shot reads only (no listeners), per-page message boxes, dot-path writes —
 // matching the conventions in dashboard.html / onboarding-wizard.js.
-import { doc, getDoc, collection, query, where, limit, getDocs } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
 import { db, functions } from "./firebase-init.js";
-import { analyzeHevyCsv, buildAdherenceSummary } from "./generated/hevy-checkin.js";
+import { analyzeHevyCsv } from "./generated/hevy-checkin.js";
 import { requireOnboarded } from "./auth-guard.js";
 import { connectIntervalsIcuViaOAuth } from "./intervals-oauth.js";
 import { bindMessages } from "./ui-messages.js";
@@ -53,87 +53,22 @@ function expandSection(sectionId) {
 /* ---------- Section 1: Hevy import ---------- */
 
 const TREND_CLASS = { "↑": "trend-up", "→": "trend-flat", "↓": "trend-down" };
+const fmtDate = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 
-function progressionHtml(progression, sessionsImported) {
-  if (!progression) {
-    return `<p class="muted small">Found ${sessionsImported} session${sessionsImported === 1 ? "" : "s"}. Not enough data yet to chart progression.</p>`;
-  }
-  const { dateRange, frequencyPerWeek, keyLifts } = progression;
-  const rangeStr = dateRange ? `${esc(dateRange.first)} — ${esc(dateRange.last)}` : "";
-
-  const rows = (keyLifts || []).slice(0, 8).map((l) => {
-    const pr = l.pr ? `${l.pr.weight_kg}kg <span class="muted small">(${esc(l.pr.date)})</span>` : "—";
-    const trend = l.trend
-      ? `<span class="${TREND_CLASS[l.trend.direction] || ""}">${l.trend.direction} ${l.trend.percent_change > 0 ? "+" : ""}${l.trend.percent_change}%</span>`
-      : "<span class=\"muted\">—</span>";
-    return `<tr>
-      <td><b>${esc(l.exercise)}</b></td>
-      <td class="n">${l.currentE1RM}kg</td>
-      <td class="n">${pr}</td>
-      <td>${trend}</td>
-      <td class="muted small">${esc(l.lastTrained || "—")}</td>
-    </tr>`;
+// Kept deliberately short: the plan update further down the page is where the
+// athlete reads coaching, so this only confirms what was imported. Plan
+// adherence isn't shown; generation compares the log with the plan itself.
+function renderImportSummary(container, sessionsImported, progression) {
+  const plural = sessionsImported === 1 ? "" : "s";
+  const range = progression?.dateRange ? ` from ${esc(fmtDate(progression.dateRange.first))} to ${esc(fmtDate(progression.dateRange.last))}` : "";
+  const lifts = (progression?.keyLifts || []).slice(0, 5).map((l) => {
+    const trend = l.trend ? ` <span class="${TREND_CLASS[l.trend.direction] || ""}">${l.trend.direction}</span>` : "";
+    return `<li><b>${esc(l.exercise)}</b> ${l.currentE1RM}kg${trend}</li>`;
   }).join("");
-
-  return `
-    <div class="stats">
-      <div class="stat"><div class="k">Sessions in export</div><div class="v">${sessionsImported}</div></div>
-      <div class="stat"><div class="k">Frequency</div><div class="v">${frequencyPerWeek}/wk</div></div>
-      <div class="stat"><div class="k">Date range</div><div class="v" style="font-size:.9rem">${rangeStr}</div></div>
-    </div>
-    ${rows ? `<h3>Key lifts (e1RM)</h3>
-      <div class="tablescroll"><table>
-        <thead><tr><th>Exercise</th><th class="n">Current</th><th class="n">PR</th><th>6-week trend</th><th>Last trained</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>
-      <p class="note">e1RM = estimated 1-rep max (Epley). Trend compares your oldest vs newest lift in the last 6 weeks.</p>`
-      : `<p class="muted small">No scorable barbell/weighted lifts found to chart yet.</p>`}`;
-}
-
-// Adherence to the athlete's current program: which prescribed lifts were hit,
-// missed, or swapped for something else since the plan was generated.
-function adherenceHtml(adherence) {
-  if (!adherence) return "";
-  const line = (arr, cls, icon, label) =>
-    arr && arr.length
-      ? `<p class="small" style="margin:4px 0"><span class="${cls}">${icon} ${label}</span>: ${arr.map(esc).join(", ")}</p>`
-      : "";
-  const title = adherence.programTitle ? `“${esc(adherence.programTitle)}”` : "your current plan";
-  const sinceStr = adherence.since ? ` since ${esc(adherence.since)}` : "";
-  const anything = (adherence.hit?.length || adherence.missed?.length || adherence.added?.length);
-  return `
-    <h3>Adherence to your current plan</h3>
-    <p class="muted small">Comparing ${adherence.sessionsLogged} session${adherence.sessionsLogged === 1 ? "" : "s"} logged${sinceStr} against ${title}.</p>
-    ${line(adherence.hit, "trend-up", "✓", "Hit")}
-    ${line(adherence.missed, "trend-down", "⚠", "Missed")}
-    ${line(adherence.added, "trend-flat", "+", "Added")}
-    ${anything ? "" : '<p class="muted small">No overlap to report yet — log a few sessions from this plan.</p>'}`;
-}
-
-function renderImportSummary(container, { sessionsImported, progression, adherence }) {
-  container.innerHTML = progressionHtml(progression, sessionsImported) + adherenceHtml(adherence);
+  container.innerHTML = `
+    <p class="small">${sessionsImported} session${plural}${range}.</p>
+    ${lifts ? `<p class="muted small" style="margin-bottom:4px">Estimated 1-rep max for your main lifts:</p><ul class="small">${lifts}</ul>` : ""}`;
   container.style.display = "block";
-}
-
-// The program the app shows this athlete: the group's active shared program
-// for a group member (as program.html does), otherwise their own current one.
-// Adherence is a nice-to-have, so any read failure just hides it.
-async function loadActiveProgram() {
-  try {
-    const summary = (await getDoc(doc(db, "users", user.uid, "state", "summary"))).data();
-    if (summary?.activeProgramSource === "group" && summary?.groupId) {
-      const snap = await getDocs(query(collection(db, "groups", summary.groupId, "programs"), where("status", "==", "active"), limit(1)));
-      const shared = snap.docs[0]?.data();
-      // Group docs carry every member's snapshot; this member's fixed sessions come from their own profile.
-      return shared ? { ...shared, profileSnapshot: shared.profileSnapshots?.[user.uid] } : null;
-    }
-    if (summary?.currentProgramId) {
-      return (await getDoc(doc(db, "users", user.uid, "programs", summary.currentProgramId))).data() ?? null;
-    }
-  } catch {
-    // fall through
-  }
-  return null;
 }
 
 // The CSV is parsed and analyzed here in the browser, so the results show
@@ -146,15 +81,11 @@ document.getElementById("hevyUploadBtn").addEventListener("click", (e) => {
   setStatus("hevyStatus", "Analyzing…");
   withButtonBusy(btn, "Analyzing…", async () => {
     const { sessions, lifts, progression } = analyzeHevyCsv(await file.text());
-    const adherence = buildAdherenceSummary(await loadActiveProgram(), sessions);
-    renderImportSummary(document.getElementById("hevyResults"), { sessionsImported: sessions.length, progression, adherence });
-    document.getElementById("hevyResults").scrollIntoView({ behavior: "smooth", block: "nearest" });
+    renderImportSummary(document.getElementById("hevyResults"), sessions.length, progression);
 
     setStatus("hevyStatus", "Saving…");
-    const result = await httpsCallable(functions, "saveHevySessions")({ sessions, lifts });
-    const { sessionsImported } = result.data;
-    setStatus("hevyStatus", "");
-    showSuccess(`Imported ${sessionsImported ?? 0} training session${sessionsImported === 1 ? "" : "s"}.`);
+    await httpsCallable(functions, "saveHevySessions")({ sessions, lifts });
+    setStatus("hevyStatus", "Saved. Update your plan below when you're ready.");
   }).catch((err) => {
     setStatus("hevyStatus", "");
     showError(`Couldn't import that CSV: ${err.message || err}`);
