@@ -15,7 +15,7 @@ import { runGenerateProgram } from "../src/generate/generateProgram";
 const mockExtractStructuredJson = vi.hoisted(() => vi.fn());
 vi.mock("../src/lib/claude", () => ({
   extractStructuredJson: mockExtractStructuredJson,
-  MODEL: "claude-sonnet-4-5-20250929",
+  MODEL: "claude-sonnet-5-5",
 }));
 
 const db = getTestDb();
