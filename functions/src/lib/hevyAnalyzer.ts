@@ -1,8 +1,8 @@
 // Parse Hevy CSV into normalized sessions for history analysis.
-// Pure functions, no Firebase dependencies.
+// Pure functions with no Firebase or Node dependencies: this module is also
+// bundled into the check-in page (see src/web/hevyCheckin.ts), so the CSV is
+// parsed in the browser. Session ids are added server-side when saving.
 import { parse } from "csv-parse/sync";
-import { Timestamp } from "firebase-admin/firestore";
-import * as crypto from "crypto";
 
 // NOTE: Structure is intentionally nested (exercises > sets) to match spec
 export interface HevySet {
@@ -20,14 +20,12 @@ export interface HevyExercise {
   sets: HevySet[];
 }
 
-export interface StrengthSession {
-  id: string;
+export interface ParsedHevySession {
   date: string;
   title: string;
   start_time: string;
   end_time: string;
   exercises: HevyExercise[];
-  createdAt: Timestamp;
   source: "hevy";
 }
 
@@ -93,13 +91,7 @@ export function groupRowsBySession(rows: HevyRow[]): Map<string, HevyRow[]> {
   return sessionMap;
 }
 
-export function generateSessionId(uid: string, startTime: string, title: string): string {
-  const input = `${uid}|${startTime}|${title}`;
-  const hash = crypto.createHash("sha256").update(input).digest("hex");
-  return hash.substring(0, 16);
-}
-
-export function rowsToStrengthSession(rows: HevyRow[], uid: string): StrengthSession | null {
+export function rowsToStrengthSession(rows: HevyRow[]): ParsedHevySession | null {
   if (rows.length === 0) return null;
   const firstRow = rows[0];
   const title = firstRow.title?.trim();
@@ -139,20 +131,17 @@ export function rowsToStrengthSession(rows: HevyRow[], uid: string): StrengthSes
       exercises.push({ name: exerciseName, sets });
     }
   }
-  const sessionId = generateSessionId(uid, startTimeStr, title);
   return {
-    id: sessionId,
     date: dateStr,
     title,
     start_time: startTimeStr,
     end_time: endTimeStr,
     exercises,
-    createdAt: Timestamp.fromDate(startDate),
     source: "hevy",
   };
 }
 
-export function parseHevyCsvToSessions(csvText: string, uid: string = ""): StrengthSession[] {
+export function parseHevyCsvToSessions(csvText: string): ParsedHevySession[] {
   // Some exports (observed from iOS) mix CRLF and bare-LF line endings within
   // the same file, which makes csv-parse lock onto the wrong record delimiter
   // and throw "Invalid Opening Quote" on the stray \n. Normalize to LF first.
@@ -162,9 +151,9 @@ export function parseHevyCsvToSessions(csvText: string, uid: string = ""): Stren
     relax_column_count: true,
   });
   const sessionGroups = groupRowsBySession(rows);
-  const sessions: StrengthSession[] = [];
+  const sessions: ParsedHevySession[] = [];
   for (const sessionRows of sessionGroups.values()) {
-    const session = rowsToStrengthSession(sessionRows, uid);
+    const session = rowsToStrengthSession(sessionRows);
     if (session) {
       sessions.push(session);
     }
