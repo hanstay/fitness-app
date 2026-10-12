@@ -4,7 +4,7 @@
 // Firestore emulator, with only the LLM boundary mocked. Run via
 // `firebase emulators:exec --only firestore --project demo-ci "npx vitest run test/groupGeneration.integration.test.ts"`
 // — see functions/test/README.md.
-import { vi, describe, it, expect, beforeEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterAll } from "vitest";
 import { FieldValue } from "firebase-admin/firestore";
 import { getTestDb, clearFirestoreEmulator } from "./helpers/emulatorFirestore";
 import { FIXTURES, defaultFixtureResponse } from "./fixtures/llmFixtures";
@@ -48,6 +48,15 @@ async function seedGroup(groupId: string, memberUids: string[], overrides: Recor
     ...overrides,
   });
 }
+
+// Pin the clock (Date only, so emulator I/O timers still run) inside the
+// fixture roadmap's first phase (Base: 2026-08-11 to 2026-10-05). Unpinned,
+// these tests start seeing that phase as ended once the real date passes it,
+// and decideRegen correctly switches to "advance", which reruns Stage A.
+vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-09-15T00:00:00Z") });
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 beforeEach(async () => {
   await clearFirestoreEmulator();
