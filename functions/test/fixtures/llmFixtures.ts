@@ -184,7 +184,7 @@ export function validateFixtures(): void {
  * Wire it up per-test-file with `vi.hoisted`:
  *
  *   const mockExtractStructuredJson = vi.hoisted(() => vi.fn());
- *   vi.mock("../src/lib/claude", () => ({ extractStructuredJson: mockExtractStructuredJson, MODEL: "claude-sonnet-4-5-20250929" }));
+ *   vi.mock("../src/lib/claude", () => ({ extractStructuredJson: mockExtractStructuredJson, MODEL: "claude-sonnet-5-5" }));
  *   beforeEach(() => mockExtractStructuredJson.mockImplementation(defaultFixtureResponse));
  *
  * A single test that needs a different response for one call uses

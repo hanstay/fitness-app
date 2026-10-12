@@ -1,6 +1,6 @@
-// Shared Claude API wrapper — forces structured JSON output via tool-calling
-// (the model MUST call the one tool we give it, so its "input" is already
-// parsed, schema-shaped JSON, not free text to hope-and-parse). Used by
+// Shared Claude API wrapper — gets structured JSON output via tool-calling
+// (the model is told to call the one tool we give it, so its "input" is
+// already parsed, schema-shaped JSON, not free text to hope-and-parse). Used by
 // parseBodyScan, generateProgram, and generateMealPlan.
 import Anthropic from "@anthropic-ai/sdk";
 import type { ZodSchema } from "zod";
@@ -21,7 +21,11 @@ function getClient(): Anthropic {
 // (e.g. generateProgram.ts's `model:` field) reference this single source of
 // truth instead of redeclaring the literal — a future model bump only needs
 // to change it here.
-export const MODEL = "claude-sonnet-4-5-20250929";
+export const MODEL = "claude-sonnet-5-5";
+
+// Ceiling for the larger max_tokens a truncated call is retried with. Kept
+// under the non-streaming request limits the SDK enforces.
+const MAX_TOKENS_CEILING = 16000;
 
 interface ExtractJsonParams<T> {
   system: string;
@@ -39,10 +43,12 @@ interface ExtractJsonParams<T> {
 }
 
 /**
- * Calls Claude with a single forced tool call and validates the result.
- * Retries once (with the validation error fed back to the model) if the
- * first attempt doesn't pass the zod validator — output is still
- * schema-constrained by the tool definition, but zod catches semantic
+ * Calls Claude with a single tool and validates the tool call it makes.
+ * Retries once if the first attempt fails: a response cut off at max_tokens
+ * is retried from scratch with double the token limit (the same limit would
+ * just get cut off again); any other failure (no tool call, or input that
+ * fails the zod validator) is fed back to the model to correct. Output is
+ * still schema-constrained by the tool definition, but zod catches semantic
  * issues (e.g. an out-of-range number) the JSON Schema alone might miss.
  */
 export async function extractStructuredJson<T>(params: ExtractJsonParams<T>): Promise<T> {
@@ -64,17 +70,25 @@ export async function extractStructuredJson<T>(params: ExtractJsonParams<T>): Pr
     input_schema: params.inputSchema as Anthropic.Messages.Tool.InputSchema,
   };
 
+  // Current models reject a forced tool_choice ({ type: "tool" }), so the
+  // tool call is requested in the system prompt instead and checked below.
+  const system = `${params.system}\n\nRespond only by calling the ${params.toolName} tool.`;
   const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content }];
+  let maxTokens = params.maxTokens ?? 4096;
   let lastError = "";
   for (let attempt = 0; attempt < 2; attempt++) {
     const startedAt = Date.now();
     const response = await anthropic.messages.create(
       {
         model: params.model ?? MODEL,
-        max_tokens: params.maxTokens ?? 4096,
-        system: params.system,
+        max_tokens: maxTokens,
+        system,
         tools: [tool],
-        tool_choice: { type: "tool", name: params.toolName },
+        tool_choice: { type: "auto" },
+        // Lowest thinking setting: no extended thinking eating into
+        // max_tokens, matching how these calls ran on the previous model.
+        // The SDK's types predate "between_tools", hence the cast.
+        thinking: { type: "between_tools" } as unknown as Anthropic.Messages.ThinkingConfigParam,
         messages,
       },
       // SDK default is 2 retries — too thin once many users onboard at once
@@ -95,13 +109,25 @@ export async function extractStructuredJson<T>(params: ExtractJsonParams<T>): Pr
       toolName: params.toolName,
       attempt,
       durationMs: Date.now() - startedAt,
-      maxTokens: params.maxTokens ?? 4096,
+      maxTokens,
       model,
       inputTokens,
       outputTokens,
       costUsd: estimateCostUsd(model, inputTokens, outputTokens),
       stopReason: response.stop_reason,
     });
+
+    if (response.stop_reason === "refusal") {
+      throw new Error("Claude declined to generate this output (refusal).");
+    }
+    if (response.stop_reason === "max_tokens") {
+      // Cut off mid-output: the tool input is incomplete, so asking the model
+      // to "correct" it at the same limit would fail the same way. Start the
+      // conversation over with more room instead.
+      lastError = `Output was cut off at max_tokens (${maxTokens}).`;
+      maxTokens = Math.min(maxTokens * 2, MAX_TOKENS_CEILING);
+      continue;
+    }
 
     const toolUse = response.content.find((b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use");
     if (toolUse) {

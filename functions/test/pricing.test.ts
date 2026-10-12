@@ -14,6 +14,10 @@ describe("estimateCostUsd", () => {
       .toBeCloseTo((1000 * 3 + 2000 * 15) / 1_000_000, 10);
   });
 
+  it("prices the current model", () => {
+    expect(estimateCostUsd("claude-sonnet-5-5", 1000, 2000)).toBeCloseTo((1000 * 2 + 2000 * 10) / 1_000_000, 10);
+  });
+
   it("returns null for an unrecognized model", () => {
     expect(estimateCostUsd("claude-opus-9000", 1000, 1000)).toBeNull();
   });

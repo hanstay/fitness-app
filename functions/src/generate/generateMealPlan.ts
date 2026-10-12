@@ -1,6 +1,6 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
-import { extractStructuredJson } from "../lib/claude";
+import { extractStructuredJson, MODEL } from "../lib/claude";
 import { mealPlanJsonSchema, mealPlanSchema } from "../lib/schemas";
 
 // Exported only so the manual latency probe
@@ -104,7 +104,7 @@ export async function runGenerateMealPlan(uid: string) {
   batch.set(newRef, {
     createdAt: FieldValue.serverTimestamp(),
     status: "active",
-    model: "claude-sonnet-4-5-20250929",
+    model: MODEL,
     targetsSnapshot: {
       kcal: currentTargets.target_calories,
       p: currentTargets.protein_g,

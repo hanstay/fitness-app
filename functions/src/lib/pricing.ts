@@ -1,6 +1,7 @@
 // Model pricing for cost-estimate logging (see claude.ts's extractStructuredJson).
 // Update this table when Anthropic's pricing changes — nothing else needs to.
 export const MODEL_PRICING_PER_MTOK: Record<string, { input: number; output: number }> = {
+  "claude-sonnet-5-5": { input: 2, output: 10 },
   "claude-sonnet-4-5-20250929": { input: 3, output: 15 },
 };
 
