@@ -2,10 +2,21 @@
 // any client read/write can succeed under the Security Rules (users/{uid},
 // state/summary, and the credentials shell). Uses the v1 Auth trigger API;
 // Functions v2 has no direct equivalent for a plain Auth onCreate event.
-import * as functionsV1 from "firebase-functions/v1";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
+//
+// Lives in its own codebase (see firebase.json) because v1 functions run on
+// Cloud Functions 1st gen, which doesn't support Node 24 — the main
+// functions/ codebase is on Node 24, this one stays on Node 22. Plain
+// JavaScript so this small codebase needs no build step.
+const functionsV1 = require("firebase-functions/v1");
+const { initializeApp } = require("firebase-admin/app");
+const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 
-export const onUserCreate = functionsV1.auth.user().onCreate(async (user) => {
+initializeApp();
+
+// Named seedNewUser rather than onUserCreate: a function name can't move
+// between codebases in place, so the old one is deleted from the main
+// codebase and this one created in the same deploy.
+exports.seedNewUser = functionsV1.auth.user().onCreate(async (user) => {
   const db = getFirestore();
   const uid = user.uid;
   const now = FieldValue.serverTimestamp();

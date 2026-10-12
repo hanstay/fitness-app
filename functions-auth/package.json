@@ -1,0 +1,13 @@
+{
+  "name": "functions-auth",
+  "description": "Cloud Functions 1st-gen codebase: the Auth onCreate trigger, which can't run on Node 24",
+  "engines": {
+    "node": "22"
+  },
+  "main": "index.js",
+  "private": true,
+  "dependencies": {
+    "firebase-admin": "^14.2.0",
+    "firebase-functions": "^7.4.0"
+  }
+}

@@ -55,3 +55,27 @@ jobs:
       # emulator instance/project, so they must not run concurrently.
       - name: LLM generation integration tests
         run: npx firebase-tools emulators:exec --only firestore --project demo-ci "npx vitest run --no-file-parallelism test/*.integration.test.ts"
+
+  # The Auth onCreate trigger is a 1st-gen function, which can't run on Node
+  # 24, so it lives in its own Node 22 codebase (see firebase.json). No build
+  # step — just check it installs and loads.
+  functions-auth:
+    name: functions-auth install + load
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: functions-auth
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: functions-auth/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Load the module
+        run: node -e "const m = require('./index.js'); if (typeof m.seedNewUser !== 'function') throw new Error('seedNewUser not exported')"
