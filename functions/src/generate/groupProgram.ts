@@ -4,7 +4,7 @@
 // generateProgram.ts's full/incremental split, applied at the group level:
 // Stage A is the group analogue of a full regen, Stage B always runs for the
 // triggering member (roughly analogous cost to an incremental regen).
-import { getFirestore, FieldValue, Firestore } from "firebase-admin/firestore";
+import { getFirestore, FieldValue, Firestore, DocumentData } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import { extractStructuredJson, MODEL } from "../lib/claude";
 import {
@@ -12,8 +12,11 @@ import {
   memberLayerSchema, memberLayerJsonSchema,
   ProgramOutput,
 } from "../lib/schemas";
-import { needsGroupFullRegen, AthleteProfileSnapshot } from "../lib/programDecisions";
-import { gatherGroundingData } from "./groundingData";
+import {
+  decideRegen, groupStructuralChange, roadmapForAdvance, buildContinuationText, normalizeRoadmap, AthleteProfileSnapshot,
+} from "../lib/programDecisions";
+import { gatherGroundingData, loadExerciseVocabulary } from "./groundingData";
+import type { PrescriptionProgram } from "../lib/trainingLog";
 import { applySessionLoads } from "../lib/sessionLoads";
 import { reconcileEvents } from "../lib/eventReconciliation";
 
@@ -51,6 +54,13 @@ fixed weekly sessions — set by the group leader, not inferred — plus every m
    the previous phase's endDate (contiguous, no gaps/overlaps), and the last phase ends at/around
    the nearest event's date when one is given. Code reads these dates to detect a phase change, so
    only leave them null if a phase is genuinely undatable (no event to anchor a timeline).
+   MOVING TO THE NEXT PHASE: when a "Current plan — MOVING TO ITS NEXT PHASE" section is given,
+   the roadmap is FIXED — copy it into "roadmap" exactly as given. weeklyStructure/sessions build
+   the week for the phase marked "PROGRAM THIS BLOCK NOW" (following its focus/lifting/running),
+   and title, progressionRules, deloadGuidance and warmupNotes are written for that phase.
+   REDESIGNING AN EXISTING PLAN: when a "Previous plan (REDESIGN ...)" section is given, don't
+   restart at the first phase or repeat COMPLETED phases — the new roadmap starts with the block
+   marked "PROGRAM THIS BLOCK NOW" (or the next logical block if all are complete).
 3. "daysPerWeek": set to EXACTLY the group's stated training days/week — this is a hard constraint,
    not a suggestion. "weeklyStructure": the group's stated fixed weekly sessions are already
    committed — place each on its given day, don't stack a conflicting hard session on top of it,
@@ -63,21 +73,37 @@ fixed weekly sessions — set by the group leader, not inferred — plus every m
    "substitution_note" to cover equipment/injury differences across the group (e.g. "if no
    barbell, use DB variant"; "if shoulder issue, use neutral-grip press") so the ONE session list
    still works for everyone.
+   EXERCISE NAMES: each member's profile lists the exercise names they actually log in Hevy.
+   Name every exercise exactly as those lists spell it — prefer the spelling most members use —
+   since members log the plan in Hevy and it's compared against their logs by name. For an
+   exercise nobody has logged, use Hevy's pattern "Exercise (Equipment)", e.g. "Romanian
+   Deadlift (Dumbbell)". That's for lifts: runs and conditioning items get a descriptive name,
+   and every item within one session must have its own distinct name — e.g. "Warm-up jog",
+   "Tempo run", "Cool-down jog", never "Running" three times over. With load_note left null here,
+   put shared pace/intensity targets in "reps" (e.g. "2 km @ tempo pace"); "substitution_note" is
+   only for an alternative exercise, not for cues.
 5. progressionRules/deloadGuidance/warmupNotes: general guidance that works for the group.
 
 Call the tool with the complete shared structure; do not respond in prose.`;
 
 export const MEMBER_LAYER_SYSTEM_PROMPT = `You are a strength coach personalizing ONE athlete's loads within a training program their
-group already shares. You are given their own grounding data (progression, adherence, wellness)
-and the group's current session skeleton (exercises/sets/reps already fixed — not yours to
-change). Your job:
+group already shares. You are given their own grounding data — their Hevy training log (every
+working set, with RPE when logged) next to the week they were prescribed, intervals.icu load and
+activities, and when each source was last refreshed — plus the group's current session skeleton
+(exercises/sets/reps already fixed — not yours to change). Read the log like a coach: judge
+progress from the pattern across sessions (load climbing with reps holding vs reps falling or
+RPE rising at the same load), never from one light session, and treat a gap at the end of the
+log with an old import date as a missed upload, not missed training. Your job:
 
 1. "sessionLoads": for every exercise in the given skeleton, write this athlete's own load_note
    (their working weight/intensity/pace — e.g. "work up to a top set of 5 at ~82kg", "zone 2,
-   conversational pace") grounded in their progression/current-lifts data. Match every day/name
-   in the skeleton exactly — do not add, remove, or rename days/exercises.
+   conversational pace") grounded in their actual recent sets in the log (the same lift may be
+   logged under a slightly different name, e.g. "Barbell Squat" for "Squat (Barbell)" — use
+   those sets). Match every day/name in the skeleton exactly and in the same order, one entry
+   per exercise (if a name appears twice in a day, give two entries in that order) — do not add,
+   remove, or rename days/exercises.
 2. "currentState": this athlete's own honest, data-grounded snapshot (same rules as a solo
-   program: cite lift stalls/PRs by name and number, aerobic base from CTL, gaps).
+   program: cite the actual sets behind a stall or PR, aerobic base from CTL, gaps).
 3. "coachNotes"/"sportNotes"/"nutritionNote": this athlete's own individual guidance (injury/
    mobility, event strategy, fueling); null when not relevant.
 
@@ -88,7 +114,10 @@ Call the tool with the complete personal layer; do not respond in prose.`;
 // (see GroupInfo/buildGroupContextText) rather than inferred from combining
 // each member's own, which was a poor proxy for "how many days do you
 // actually train together."
-function buildGroupProfileText(memberAthletes: Record<string, AthleteProfileSnapshotFull>): string {
+function buildGroupProfileText(
+  memberAthletes: Record<string, AthleteProfileSnapshotFull>,
+  memberVocabularies: Record<string, string>
+): string {
   return Object.entries(memberAthletes)
     .map(([uid, a], i) => {
       const eventLines = (a.events || []).map((e) => `  - ${e.name}${e.date ? ` on ${e.date}` : ""}`).join("\n") || "  none listed";
@@ -99,6 +128,8 @@ function buildGroupProfileText(memberAthletes: Record<string, AthleteProfileSnap
         `  Injuries/constraints: ${a.injuries_constraints || "none reported"}`,
         `  Own target events (only used for "events" if the group stated none at all — see instructions):`,
         eventLines,
+        `  Exercise names they log in Hevy (most used first):`,
+        (memberVocabularies[uid] ?? "none logged yet").split("\n").map((l) => `  ${l}`).join("\n"),
       ].join("\n");
     })
     .join("\n\n");
@@ -155,6 +186,30 @@ function buildGroupContextText(group: GroupInfo): string {
 }
 
 /**
+ * The week this member was actually meant to follow — the group program that
+ * was active before this run (Stage A may have just replaced it) with their
+ * own previous loads applied — for comparing against their Hevy log.
+ */
+async function followedPrescription(
+  db: Firestore,
+  groupId: string,
+  uid: string,
+  previousGroupProgram: DocumentData | null,
+  currentSharedProgram: ProgramSharedOutput
+): Promise<PrescriptionProgram> {
+  const base = previousGroupProgram ?? currentSharedProgram;
+  const memberSnap = await db.doc(`groups/${groupId}/members/${uid}`).get().catch(() => null);
+  const sessionLoads = memberSnap?.data()?.sessionLoads;
+  const createdAtMs = previousGroupProgram?.createdAt?.toMillis?.();
+  return {
+    title: base.title,
+    createdAtDate: createdAtMs != null ? new Date(createdAtMs).toISOString().slice(0, 10) : null,
+    weeklyStructure: base.weeklyStructure,
+    sessions: Array.isArray(sessionLoads) ? applySessionLoads(base.sessions, sessionLoads) : base.sessions,
+  };
+}
+
+/**
  * Group analogue of generateProgram.ts's runGenerateProgram. Called for the
  * triggering member (`uid`); regenerates the group's shared structure
  * (Stage A) only if it's missing/stale/structurally out of date for any
@@ -168,7 +223,7 @@ export async function runGenerateGroupProgram(
   groupId: string,
   athlete: AthleteProfileSnapshotFull,
   opts?: { force?: boolean }
-): Promise<{ programId: string } & ProgramOutput> {
+): Promise<{ programId: string } & ProgramOutput & { changeSummary?: string[] }> {
   const db = getFirestore();
   const group = await loadGroup(db, groupId);
   const memberUids = group.memberUids;
@@ -186,28 +241,47 @@ export async function runGenerateGroupProgram(
   const activeGroupProgramDoc = existingActiveSnap.docs[0] ?? null;
   const activeGroupProgram = activeGroupProgramDoc?.data() ?? null;
 
-  const fullRegen = opts?.force || needsGroupFullRegen({
-    memberAthletes,
-    group: { goal: group.goal, daysPerWeek: group.daysPerWeek, events: group.events, fixedSessions: group.fixedSessions },
-    activeProgram: activeGroupProgramDoc
-      ? {
-          profileSnapshots: activeGroupProgram?.profileSnapshots,
-          groupSnapshot: activeGroupProgram?.groupSnapshot,
-          createdAt: activeGroupProgram?.createdAt,
-          roadmap: activeGroupProgram?.roadmap,
-        }
-      : null,
+  // A group program's createdAt only changes when Stage A runs (weekly
+  // check-ins only redo Stage B), so it's a sound block start for programs
+  // saved before blockStartedAt existed.
+  const blockStartedAtMs: number | null =
+    activeGroupProgram?.blockStartedAt?.toMillis?.() ?? activeGroupProgram?.createdAt?.toMillis?.() ?? null;
+  const decision = decideRegen({
+    hasActiveProgram: activeGroupProgram != null,
+    structuralChange: activeGroupProgram != null && groupStructuralChange({
+      memberAthletes,
+      group: { goal: group.goal, daysPerWeek: group.daysPerWeek, events: group.events, fixedSessions: group.fixedSessions },
+      activeProgram: { profileSnapshots: activeGroupProgram.profileSnapshots, groupSnapshot: activeGroupProgram.groupSnapshot },
+    }),
+    state: { roadmap: activeGroupProgram?.roadmap, currentPhaseIndex: activeGroupProgram?.currentPhaseIndex, blockStartedAtMs },
+    force: opts?.force === true,
   });
+  const today = new Date().toISOString().slice(0, 10);
 
   let sharedProgram: ProgramSharedOutput;
   let groupProgramRef = activeGroupProgramDoc?.ref ?? null;
 
-  if (fullRegen) {
+  if (decision.mode !== "incremental") {
     const groupContextText = buildGroupContextText(group);
-    const groupProfileText = buildGroupProfileText(memberAthletes);
+    const memberVocabularies = Object.fromEntries(
+      await Promise.all(memberUids.map(async (muid) => [muid, await loadExerciseVocabulary(db, muid)] as const))
+    );
+    const groupProfileText = buildGroupProfileText(memberAthletes, memberVocabularies);
+    // Where the group is in its existing plan: for "advance", the fixed
+    // roadmap and the phase to program; for a redesign, where to continue from.
+    const continuationText = activeGroupProgram
+      ? buildContinuationText({
+          mode: decision.mode,
+          roadmap: activeGroupProgram.roadmap,
+          targetIndex: decision.targetPhaseIndex ?? 0,
+          reason: decision.reason,
+        })
+      : "";
     const overview = await extractStructuredJson({
       system: GROUP_SYSTEM_PROMPT,
-      userText: `${groupContextText}\n\nGroup members:\n\n${groupProfileText}\n\nGenerate the shared program structure.`,
+      userText: `${groupContextText}\n\nGroup members:\n\n${groupProfileText}${
+        continuationText ? `\n\n${continuationText}` : ""
+      }\n\nGenerate the shared program structure.`,
       toolName: "record_group_program",
       toolDescription: "Record the group's shared training program structure.",
       inputSchema: programSharedJsonSchema,
@@ -217,6 +291,10 @@ export async function runGenerateGroupProgram(
     // Which events appear and their weeksOut are enforced in code, not left
     // to the model — see eventReconciliation.ts for why.
     sharedProgram = { ...overview, events: reconcileEvents(overview.events, group.events) };
+    if (decision.mode === "advance") {
+      // Moving to the next phase keeps the group's periodization — see generateProgram.ts.
+      sharedProgram.roadmap = roadmapForAdvance(normalizeRoadmap(activeGroupProgram!.roadmap), decision.targetPhaseIndex!, today);
+    }
 
     const batch = db.batch();
     existingActiveSnap.forEach((d) => batch.update(d.ref, { status: "archived" }));
@@ -228,38 +306,54 @@ export async function runGenerateGroupProgram(
       ...sharedProgram,
       profileSnapshots: memberAthletes,
       groupSnapshot: { goal: group.goal, daysPerWeek: group.daysPerWeek, events: group.events, fixedSessions: group.fixedSessions },
+      currentPhaseIndex: decision.mode === "advance" ? decision.targetPhaseIndex : 0,
+      blockStartedAt: FieldValue.serverTimestamp(),
     });
     await batch.commit();
     groupProgramRef = newRef;
   } else {
     sharedProgram = activeGroupProgram as ProgramSharedOutput;
   }
+  const currentPhaseIndex = decision.mode === "advance" ? decision.targetPhaseIndex! : decision.mode === "full" ? 0 : decision.fromPhaseIndex ?? 0;
 
   // Stage B: this member's own layer, grounded in their own data, against
   // the (possibly just-regenerated) shared skeleton.
-  const { wellness, currentTargets, activitySummary, progressionBlock, adherenceBlock } =
-    await gatherGroundingData(db, uid, { title: sharedProgram.title, sessions: sharedProgram.sessions });
+  const { wellness, currentTargets, freshnessBlock, activitySummary, trainingLogBlock, prescriptionBlock, exerciseVocabulary, hasHevyLog } =
+    await gatherGroundingData(db, uid, await followedPrescription(db, groupId, uid, activeGroupProgram, sharedProgram));
 
   const liftLines = (athlete.current_lifts || [])
     .map((l) => `- ${l.exercise}: ${l.weight_kg ?? "?"}kg × ${l.reps ?? "?"}${l.date ? ` (${l.date})` : ""}`)
     .join("\n") || "none logged yet";
 
+  // The member layer writes this athlete's coach/event/fueling notes, so tell
+  // it which block the shared program is in — otherwise those notes can keep
+  // describing a phase the group has already moved past.
+  const currentBlock = (() => {
+    const phase = (sharedProgram.roadmap ?? [])[currentPhaseIndex];
+    return phase ? `${phase.phase}${phase.dates ? ` (${phase.dates})` : ""} — focus: ${phase.focus}` : "not specified";
+  })();
+
   const memberProfileText = [
+    `Group program: ${sharedProgram.title}`,
+    `Current block: ${currentBlock} — write coachNotes/sportNotes/nutritionNote for THIS block`,
     `Training days/week: ${athlete.training_days_per_week}`,
     `Goal: ${athlete.goal || "general fitness"}`,
     `Injuries/constraints: ${athlete.injuries_constraints || "none reported"}`,
+    freshnessBlock,
+    ``,
     `Training load (from intervals.icu): ${
       wellness ? `CTL ${wellness.ctl}, ATL ${wellness.atl}, TSB ${wellness.tsb} (as of ${wellness.asOf})` : "not connected"
     }`,
-    `Recent activities (most recent first):`,
+    `Recent activities (intervals.icu, most recent first):`,
     activitySummary,
     ``,
-    `Current lifts (most recent working sets):`,
-    liftLines,
+    ...(hasHevyLog ? [] : [`Current lifts (from profile):`, liftLines, ``]),
+    trainingLogBlock,
     ``,
-    progressionBlock,
+    prescriptionBlock,
     ``,
-    adherenceBlock,
+    `Exercise names this athlete logs in Hevy:`,
+    exerciseVocabulary,
     ``,
     `Current macro targets: ${
       currentTargets ? `${currentTargets.target_calories} kcal, ${currentTargets.protein_g}P/${currentTargets.carbs_g}C/${currentTargets.fat_g}F` : "not calculated"
@@ -304,5 +398,13 @@ export async function runGenerateGroupProgram(
     coachNotes: memberLayer.coachNotes,
     sportNotes: memberLayer.sportNotes,
     nutritionNote: memberLayer.nutritionNote,
+    ...(decision.mode === "advance"
+      ? {
+          changeSummary: [
+            `Moved to the next phase of the group plan: ${activeGroupProgram?.roadmap?.[decision.fromPhaseIndex!]?.phase ?? "previous phase"} → ${sharedProgram.roadmap[currentPhaseIndex]?.phase ?? "next phase"}.`,
+            ...(memberLayer.currentState?.highlights ?? []),
+          ],
+        }
+      : {}),
   };
 }

@@ -21,6 +21,8 @@ interface IntervalsActivity {
   average_speed?: number;
   average_heartrate?: number;
   icu_training_load?: number;
+  icu_hr_zones?: number[];
+  interval_summary?: string[];
 }
 
 interface IntervalsWellness {
@@ -94,6 +96,8 @@ export async function syncIntervalsActivitiesForUser(
       pace: formatPace(a.average_speed, type),
       avg_hr: a.average_heartrate ? Math.round(a.average_heartrate) : null,
       training_load: a.icu_training_load ?? null,
+      hrZones: a.icu_hr_zones ?? null,
+      intervalSummary: a.interval_summary ?? null,
       ctl: wellness?.ctl ?? null,
       atl: wellness?.atl ?? null,
       tsb: wellness?.tsb ?? null,
