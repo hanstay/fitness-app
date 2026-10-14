@@ -64,59 +64,96 @@
     <div class="wizard-head">
       <div>
         <p class="wizard-step-label">Step 2 of 3 · Optional</p>
-        <p class="wizard-title">Training</p>
+        <p class="wizard-title">Your training week</p>
       </div>
       <div class="progress-track"><div class="progress-fill" style="width:66%"></div></div>
     </div>
     <div class="wizard-body">
-      <h3>Set up your training plan</h3>
-      <p class="lead">Fill this in to generate a training program. Skip it and you can set it up any time from your dashboard.</p>
+      <h3>Your training week</h3>
+      <p class="lead">Days and session length are all we need to build your program. Skip this and you can set it up any time from your dashboard.</p>
 
-      <fieldset class="field-group">
-        <legend>Connect your data (optional)</legend>
-        <p class="hint">Gives your program a head start with real training history.</p>
-        <button class="btn secondary" id="icuConnectBtn" type="button">Connect with intervals.icu</button>
-        <p class="note" id="icuStatus"></p>
-        <div class="field" style="margin-top:14px">
-          <label for="hevyFile">Hevy workout export (CSV)</label>
-          <input class="input" type="file" id="hevyFile" accept=".csv">
+      <fieldset class="choice-group">
+        <legend>Days per week <span class="req">for program</span></legend>
+        <div class="seg">
+          <label><input type="radio" name="training_days_per_week" value="2"><span>2</span></label>
+          <label><input type="radio" name="training_days_per_week" value="3"><span>3</span></label>
+          <label><input type="radio" name="training_days_per_week" value="4"><span>4</span></label>
+          <label><input type="radio" name="training_days_per_week" value="5"><span>5</span></label>
+          <label><input type="radio" name="training_days_per_week" value="6"><span>6</span></label>
         </div>
-        <button class="btn secondary" id="hevyUploadBtn" type="button">Upload &amp; import lifts</button>
-        <p class="note" id="hevyStatus"></p>
+      </fieldset>
+
+      <fieldset class="choice-group">
+        <legend>Session length <span class="req">for program</span></legend>
+        <div class="seg">
+          <label><input type="radio" name="session_length_minutes" value="45"><span>45 min</span></label>
+          <label><input type="radio" name="session_length_minutes" value="60"><span>60 min</span></label>
+          <label><input type="radio" name="session_length_minutes" value="75"><span>75 min</span></label>
+          <label><input type="radio" name="session_length_minutes" value="90"><span>90 min</span></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="choice-group">
+        <legend>Equipment</legend>
+        <div class="chips">
+          <label><input type="checkbox" name="equipment" value="barbell"><span>Barbell</span></label>
+          <label><input type="checkbox" name="equipment" value="dumbbells"><span>Dumbbells</span></label>
+          <label><input type="checkbox" name="equipment" value="cables"><span>Cables</span></label>
+          <label><input type="checkbox" name="equipment" value="kettlebells"><span>Kettlebells</span></label>
+          <label><input type="checkbox" name="equipment" value="machines"><span>Machines</span></label>
+          <label><input type="checkbox" name="equipment" value="bodyweight"><span>Bodyweight</span></label>
+          <label><input type="checkbox" id="equipmentOtherToggle" aria-controls="equipmentOtherField"><span>+ Other</span></label>
+        </div>
+        <div class="field" id="equipmentOtherField" hidden style="margin-top:12px">
+          <label for="equipment_other">Other equipment (comma-separated)</label>
+          <input class="input" type="text" id="equipment_other" placeholder="e.g. rower, assault bike">
+        </div>
       </fieldset>
 
       <fieldset class="field-group">
-        <legend>Training details</legend>
-        <p class="hint">Days/week and session length are needed to generate a program.</p>
-        <div class="field"><label for="training_days_per_week">Days/week available <span class="req">for program</span></label><input class="input" type="number" min="1" max="7" id="training_days_per_week"></div>
-        <div class="field"><label for="session_length_minutes">Session length (minutes) <span class="req">for program</span></label><input class="input" type="number" id="session_length_minutes"></div>
-        <div class="field"><label for="training_experience_years">Years training</label><input class="input" type="number" step="0.5" id="training_experience_years"></div>
-        <div class="field"><label for="preferred_split">Preferred split (optional)</label><input class="input" type="text" id="preferred_split" placeholder="e.g. Push/Pull/Legs"></div>
-        <div class="field"><label for="equipment">Equipment (comma-separated)</label><input class="input" type="text" id="equipment" placeholder="barbell, dumbbells, cables, kettlebells"></div>
-      </fieldset>
+        <legend>Make it more personal · optional</legend>
 
-      <fieldset class="field-group">
-        <legend>Group classes / fixed sessions (optional)</legend>
-        <p class="hint">Regular classes that are already part of your week (these count toward your days/week above). Your program anchors these on their day and builds the rest of the week around them.</p>
-        <div id="commitmentsEditor"></div>
-      </fieldset>
+        <details class="disclosure">
+          <summary><span><span class="disclosure-title">Import past workouts</span><span class="disclosure-hint">Hevy CSV or intervals.icu</span></span></summary>
+          <div class="disclosure-body">
+            <div class="field">
+              <label for="hevyFile">Hevy workout export (CSV)</label>
+              <input class="input" type="file" id="hevyFile" accept=".csv">
+            </div>
+            <p class="note" id="hevyStatus" role="status"></p>
+            <button class="btn secondary" id="icuConnectBtn" type="button">Connect with intervals.icu</button>
+            <p class="note" id="icuStatus"></p>
+          </div>
+        </details>
 
-      <fieldset class="field-group">
-        <legend>Target events (optional)</legend>
-        <p class="hint">Races or competitions you're training for, with dates — your program periodizes toward these. Leave blank if you have none.</p>
-        <div id="eventsEditor"></div>
-      </fieldset>
+        <details class="disclosure">
+          <summary><span><span class="disclosure-title">Classes you already go to</span><span class="disclosure-hint">We'll plan around them</span></span></summary>
+          <div class="disclosure-body">
+            <p class="hint">These count toward your days per week.</p>
+            <div id="commitmentsEditor"></div>
+          </div>
+        </details>
 
-      <fieldset class="field-group">
-        <legend>Goals &amp; constraints (optional)</legend>
-        <div class="field"><label for="goal">Overall goal</label><textarea class="input" id="goal" placeholder="Your general focus — e.g. build strength while improving conditioning. Add specific races above."></textarea></div>
-        <div class="field"><label for="injuries_constraints">Injuries / constraints</label><textarea class="input" id="injuries_constraints"></textarea></div>
+        <details class="disclosure">
+          <summary><span><span class="disclosure-title">A race or event</span><span class="disclosure-hint">Your plan builds toward it</span></span></summary>
+          <div class="disclosure-body">
+            <div id="eventsEditor"></div>
+          </div>
+        </details>
+
+        <details class="disclosure">
+          <summary><span><span class="disclosure-title">Goal and injuries</span><span class="disclosure-hint">Anything to work around</span></span></summary>
+          <div class="disclosure-body">
+            <div class="field"><label for="goal">Overall goal</label><textarea class="input" id="goal" placeholder="Your general focus — e.g. build strength while improving conditioning. Add specific races above."></textarea></div>
+            <div class="field"><label for="injuries_constraints">Injuries / constraints</label><textarea class="input" id="injuries_constraints"></textarea></div>
+          </div>
+        </details>
       </fieldset>
 
       <div class="btn-row">
         <button class="btn secondary" id="step2BackBtn" type="button">Back</button>
         <button class="btn secondary" id="step2SkipBtn" type="button">Skip</button>
-        <button class="btn grow" id="step2ContinueBtn" type="button">Save &amp; continue</button>
+        <button class="btn grow" id="step2ContinueBtn" type="button">Continue</button>
       </div>
     </div>
   </section>

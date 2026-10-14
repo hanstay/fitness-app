@@ -118,8 +118,8 @@ footer{color:var(--text-secondary); font-size:.8rem; text-align:center; padding:
 .card.narrow{max-width:440px; margin:0 auto}
 
 .field{margin:0 0 16px}
-.field label{display:block; font-size:.72rem; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.4px; margin:0 0 7px}
-.field label .req{color:var(--accent-dark); background:var(--accent-soft); border-radius:5px; padding:1px 6px; margin-left:6px; font-size:.62rem; letter-spacing:.3px}
+.field label, .choice-group legend{display:block; font-size:.72rem; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.4px; margin:0 0 7px}
+.field label .req, .choice-group legend .req{color:var(--accent-dark); background:var(--accent-soft); border-radius:5px; padding:1px 6px; margin-left:6px; font-size:.62rem; letter-spacing:.3px}
 .hint{font-size:.78rem; color:var(--text-secondary); margin:0 0 12px}
 .field .hint{margin:5px 0 0}
 .input, select.input, textarea.input{
@@ -178,6 +178,33 @@ fieldset.field-group legend{padding:0 6px; font-size:.72rem; font-weight:700; co
 .wizard-body.center .spinner{margin:0 auto 16px}
 .wizard-body.center .lead{margin:0 auto; max-width:340px}
 .btn-row .btn.grow{flex:1}
+
+/* Tap-to-choose fields: radios drawn as a segmented control (.seg) and
+   checkboxes drawn as toggle chips (.chips). The native inputs stay in the
+   DOM, only visually hidden, so labels, Tab, arrow keys and Space all work. */
+.choice-group{border:0; padding:0; margin:0 0 16px; min-width:0}
+.choice-group legend{padding:0}
+.seg{display:flex; gap:6px}
+.seg label{flex:1}
+.chips{display:flex; flex-wrap:wrap; gap:8px}
+.seg label, .chips label{position:relative; cursor:pointer}
+.seg input, .chips input{position:absolute; opacity:0; pointer-events:none}
+.seg span{display:block; text-align:center; padding:11px 0; border:1px solid var(--border); border-radius:var(--radius-sm); font-size:.9rem; font-weight:600}
+.seg input:checked + span{background:var(--accent); border-color:var(--accent); color:#ffffff}
+.chips span{display:inline-block; padding:8px 14px; border:1px solid var(--border); border-radius:999px; font-size:.86rem; font-weight:600}
+.chips input:checked + span{background:var(--accent-soft); border-color:#f3cfd0; color:var(--accent-dark)}
+.seg input:focus-visible + span, .chips input:focus-visible + span{outline:2px solid var(--accent); outline-offset:2px}
+
+/* Optional rows that open in place (<details>): a title, a one-line hint,
+   and a +/− marker in place of the native disclosure triangle. */
+.disclosure + .disclosure{border-top:1px solid var(--border)}
+.disclosure > summary{display:flex; align-items:center; gap:12px; padding:10px 0; cursor:pointer; list-style:none}
+.disclosure > summary::-webkit-details-marker{display:none}
+.disclosure > summary::after{content:"+"; margin-left:auto; color:var(--accent-dark); font-size:1.25rem; font-weight:700; line-height:1}
+.disclosure[open] > summary::after{content:"−"}
+.disclosure-title{display:block; font-weight:600; font-size:.94rem}
+.disclosure-hint{display:block; font-size:.8rem; color:var(--text-secondary)}
+.disclosure-body{padding:4px 0 14px}
 
 /* Content list card */
 .item-card{display:flex; gap:14px; padding:14px; background:var(--card); border:1px solid var(--border); border-radius:var(--radius); margin:0 0 12px; align-items:center; text-decoration:none}
