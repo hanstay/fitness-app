@@ -395,7 +395,7 @@ export async function runGenerateGroupProgram(
   // there); set() replaces the whole doc, so a later run without one clears it.
   // groupProgramId: the shared program this layer was written against, so the
   // summary isn't shown once another member's run has replaced that program.
-  await commitProgramGeneration(uid, opts?.placeholder, (tx) => {
+  await commitProgramGeneration(uid, opts?.placeholder, async (tx) => {
     tx.set(db.doc(`groups/${groupId}/members/${uid}`), {
       ...memberLayer,
       ...(changeSummary ? { changeSummary } : {}),

@@ -45,10 +45,13 @@ const queue = (uid: string, data?: unknown) =>
   queueProgramGeneration.run({ auth: { uid }, data } as unknown as QueueRequest) as Promise<{ programId: string }>;
 
 // Delivers the placeholder's write to the trigger the way Eventarc would.
-async function deliver(uid: string, programId: string) {
+async function eventFor(uid: string, programId: string) {
   const after = await db.doc(`users/${uid}/programs/${programId}`).get();
-  await onProgramGenerationRequested.run({ params: { uid, programId }, data: { after } } as unknown as TriggerEvent);
+  return { params: { uid, programId }, data: { after } } as unknown as TriggerEvent;
 }
+const deliver = async (uid: string, programId: string) => onProgramGenerationRequested.run(await eventFor(uid, programId));
+const programDocs = async (uid: string, status: string) =>
+  (await db.collection(`users/${uid}/programs`).where("status", "==", status).get()).size;
 
 const summaryOf = async (uid: string) => (await db.doc(`users/${uid}/state/summary`).get()).data();
 const placeholderExists = async (uid: string, programId: string) =>
@@ -199,5 +202,56 @@ describe("direct generation", () => {
     await runGenerateProgram("d3");
 
     expect(await summaryOf("d3")).toMatchObject({ programGenerationStatus: "generating", programGenerationId: programId });
+  });
+
+  it("ends a stalled queued run for good, so the sweep doesn't then fail it", async () => {
+    await seedUser("d4");
+    const { programId } = await queue("d4");
+    const longAgo = Timestamp.fromMillis(Date.now() - 60 * 60 * 1000);
+    await db.doc(`users/d4/programs/${programId}`).update({ createdAt: longAgo });
+    await db.doc("users/d4/state/summary").update({ programGenerationStartedAt: longAgo });
+
+    await runGenerateProgram("d4");
+    await sweep();
+
+    expect(await placeholderExists("d4", programId)).toBe(false);
+    expect(await summaryOf("d4")).not.toHaveProperty("programGenerationStatus");
+  });
+});
+
+describe("duplicate and concurrent runs", () => {
+  it("a repeated delivery of the same event generates once", async () => {
+    await seedUser("r1");
+    const { programId } = await queue("r1");
+    const event = await eventFor("r1", programId);
+
+    await onProgramGenerationRequested.run(event);
+    await onProgramGenerationRequested.run(event);
+
+    expect(mockRunGenerateProgram).toHaveBeenCalledTimes(1);
+    expect(await programDocs("r1", "active")).toBe(1);
+  });
+
+  it("two deliveries racing each other commit one program", async () => {
+    await seedUser("r2");
+    const { programId } = await queue("r2");
+    const event = await eventFor("r2", programId);
+
+    await Promise.all([onProgramGenerationRequested.run(event), onProgramGenerationRequested.run(event)]);
+
+    expect((await db.collection("users/r2/programs").get()).size).toBe(1);
+    expect(await programDocs("r2", "active")).toBe(1);
+  });
+
+  it("two overlapping generations leave exactly one active program", async () => {
+    await seedUser("r3");
+    await runGenerateProgram("r3"); // an existing active program both runs archive
+    const first = await queue("r3");
+    const second = await queue("r3");
+
+    await Promise.all([deliver("r3", first.programId), deliver("r3", second.programId)]);
+
+    expect(await programDocs("r3", "active")).toBe(1);
+    expect(await programDocs("r3", "archived")).toBe(2);
   });
 });

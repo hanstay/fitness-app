@@ -25,6 +25,9 @@ export const onProgramGenerationRequested = onDocumentWritten(
   async (event) => {
     const after = event.data?.after;
     if (!after?.exists || after.data()?.status !== "generating") return;
+    // Events are delivered at least once: a placeholder that's gone by now
+    // was already handled by an earlier delivery (or ended by a direct run).
+    if (!(await after.ref.get()).exists) return;
 
     try {
       // runGenerateProgram archives every prior "active" program and writes a

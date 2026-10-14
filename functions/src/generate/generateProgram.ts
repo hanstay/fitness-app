@@ -510,8 +510,10 @@ export async function runGenerateProgram(
   }
 
   const newRef = db.collection(`users/${uid}/programs`).doc();
-  await commitProgramGeneration(uid, opts?.placeholder, (tx) => {
-    existingActiveSnap.forEach((d) => tx.update(d.ref, { status: "archived" }));
+  await commitProgramGeneration(uid, opts?.placeholder, async (tx) => {
+    // Re-read in the transaction: an overlapping run may have committed since.
+    const activeSnap = await tx.get(db.collection(`users/${uid}/programs`).where("status", "==", "active"));
+    activeSnap.forEach((d) => tx.update(d.ref, { status: "archived" }));
     tx.set(newRef, {
       createdAt: FieldValue.serverTimestamp(),
       status: "active",

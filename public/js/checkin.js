@@ -202,23 +202,27 @@ function renderGenerationStatus() {
   regenBtn.disabled = queuing || inFlight;
   regenBtn.innerHTML = queuing ? `<span class="spinner"></span> Starting…` : regenLabel;
   const statusEl = document.getElementById("regenStatus");
+  // A live region: only touch it when the text changes, so it isn't
+  // re-announced on every snapshot.
+  const setStatusText = (text) => { if (statusEl.textContent !== text) statusEl.textContent = text; };
   if (inFlight) {
-    followingId ??= s.programGenerationId ?? null;
-    statusEl.textContent = UPDATING_MSG;
+    // A newer generation (e.g. from another tab) replaces a stalled one.
+    followingId = s.programGenerationId ?? followingId;
+    setStatusText(UPDATING_MSG);
   } else if (followingId && s?.programGenerationId === followingId) {
     if (s.programGenerationStatus === "generating") {
       // Stalled: keep following it, so the stale sweep's error still shows.
-      statusEl.textContent = STALLED_MSG;
+      setStatusText(STALLED_MSG);
     } else if (s.programGenerationStatus === "error") {
       followingId = null;
-      statusEl.textContent = "";
+      setStatusText("");
       showError(`Couldn't update your program: ${s.programGenerationError || "unknown error"}`);
     } else {
       followingId = null;
       statusEl.innerHTML = `Your plan is updated. <a href="program.html">See your updated plan →</a>`;
     }
   } else if (statusEl.textContent === UPDATING_MSG) {
-    statusEl.textContent = ""; // one whose outcome isn't ours to report (no id, or stalled)
+    setStatusText(""); // one whose outcome isn't ours to report (no id, or stalled)
   }
 }
 
