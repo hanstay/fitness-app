@@ -133,20 +133,26 @@
     clearMessages();
   }
 
+  // The mode links do nothing while a request is in flight, so its result
+  // can't land in a different view.
   toggleModeLink.addEventListener("click", (e) => {
     e.preventDefault();
+    if (submitBtn.disabled) return;
     setMode(mode === "signin" ? "signup" : "signin");
   });
 
   document.getElementById("forgotLink").addEventListener("click", (e) => {
     e.preventDefault();
+    if (submitBtn.disabled) return;
     setMode("reset");
     emailInput.focus();
   });
 
   document.getElementById("backLink").addEventListener("click", (e) => {
     e.preventDefault();
+    if (submitBtn.disabled) return;
     setMode("signin");
+    (emailInput.value ? passwordInput : emailInput).focus();
   });
 
   async function afterSignIn() {
@@ -165,8 +171,9 @@
 
   function friendlyError(err) {
     const code = err?.code || "";
-    if (code.includes("wrong-password") || code.includes("invalid-credential")) return "Incorrect email or password.";
-    if (code.includes("user-not-found")) return "No account found with that email.";
+    // user-not-found gets the same message so sign-in never reveals whether
+    // an email has an account.
+    if (code.includes("wrong-password") || code.includes("invalid-credential") || code.includes("user-not-found")) return "Incorrect email or password.";
     if (code.includes("email-already-in-use")) return "An account with that email already exists — try signing in instead.";
     if (code.includes("weak-password")) return "Password must be at least 6 characters.";
     if (code.includes("popup-closed-by-user")) return "Sign-in was cancelled.";
@@ -176,17 +183,14 @@
     return "Something went wrong. Please try again.";
   }
 
-  // Only these reset failures are worth showing. Anything else (notably
-  // user-not-found) gets the same confirmation as a real send, so the form
-  // never reveals whether an email has an account.
-  const RESET_ERRORS = ["invalid-email", "missing-email", "network-request-failed", "too-many-requests"];
-
   async function sendResetLink(email) {
     try {
       await sendPasswordResetEmail(auth, email);
     } catch (err) {
-      console.error("[auth] password reset", err);
-      if (RESET_ERRORS.some((c) => err?.code?.includes(c))) {
+      // user-not-found gets the same confirmation as a real send, so the
+      // form never reveals whether an email has an account.
+      if (!err?.code?.includes("user-not-found")) {
+        console.error("[auth] password reset", err);
         showError(friendlyError(err));
         return;
       }

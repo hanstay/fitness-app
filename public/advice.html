@@ -74,14 +74,27 @@
 <script type="module">
   import { doc, getDoc, getDocs, collection, query, where, limit } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
   import { db } from "./js/firebase-init.js";
-  import { requireOnboarded } from "./js/auth-guard.js";
-
-  const session = await requireOnboarded();
-  if (!session) throw new Error("redirecting");
-  const { user } = session;
+  import { requireOnboarded, revealPage } from "./js/auth-guard.js";
 
   const main = document.getElementById("mainContent");
   const tocLinks = document.getElementById("tocLinks");
+
+  // Also used when the auth/profile check itself fails, which leaves the
+  // veil up, so lift it first.
+  const showLoadError = (err) => {
+    console.error("[advice] failed to load", err);
+    revealPage();
+    document.getElementById("pageSub").textContent = "Couldn't load your advice.";
+    main.innerHTML = `
+      <section><div class="state-box">
+        <p>Something went wrong loading your advice.</p>
+        <button class="btn secondary" type="button" onclick="location.reload()">Retry</button>
+      </div></section>`;
+  };
+
+  const session = await requireOnboarded().catch((err) => { showLoadError(err); return null; });
+  if (!session) throw new Error("redirecting");
+  const { user } = session;
 
   const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
   // Which roadmap phase the plan is programming: the phase stored on the
@@ -260,13 +273,7 @@
     document.querySelectorAll("main section").forEach((s) => obs.observe(s));
   }
   } catch (err) {
-    console.error("[advice] failed to load", err);
-    document.getElementById("pageSub").textContent = "Couldn't load your advice.";
-    main.innerHTML = `
-      <section><div class="state-box">
-        <p>Something went wrong loading your advice.</p>
-        <button class="btn secondary" type="button" onclick="location.reload()">Retry</button>
-      </div></section>`;
+    showLoadError(err);
   }
 </script>
 </body>
