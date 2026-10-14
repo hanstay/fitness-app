@@ -528,7 +528,7 @@ export async function runGenerateProgram(
         ? Timestamp.fromMillis(blockStartedAtMs)
         : FieldValue.serverTimestamp(),
     });
-    tx.update(db.doc(`users/${uid}/state/summary`), { currentProgramId: newRef.id });
+    return { currentProgramId: newRef.id };
   });
 
   return { programId: newRef.id, ...mergedProgram, ...(changeSummary ? { changeSummary } : {}) };

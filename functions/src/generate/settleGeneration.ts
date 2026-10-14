@@ -31,16 +31,18 @@ export async function settleGeneration(
 }
 
 /**
- * Commits a program generation's result (`write`) in one transaction with the
- * end of the generation, so a run can't be left half-recorded. A queued run
- * (`placeholder`, from onProgramGenerationRequested.ts) settles as above. A
- * direct run (the generateProgram onCall) clears whatever status is left over
- * unless a queued generation is still in flight.
+ * Commits a program generation's result in one transaction with the end of
+ * the generation, so a run can't be left half-recorded. `write` writes the
+ * result and returns any summary fields to set alongside, so the summary is
+ * written once. A queued run (`placeholder`, from
+ * onProgramGenerationRequested.ts) settles as above. A direct run (the
+ * generateProgram onCall) clears whatever status is left over unless a queued
+ * generation is still in flight.
  */
 export async function commitProgramGeneration(
   uid: string,
   placeholder: DocumentReference | undefined,
-  write: (tx: Transaction) => void
+  write: (tx: Transaction) => Record<string, unknown>
 ): Promise<void> {
   const db = getFirestore();
   const summaryRef = db.doc(`users/${uid}/state/summary`);
@@ -50,13 +52,11 @@ export async function commitProgramGeneration(
       ? tracks(summary, "programGenerationId", placeholder)
       : summary.get("programGenerationStatus") !== "generating" ||
         isStaleGeneration(summary.get("programGenerationStartedAt")?.toDate() ?? null, Date.now());
-    write(tx);
+    const summaryUpdate = {
+      ...write(tx),
+      ...(ends ? { programGenerationStatus: FieldValue.delete(), programGenerationStartedAt: FieldValue.delete() } : {}),
+    };
     if (placeholder) tx.delete(placeholder);
-    if (ends) {
-      tx.update(summaryRef, {
-        programGenerationStatus: FieldValue.delete(),
-        programGenerationStartedAt: FieldValue.delete(),
-      });
-    }
+    if (Object.keys(summaryUpdate).length) tx.update(summaryRef, summaryUpdate);
   });
 }

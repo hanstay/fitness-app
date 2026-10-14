@@ -403,6 +403,7 @@ export async function runGenerateGroupProgram(
       profileSnapshot: athlete,
       updatedAt: FieldValue.serverTimestamp(),
     });
+    return {};
   });
 
   const sessions = applySessionLoads(sharedProgram.sessions, memberLayer.sessionLoads);
