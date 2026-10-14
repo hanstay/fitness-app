@@ -356,7 +356,7 @@ export const programUpdateJsonSchema = {
     currentState: currentStateJsonSchema,
     weeklyStructure: {
       type: "array",
-      description: "Day-by-day overview of the adjusted current week, with placement rationale.",
+      description: "Day-by-day overview of the adjusted current week, with placement rationale: all 7 days, rest days included (a rest day's focus is just \"Rest\").",
       items: weeklyDayJsonSchema,
     },
     sessions: {

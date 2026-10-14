@@ -67,26 +67,53 @@ describe("mergeIncrementalSessions", () => {
 });
 
 describe("mergeUpdatedWeek", () => {
+  const ALL: SessionOutput["day"][] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
   const existing = [session("Monday", "Upper"), session("Tuesday", "Run"), session("Wednesday", "Lower")];
-  const week = (...days: Array<[SessionOutput["day"], string]>) => days.map(([day, focus]) => ({ day, focus, note: null }));
+  // A full seven-day weeklyStructure: the given focuses, every other day "Rest".
+  const fullWeek = (focus: Partial<Record<SessionOutput["day"], string>>) =>
+    ALL.map((day) => ({ day, focus: focus[day] ?? "Rest", note: null }));
 
-  it("drops a carried-forward session on a day the update makes a rest day", () => {
-    const update = { weeklyStructure: week(["Monday", "Upper"], ["Tuesday", "Rest"], ["Wednesday", "Recovery"]), sessions: [] };
-    expect(mergeUpdatedWeek(existing, update)).toEqual([session("Monday", "Upper")]);
+  it.each(["Rest", "Rest day", "Recovery", "Off", "  recovery DAY. ", "Off day"])(
+    "drops a carried-forward session on a day whose focus is %j",
+    (focus) => {
+      const update = { weeklyStructure: fullWeek({ Monday: "Upper", Tuesday: focus, Wednesday: "Lower" }), sessions: [] };
+      expect(mergeUpdatedWeek(existing, update)).toEqual([session("Monday", "Upper"), session("Wednesday", "Lower")]);
+    }
+  );
+
+  it.each(["Recovery run", "Recovery run (Z2)", "Recovery: easy spin", "Rest / mobility", "Active recovery", "Upper + recovery run", "Rest-pause upper"])(
+    "keeps a carried-forward session on a day whose focus is %j",
+    (focus) => {
+      const update = { weeklyStructure: fullWeek({ Monday: "Upper", Tuesday: focus, Wednesday: "Lower" }), sessions: [] };
+      expect(mergeUpdatedWeek(existing, update)).toEqual(existing);
+    }
+  );
+
+  it("keeps a day listed twice when either entry trains", () => {
+    const weeklyStructure = [...fullWeek({ Monday: "Upper", Wednesday: "Lower" }), { day: "Tuesday" as const, focus: "Run", note: null }];
+    expect(mergeUpdatedWeek(existing, { weeklyStructure, sessions: [] })).toEqual(existing);
   });
 
-  it("keeps it when rest or recovery is only part of the day's focus", () => {
-    const update = { weeklyStructure: week(["Monday", "Upper + recovery run"], ["Tuesday", "Forest trail run"], ["Wednesday", "Lower"]), sessions: [] };
-    expect(mergeUpdatedWeek(existing, update)).toEqual(existing);
-  });
-
-  it("drops the old day of a session the update moved, even when it leaves that day out", () => {
+  it("drops the old day of a session the update moved, now marked rest", () => {
     const update = {
-      weeklyStructure: week(["Monday", "Upper"], ["Wednesday", "Lower"], ["Thursday", "Run"]),
+      weeklyStructure: fullWeek({ Monday: "Upper", Wednesday: "Lower", Thursday: "Run" }),
       sessions: [session("Thursday", "Run")],
     };
     expect(mergeUpdatedWeek(existing, update))
       .toEqual([session("Monday", "Upper"), session("Wednesday", "Lower"), session("Thursday", "Run")]);
+  });
+
+  it("keeps the sessions of days a partial weeklyStructure leaves out", () => {
+    const update = {
+      weeklyStructure: [{ day: "Monday" as const, focus: "Upper", note: null }, { day: "Thursday" as const, focus: "Run", note: null }],
+      sessions: [session("Thursday", "Run")],
+    };
+    expect(mergeUpdatedWeek(existing, update)).toEqual([...existing, session("Thursday", "Run")]);
+  });
+
+  it("still drops a rest day's session in a partial weeklyStructure", () => {
+    const update = { weeklyStructure: [{ day: "Tuesday" as const, focus: "Rest", note: null }], sessions: [] };
+    expect(mergeUpdatedWeek(existing, update)).toEqual([session("Monday", "Upper"), session("Wednesday", "Lower")]);
   });
 
   it("keeps every carried-forward session when the update has no weeklyStructure", () => {

@@ -27,25 +27,31 @@ export function mergeIncrementalSessions(
   return merged;
 }
 
+// A day's focus that says it is a rest day and nothing more ("Rest",
+// "Recovery day.", "Off"). Anything else — "Recovery run", "Rest / mobility",
+// "Active recovery" — still trains: keeping a session is safe, dropping one
+// loses training.
+const REST_FOCUS = /^\s*(rest|recovery|off)(\s+day)?\s*[.!:;,-]*\s*$/i;
+export const isRestFocus = (focus: string): boolean => REST_FOCUS.test(focus);
+
 /**
- * A weekly update's sessions merged over the stored week, keeping a
- * carried-forward session only on a day the update's weeklyStructure still
- * trains on: a placement change (e.g. moving a lifting day off an injured
- * day, or Tuesday's run to Thursday) marks the old day "Rest"/"Recovery" or
- * leaves it out without re-emitting it in "sessions", and its old session
- * mustn't linger there. "Rest"/"Recovery" must lead the focus — "Upper +
- * recovery run" still trains. An update with no weeklyStructure keeps them all.
+ * A weekly update's sessions merged over the stored week. A placement change
+ * (e.g. moving a lifting day off an injured day, or Tuesday's run to
+ * Thursday) marks the old day as rest without re-emitting it in "sessions",
+ * and its old session mustn't linger there, so a carried-forward session is
+ * dropped on a day the update's weeklyStructure marks as rest (see
+ * isRestFocus). A day the weeklyStructure leaves out keeps its sessions (the
+ * update is asked for all seven days, so a missing one is an omission, not a
+ * rest day), as does every day when the weeklyStructure is empty.
  */
 export function mergeUpdatedWeek(
   existingSessions: SessionOutput[],
   update: Pick<ProgramOutput, "weeklyStructure" | "sessions">
 ): SessionOutput[] {
-  const trainingDays = new Set(
-    update.weeklyStructure.filter((d) => !/^(rest|recovery)\b/i.test(d.focus)).map((d) => d.day)
-  );
-  const carried = update.weeklyStructure.length === 0
-    ? existingSessions
-    : existingSessions.filter((s) => trainingDays.has(s.day));
+  const listed = new Set<string>(update.weeklyStructure.map((d) => d.day));
+  // A day listed twice is a rest day only if every entry for it says so.
+  const training = new Set<string>(update.weeklyStructure.filter((d) => !isRestFocus(d.focus)).map((d) => d.day));
+  const carried = existingSessions.filter((s) => training.has(s.day) || !listed.has(s.day));
   return mergeIncrementalSessions(carried, update.sessions);
 }
 

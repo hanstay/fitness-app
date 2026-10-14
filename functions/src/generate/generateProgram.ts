@@ -200,7 +200,8 @@ WORK IN THIS ORDER:
 
 2. Keep the SAME day count and respect the same hard constraints as a fresh plan would: exactly
    training-days-per-week training days, fixed weekly sessions treated as committed and counted
-   toward that number, every remaining day marked "Rest"/"Recovery". Only change weeklyStructure
+   toward that number, every remaining day marked "Rest"/"Recovery". weeklyStructure lists all
+   7 days, rest days included. Only change weeklyStructure
    placement if the data clearly calls for it (e.g. an injury flag) — otherwise keep today's
    placement and just adjust the session content.
 
