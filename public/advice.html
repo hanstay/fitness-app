@@ -39,7 +39,8 @@
   .day-note .day-h{margin:0 0 4px; font-family:var(--font-head); font-size:.95rem; font-weight:600}
 </style>
 </head>
-<body>
+<body data-auth="pending">
+<div id="authVeil"><div class="veil-spinner"></div></div>
 
 <header class="hero">
   <div class="wrap">
@@ -79,6 +80,24 @@
   if (!session) throw new Error("redirecting");
   const { user } = session;
 
+  const main = document.getElementById("mainContent");
+  const tocLinks = document.getElementById("tocLinks");
+
+  const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  // Which roadmap phase the plan is programming: the phase stored on the
+  // program (set whenever it moves to a new phase), else by startDate/endDate
+  // (ISO, inclusive) for older programs, else the first phase.
+  const currentPhaseIndex = (roadmap, storedIndex) => {
+    if (!roadmap || !roadmap.length) return 0;
+    if (Number.isInteger(storedIndex)) return Math.min(Math.max(storedIndex, 0), roadmap.length - 1);
+    if (!roadmap.every((ph) => ph.startDate && ph.endDate)) return 0;
+    const today = new Date().toISOString().slice(0, 10);
+    const idx = roadmap.findIndex((ph) => today >= ph.startDate && today <= ph.endDate);
+    if (idx !== -1) return idx;
+    return today > roadmap[roadmap.length - 1].endDate ? roadmap.length - 1 : 0;
+  };
+
+  try {
   const summarySnap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
   const summary = summarySnap.data();
 
@@ -109,23 +128,6 @@
     const programSnap = await getDoc(doc(db, "users", user.uid, "programs", summary.currentProgramId));
     p = programSnap.data() ?? null;
   }
-
-  const main = document.getElementById("mainContent");
-  const tocLinks = document.getElementById("tocLinks");
-
-  const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-  // Which roadmap phase the plan is programming: the phase stored on the
-  // program (set whenever it moves to a new phase), else by startDate/endDate
-  // (ISO, inclusive) for older programs, else the first phase.
-  const currentPhaseIndex = (roadmap, storedIndex) => {
-    if (!roadmap || !roadmap.length) return 0;
-    if (Number.isInteger(storedIndex)) return Math.min(Math.max(storedIndex, 0), roadmap.length - 1);
-    if (!roadmap.every((ph) => ph.startDate && ph.endDate)) return 0;
-    const today = new Date().toISOString().slice(0, 10);
-    const idx = roadmap.findIndex((ph) => today >= ph.startDate && today <= ph.endDate);
-    if (idx !== -1) return idx;
-    return today > roadmap[roadmap.length - 1].endDate ? roadmap.length - 1 : 0;
-  };
 
   if (!p) {
     main.innerHTML = `<section><p class="muted">No program generated yet. Go to your <a href="dashboard.html">dashboard</a> and generate one.</p></section>`;
@@ -214,7 +216,7 @@
     if (notes.length) group("notes", "Notes & tips", notes.join(""), { open: true });
 
     document.getElementById("loading").remove();
-    tocLinks.insertAdjacentHTML("beforeend", groups.map((g) => `<a href="#${g.id}">${g.label}</a>`).join(""));
+    tocLinks.insertAdjacentHTML("beforeend", groups.map((g) => `<a href="#${g.id}">${esc(g.label)}</a>`).join(""));
 
     // Top-level groups toggle independently.
     main.querySelectorAll("section.grp > .grp-head").forEach((h) => h.addEventListener("click", () => h.parentElement.classList.toggle("open")));
@@ -256,6 +258,15 @@
       });
     }, { rootMargin: "-20% 0px -70% 0px" });
     document.querySelectorAll("main section").forEach((s) => obs.observe(s));
+  }
+  } catch (err) {
+    console.error("[advice] failed to load", err);
+    document.getElementById("pageSub").textContent = "Couldn't load your advice.";
+    main.innerHTML = `
+      <section><div class="state-box">
+        <p>Something went wrong loading your advice.</p>
+        <button class="btn secondary" type="button" onclick="location.reload()">Retry</button>
+      </div></section>`;
   }
 </script>
 </body>
