@@ -16,9 +16,12 @@
     if(document.getElementById('sw-update-banner')) return;
     var b=document.createElement('div');
     b.id='sw-update-banner';
-    b.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:10000;background:#dd4045;color:#fff;'+
+    // Sits above the tab bar where there is one (--tabbar-space, theme.css),
+    // which already covers the safe area below it.
+    b.style.cssText='position:fixed;left:0;right:0;bottom:var(--tabbar-space,0px);z-index:10000;background:#dd4045;color:#fff;'+
       'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-weight:700;'+
-      'font-size:.9rem;display:flex;align-items:center;gap:10px;padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));'+
+      'font-size:.9rem;display:flex;align-items:center;gap:10px;'+
+      'padding:12px 16px calc(12px + max(0px, env(safe-area-inset-bottom,0px) - var(--tabbar-space,0px)));'+
       'box-shadow:0 -2px 14px #0007;';
     var msg=document.createElement('span');
     msg.style.cssText='flex:1'; msg.textContent='Update available — a newer version was published.';
