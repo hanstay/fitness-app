@@ -12,7 +12,7 @@ import {
   decideRegen, personalStructuralChange, inferBlockStart, roadmapForAdvance, buildContinuationText,
   normalizeRoadmap, AthleteProfileSnapshot,
 } from "../lib/programDecisions";
-import { mergeIncrementalSessions } from "../lib/programMerge";
+import { mergeIncrementalSessions, normalizeWeek } from "../lib/programMerge";
 import { gatherGroundingData } from "./groundingData";
 import { runGenerateGroupProgram } from "./groupProgram";
 
@@ -93,12 +93,13 @@ WORK IN THIS ORDER:
    Use the given "current phase signal" line to anchor what THIS week's phase should emphasize
    — the other call is building the actual week from the same signal, so stay consistent with it.
 
-   MOVING TO THE NEXT PHASE: when a "Current plan — MOVING TO ITS NEXT PHASE" section is given,
-   the roadmap is FIXED — copy it into "roadmap" exactly as given (same phases, names and dates)
-   and keep "events" consistent with it. Everything else is for the phase marked "PROGRAM THIS
-   BLOCK NOW": title, currentState, progressionRules, deloadGuidance, warmupNotes, coachNotes,
-   sportNotes and nutritionNote describe how to train THIS phase, following that phase's
-   focus/lifting/running/nutrition — not the phase just completed.
+   MOVING TO THE NEXT PHASE: when a "Current plan — MOVING TO ITS NEXT PHASE" (or "— REBUILDING
+   THIS PHASE'S WEEK") section is given, the roadmap is FIXED — copy it into "roadmap" exactly as
+   given (same phases, names and dates) and keep "events" consistent with it. Everything else is
+   for the phase marked "PROGRAM THIS BLOCK NOW": title, currentState, progressionRules,
+   deloadGuidance, warmupNotes, coachNotes, sportNotes and nutritionNote describe how to train
+   THIS phase, following that phase's focus/lifting/running/nutrition — not the phase just
+   completed.
 
    REDESIGNING AN EXISTING PLAN: when a "Previous plan (REDESIGN ...)" section is given, the
    athlete is partway through a macrocycle. Do NOT restart at the first phase (e.g. "Base") or
@@ -315,11 +316,16 @@ export async function runGenerateProgram(
       blockStartedAtMs: d.data().blockStartedAt?.toMillis?.() ?? null,
     })));
   }
+  // Plans saved before day names were locked to weekdays can say "Mon" or
+  // "Day 1" — the incremental merge below needs the week by weekday, and a
+  // week that can't be read that way is rebuilt instead.
+  const existingWeek = activeProgram ? normalizeWeek(activeProgram) : null;
   const decision = decideRegen({
     hasActiveProgram: activeProgram != null,
     structuralChange: activeProgram != null && personalStructuralChange(athlete as AthleteProfileSnapshot, activeProgram),
     state: { roadmap: activeProgram?.roadmap, currentPhaseIndex: activeProgram?.currentPhaseIndex, blockStartedAtMs },
     force: opts?.force === true,
+    weekReadable: existingWeek != null,
   });
 
   const { wellness, currentTargets, freshnessBlock, activitySummary, trainingLogBlock, prescriptionBlock, exerciseVocabulary, hasHevyLog } =
@@ -436,6 +442,8 @@ export async function runGenerateProgram(
         `Moved to the next phase of your plan: ${from?.phase ?? "previous phase"} → ${to?.phase ?? "next phase"}.`,
         ...(overview.currentState?.highlights ?? []),
       ];
+    } else if (decision.mode === "rebuild") {
+      candidate.roadmap = normalizeRoadmap(activeProgram!.roadmap);
     }
     const parsed = programSchema.safeParse(candidate);
     if (!parsed.success) {
@@ -449,8 +457,8 @@ export async function runGenerateProgram(
         `Athlete profile:\n${profileText}`,
         ``,
         `Existing current week (adjust this, don't replace the surrounding plan):`,
-        `weeklyStructure: ${JSON.stringify(activeProgram!.weeklyStructure ?? [])}`,
-        `sessions: ${JSON.stringify(activeProgram!.sessions ?? [])}`,
+        `weeklyStructure: ${JSON.stringify(existingWeek!.weeklyStructure)}`,
+        `sessions: ${JSON.stringify(existingWeek!.sessions)}`,
         ``,
         `Generate the adjusted current week + changelog.`,
       ].join("\n"),
@@ -472,7 +480,7 @@ export async function runGenerateProgram(
         .filter((d) => /rest|recovery/i.test(d.focus))
         .map((d) => d.day)
     );
-    const existingTrainingSessions = (activeProgram!.sessions ?? []).filter(
+    const existingTrainingSessions = existingWeek!.sessions.filter(
       (s: SessionOutput) => !restDays.has(s.day)
     );
     const candidate = {
@@ -511,12 +519,11 @@ export async function runGenerateProgram(
     ...mergedProgram,
     ...(changeSummary ? { changeSummary } : {}),
     profileSnapshot: athlete,
-    // Where this program is in its periodization. A weekly update carries
-    // both forward unchanged (so the block's age isn't reset every week);
-    // moving to a new phase or a redesign starts a new block today.
-    currentPhaseIndex: decision.mode === "incremental" ? decision.fromPhaseIndex ?? 0
-      : decision.mode === "advance" ? decision.targetPhaseIndex : 0,
-    blockStartedAt: decision.mode === "incremental" && blockStartedAtMs != null
+    // Where this program is in its periodization. A weekly update or rebuilt
+    // week carries both forward unchanged (so the block's age isn't reset
+    // every week); moving to a new phase or a redesign starts a new block today.
+    currentPhaseIndex: decision.mode === "full" ? 0 : decision.targetPhaseIndex ?? 0,
+    blockStartedAt: (decision.mode === "incremental" || decision.mode === "rebuild") && blockStartedAtMs != null
       ? Timestamp.fromMillis(blockStartedAtMs)
       : FieldValue.serverTimestamp(),
   });

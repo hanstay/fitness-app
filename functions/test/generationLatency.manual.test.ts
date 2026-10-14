@@ -47,14 +47,14 @@ Target calories: 2600 kcal. Target protein: 180g. Target carbs: 280g. Target fat
 
 const FIXTURE_EXISTING_WEEK = JSON.stringify({
   weeklyStructure: [
-    { day: "Mon", focus: "Lower body strength" },
-    { day: "Wed", focus: "Upper body strength" },
-    { day: "Fri", focus: "Full body + conditioning" },
-    { day: "Sat", focus: "Long run" },
+    { day: "Monday", focus: "Lower body strength" },
+    { day: "Wednesday", focus: "Upper body strength" },
+    { day: "Friday", focus: "Full body + conditioning" },
+    { day: "Saturday", focus: "Long run" },
   ],
   sessions: [
     {
-      day: "Mon",
+      day: "Monday",
       label: "Lower Body Strength",
       focus_note: "Heavy compound work, moderate volume",
       exercises: [
@@ -63,7 +63,7 @@ const FIXTURE_EXISTING_WEEK = JSON.stringify({
       ],
     },
     {
-      day: "Wed",
+      day: "Wednesday",
       label: "Upper Body Strength",
       focus_note: "Push/pull balance",
       exercises: [
@@ -72,7 +72,7 @@ const FIXTURE_EXISTING_WEEK = JSON.stringify({
       ],
     },
     {
-      day: "Fri",
+      day: "Friday",
       label: "Full Body + Conditioning",
       focus_note: "Lighter loading before the weekend long run",
       exercises: [
@@ -81,7 +81,7 @@ const FIXTURE_EXISTING_WEEK = JSON.stringify({
       ],
     },
     {
-      day: "Sat",
+      day: "Saturday",
       label: "Long Run",
       focus_note: "Easy aerobic pace",
       exercises: [

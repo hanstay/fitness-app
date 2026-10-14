@@ -3,21 +3,23 @@
 // server-side to shape the onCall response the same way a personal program
 // looks, and mirrored client-side (public/js) for rendering program.html.
 import { SessionOutput, SessionLoadsOutput } from "./schemas";
+import { normalizeDay } from "./days";
 
 // Matched per day by exercise name AND occurrence order: a session can hold
 // the same name more than once (e.g. three "Running" segments — warm-up,
 // tempo, cool-down), and matching by name alone gave every one of them the
 // last segment's load_note. The Nth "Running" in the skeleton now gets the
-// Nth "Running" load.
+// Nth "Running" load. Days are compared as weekdays: a group program saved
+// before day names were fixed can say "Mon" where its newer loads say "Monday".
 export function applySessionLoads(sessions: SessionOutput[], sessionLoads: SessionLoadsOutput): SessionOutput[] {
   const loadsByDay = new Map<string, Map<string, Array<string | null>>>();
   for (const day of sessionLoads) {
     const byName = new Map<string, Array<string | null>>();
     for (const ex of day.exercises) byName.set(ex.name, [...(byName.get(ex.name) ?? []), ex.load_note]);
-    loadsByDay.set(day.day, byName);
+    loadsByDay.set(normalizeDay(day.day) ?? day.day, byName);
   }
   return sessions.map((session) => {
-    const byName = loadsByDay.get(session.day);
+    const byName = loadsByDay.get(normalizeDay(session.day) ?? session.day);
     if (!byName) return session;
     const seen = new Map<string, number>();
     return {

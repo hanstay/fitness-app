@@ -136,13 +136,17 @@ export function inferBlockStart(
 
 /**
  * - "incremental": routine weekly update — adjust this week, keep the plan.
+ * - "rebuild": a routine update whose stored week can't be adjusted, because
+ *   its day names aren't all weekdays (see normalizeWeek in programMerge.ts)
+ *   — the week and the phase's coaching guidance are written afresh for the
+ *   SAME phase; the roadmap, phase and block start are kept.
  * - "advance": move to the next phase of the EXISTING roadmap — the roadmap
  *   (the athlete's periodization) is kept as-is; only the week and the
  *   phase's coaching guidance are rewritten for the new phase.
  * - "full": design a new plan — no plan yet, the goal/events/schedule
  *   changed, or every phase of the roadmap is done.
  */
-export type RegenMode = "full" | "advance" | "incremental";
+export type RegenMode = "full" | "advance" | "rebuild" | "incremental";
 
 export interface RegenDecision {
   mode: RegenMode;
@@ -159,9 +163,11 @@ export function decideRegen(params: {
   state: BlockState;
   /** The athlete ticked "Move to the next phase now". */
   force: boolean;
+  /** Every day of the active program's week names a weekday (normalizeWeek in programMerge.ts). */
+  weekReadable: boolean;
   now?: Date;
 }): RegenDecision {
-  const { hasActiveProgram, structuralChange, state, force, now = new Date() } = params;
+  const { hasActiveProgram, structuralChange, state, force, weekReadable, now = new Date() } = params;
   if (!hasActiveProgram) return { mode: "full", reason: "no plan yet", fromPhaseIndex: null, targetPhaseIndex: null };
 
   const today = isoDate(now.getTime());
@@ -172,12 +178,17 @@ export function decideRegen(params: {
   }
 
   const stale = state.blockStartedAtMs == null || now.getTime() - state.blockStartedAtMs > SIX_WEEKS_MS;
+  // A weekly update merges into the stored week by day, so a week whose days
+  // aren't all weekdays is rebuilt for the same phase instead.
+  const weekly = (phase: number): RegenDecision => weekReadable
+    ? { mode: "incremental", reason: "weekly update", fromPhaseIndex: phase, targetPhaseIndex: phase }
+    : { mode: "rebuild", reason: "this week's days aren't all weekdays", fromPhaseIndex: phase, targetPhaseIndex: phase };
 
   // Open-ended plan with no phases: a "new block" can only mean a new plan.
   if (roadmap.length === 0) {
     if (force) return { mode: "full", reason: "new block requested", fromPhaseIndex: 0, targetPhaseIndex: 0 };
     if (stale) return { mode: "full", reason: "block is over 6 weeks old", fromPhaseIndex: 0, targetPhaseIndex: 0 };
-    return { mode: "incremental", reason: "weekly update", fromPhaseIndex: 0, targetPhaseIndex: 0 };
+    return weekly(0);
   }
 
   let target: number;
@@ -198,7 +209,7 @@ export function decideRegen(params: {
     return { mode: "full", reason: "every phase of the plan is complete", fromPhaseIndex: from, targetPhaseIndex: roadmap.length };
   }
   if (target !== from) return { mode: "advance", reason, fromPhaseIndex: from, targetPhaseIndex: target };
-  return { mode: "incremental", reason: "weekly update", fromPhaseIndex: from, targetPhaseIndex: from };
+  return weekly(from);
 }
 
 function dateLabel(start: string, end: string): string {
@@ -299,13 +310,13 @@ export interface RoadmapPhaseForContinuation extends RoadmapPhaseForDecision {
 
 /**
  * The prompt section telling a regeneration where the athlete is in their
- * existing plan. For "advance" the roadmap is fixed and the model writes only
- * the new phase; for "full" (a redesign) it continues from where the athlete
- * is instead of restarting at the first phase. Empty when there's no previous
- * roadmap.
+ * existing plan. For "advance" and "rebuild" the roadmap is fixed and the
+ * model writes only the phase to program; for "full" (a redesign) it
+ * continues from where the athlete is instead of restarting at the first
+ * phase. Empty when there's no previous roadmap.
  */
 export function buildContinuationText(params: {
-  mode: "advance" | "full";
+  mode: "advance" | "rebuild" | "full";
   roadmap: RoadmapPhaseForContinuation[] | null | undefined;
   targetIndex: number;
   reason: string;
@@ -320,10 +331,12 @@ export function buildContinuationText(params: {
     return `- ${p.phase}${p.dates ? ` (${p.dates})` : ""}${range}${p.focus ? ` — focus: ${p.focus}` : ""}${status}`;
   });
 
-  if (params.mode === "advance") {
+  if (params.mode !== "full") {
     const t = roadmap[targetIndex];
     return [
-      `Current plan — MOVING TO ITS NEXT PHASE (${params.reason}).`,
+      params.mode === "advance"
+        ? `Current plan — MOVING TO ITS NEXT PHASE (${params.reason}).`
+        : `Current plan — REBUILDING THIS PHASE'S WEEK (${params.reason}).`,
       `The roadmap below is FIXED: it is kept exactly as-is, so copy it into "roadmap" unchanged —`,
       `do not re-size, re-date, rename, add or drop phases. The athlete's periodization does not change;`,
       `your job is the phase marked PROGRAM THIS BLOCK NOW.`,

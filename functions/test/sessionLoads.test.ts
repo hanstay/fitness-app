@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { applySessionLoads } from "../src/lib/sessionLoads";
+import type { SessionOutput } from "../src/lib/schemas";
 
 const ex = (name: string) => ({ name, sets: 1, reps: "10 min", rir: "n/a", rest_seconds: 0, load_note: null, substitution_note: null });
 
@@ -24,5 +25,11 @@ describe("applySessionLoads", () => {
     const out = applySessionLoads(sessions, [{ day: "Tuesday", exercises: [{ name: "Running", load_note: "easy" }] }]);
     expect(out[0].exercises.map((e) => e.load_note)).toEqual(["easy", null]);
     expect(out[1].exercises[0].load_note).toBeNull();
+  });
+
+  it("matches an older skeleton's abbreviated day to loads written in full", () => {
+    const sessions = [{ day: "Tue", label: "Run", focus_note: null, exercises: [ex("Running")] }] as unknown as SessionOutput[]; // stored before day names were locked
+    const out = applySessionLoads(sessions, [{ day: "Tuesday", exercises: [{ name: "Running", load_note: "easy" }] }]);
+    expect(out[0]).toMatchObject({ day: "Tue", exercises: [{ load_note: "easy" }] });
   });
 });

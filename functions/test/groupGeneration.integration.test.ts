@@ -175,4 +175,44 @@ describe("group generation", () => {
     const aBefore = await db.doc("groups/g6/members/a").get();
     expect(aBefore.exists).toBe(true);
   });
+
+  // An older shared program: rewrites its stored days with `rename`.
+  async function seedOlderProgram(groupId: string, rename: (day: string, i: number) => string) {
+    await seedGroup(groupId, ["a"]);
+    await seedMember("a", "a", groupId);
+    await runGenerateProgram("a");
+    const active = (await db.collection(`groups/${groupId}/programs`).where("status", "==", "active").get()).docs[0];
+    const renamed = (entries: Array<{ day: string }>) => entries.map((e, i) => ({ ...e, day: rename(e.day, i) }));
+    await active.ref.update({ weeklyStructure: renamed(active.data().weeklyStructure), sessions: renamed(active.data().sessions) });
+    mockExtractStructuredJson.mockClear();
+    return active;
+  }
+
+  it("scenario 7: an older shared week with abbreviated days only reruns Stage B, read as weekdays", async () => {
+    await seedOlderProgram("g7", (day) => day.slice(0, 3));
+
+    const result = await runGenerateProgram("a");
+
+    const toolNames = mockExtractStructuredJson.mock.calls.map((call) => (call[0] as { toolName: string }).toolName);
+    expect(toolNames).toEqual(["record_member_layer"]);
+    expect(mockExtractStructuredJson.mock.calls[0][0].userText).toContain(`"day":"Monday"`);
+    expect(result.sessions[0]).toMatchObject({ day: "Monday", exercises: [{ load_note: "Work up to a top set of 6 around 80kg." }, { load_note: "Moderate load, focus on drive." }] });
+  });
+
+  it("scenario 8: a shared week with days that aren't weekdays is rebuilt in Stage A for the same phase, keeping its roadmap", async () => {
+    const before = await seedOlderProgram("g8", (_day, i) => `Day ${i + 1}`);
+    const keptRoadmap = before.data().roadmap.map((p: Record<string, unknown>) => ({ ...p, phase: "Base (kept)" }));
+    await before.ref.update({ roadmap: keptRoadmap });
+
+    await runGenerateProgram("a");
+
+    const groupCall = mockExtractStructuredJson.mock.calls.find((c) => c[0].toolName === "record_group_program")!;
+    expect(groupCall[0].userText).toContain("REBUILDING THIS PHASE'S WEEK");
+    const after = (await db.collection("groups/g8/programs").where("status", "==", "active").get()).docs[0];
+    expect(after.id).not.toBe(before.id);
+    expect(after.data().roadmap).toEqual(keptRoadmap);
+    expect(after.data().currentPhaseIndex).toBe(0);
+    expect(after.data().blockStartedAt.toMillis()).toBe(before.data().blockStartedAt.toMillis());
+    expect(after.data().sessions[0].day).toBe("Monday");
+  });
 });

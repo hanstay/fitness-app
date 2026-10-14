@@ -4,7 +4,7 @@
 // generateProgram.ts's full/incremental split, applied at the group level:
 // Stage A is the group analogue of a full regen, Stage B always runs for the
 // triggering member (roughly analogous cost to an incremental regen).
-import { getFirestore, FieldValue, Firestore, DocumentData } from "firebase-admin/firestore";
+import { getFirestore, FieldValue, Timestamp, Firestore, DocumentData } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import { extractStructuredJson, MODEL } from "../lib/claude";
 import {
@@ -19,6 +19,7 @@ import { gatherGroundingData, loadExerciseVocabulary } from "./groundingData";
 import type { PrescriptionProgram } from "../lib/trainingLog";
 import { applySessionLoads } from "../lib/sessionLoads";
 import { reconcileEvents } from "../lib/eventReconciliation";
+import { normalizeWeek } from "../lib/programMerge";
 
 const GROUP_PREAMBLE = `You are an expert strength & conditioning coach writing ONE periodized, data-grounded
 training program shared by a small group of athletes who train together. They will do the same
@@ -54,10 +55,11 @@ fixed weekly sessions — set by the group leader, not inferred — plus every m
    the previous phase's endDate (contiguous, no gaps/overlaps), and the last phase ends at/around
    the nearest event's date when one is given. Code reads these dates to detect a phase change, so
    only leave them null if a phase is genuinely undatable (no event to anchor a timeline).
-   MOVING TO THE NEXT PHASE: when a "Current plan — MOVING TO ITS NEXT PHASE" section is given,
-   the roadmap is FIXED — copy it into "roadmap" exactly as given. weeklyStructure/sessions build
-   the week for the phase marked "PROGRAM THIS BLOCK NOW" (following its focus/lifting/running),
-   and title, progressionRules, deloadGuidance and warmupNotes are written for that phase.
+   MOVING TO THE NEXT PHASE: when a "Current plan — MOVING TO ITS NEXT PHASE" (or "— REBUILDING
+   THIS PHASE'S WEEK") section is given, the roadmap is FIXED — copy it into "roadmap" exactly as
+   given. weeklyStructure/sessions build the week for the phase marked "PROGRAM THIS BLOCK NOW"
+   (following its focus/lifting/running), and title, progressionRules, deloadGuidance and
+   warmupNotes are written for that phase.
    REDESIGNING AN EXISTING PLAN: when a "Previous plan (REDESIGN ...)" section is given, don't
    restart at the first phase or repeat COMPLETED phases — the new roadmap starts with the block
    marked "PROGRAM THIS BLOCK NOW" (or the next logical block if all are complete).
@@ -246,6 +248,8 @@ export async function runGenerateGroupProgram(
   // saved before blockStartedAt existed.
   const blockStartedAtMs: number | null =
     activeGroupProgram?.blockStartedAt?.toMillis?.() ?? activeGroupProgram?.createdAt?.toMillis?.() ?? null;
+  // Older shared weeks can say "Mon" or "Day 1" — see generateProgram.ts.
+  const existingWeek = activeGroupProgram ? normalizeWeek(activeGroupProgram) : null;
   const decision = decideRegen({
     hasActiveProgram: activeGroupProgram != null,
     structuralChange: activeGroupProgram != null && groupStructuralChange({
@@ -255,6 +259,7 @@ export async function runGenerateGroupProgram(
     }),
     state: { roadmap: activeGroupProgram?.roadmap, currentPhaseIndex: activeGroupProgram?.currentPhaseIndex, blockStartedAtMs },
     force: opts?.force === true,
+    weekReadable: existingWeek != null,
   });
   const today = new Date().toISOString().slice(0, 10);
 
@@ -294,6 +299,8 @@ export async function runGenerateGroupProgram(
     if (decision.mode === "advance") {
       // Moving to the next phase keeps the group's periodization — see generateProgram.ts.
       sharedProgram.roadmap = roadmapForAdvance(normalizeRoadmap(activeGroupProgram!.roadmap), decision.targetPhaseIndex!, today);
+    } else if (decision.mode === "rebuild") {
+      sharedProgram.roadmap = normalizeRoadmap(activeGroupProgram!.roadmap);
     }
 
     const batch = db.batch();
@@ -306,13 +313,18 @@ export async function runGenerateGroupProgram(
       ...sharedProgram,
       profileSnapshots: memberAthletes,
       groupSnapshot: { goal: group.goal, daysPerWeek: group.daysPerWeek, events: group.events, fixedSessions: group.fixedSessions },
-      currentPhaseIndex: decision.mode === "advance" ? decision.targetPhaseIndex : 0,
-      blockStartedAt: FieldValue.serverTimestamp(),
+      currentPhaseIndex: decision.mode === "full" ? 0 : decision.targetPhaseIndex,
+      // A rebuilt week stays in the same block.
+      blockStartedAt: decision.mode === "rebuild" && blockStartedAtMs != null
+        ? Timestamp.fromMillis(blockStartedAtMs)
+        : FieldValue.serverTimestamp(),
     });
     await batch.commit();
     groupProgramRef = newRef;
   } else {
-    sharedProgram = activeGroupProgram as ProgramSharedOutput;
+    // The stored week with its days as weekdays, so the skeleton below (and
+    // so the member's loads) uses the names new plans are written with.
+    sharedProgram = { ...activeGroupProgram, ...existingWeek } as ProgramSharedOutput;
   }
   const currentPhaseIndex = decision.mode === "advance" ? decision.targetPhaseIndex! : decision.mode === "full" ? 0 : decision.fromPhaseIndex ?? 0;
 
