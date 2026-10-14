@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeIncrementalSessions, normalizeWeek } from "../src/lib/programMerge";
+import { mergeIncrementalSessions, mergeUpdatedWeek, normalizeWeek } from "../src/lib/programMerge";
 import type { SessionOutput } from "../src/lib/schemas";
 
 function session(day: SessionOutput["day"], label: string): SessionOutput {
@@ -63,6 +63,34 @@ describe("mergeIncrementalSessions", () => {
       const result = mergeIncrementalSessions(existing, [session("Wednesday", "Upper v2")]);
       expect(result).toEqual([session("Monday", "Lift"), session("Monday", "Run"), session("Wednesday", "Upper v2")]);
     });
+  });
+});
+
+describe("mergeUpdatedWeek", () => {
+  const existing = [session("Monday", "Upper"), session("Tuesday", "Run"), session("Wednesday", "Lower")];
+  const week = (...days: Array<[SessionOutput["day"], string]>) => days.map(([day, focus]) => ({ day, focus, note: null }));
+
+  it("drops a carried-forward session on a day the update makes a rest day", () => {
+    const update = { weeklyStructure: week(["Monday", "Upper"], ["Tuesday", "Rest"], ["Wednesday", "Recovery"]), sessions: [] };
+    expect(mergeUpdatedWeek(existing, update)).toEqual([session("Monday", "Upper")]);
+  });
+
+  it("keeps it when rest or recovery is only part of the day's focus", () => {
+    const update = { weeklyStructure: week(["Monday", "Upper + recovery run"], ["Tuesday", "Forest trail run"], ["Wednesday", "Lower"]), sessions: [] };
+    expect(mergeUpdatedWeek(existing, update)).toEqual(existing);
+  });
+
+  it("drops the old day of a session the update moved, even when it leaves that day out", () => {
+    const update = {
+      weeklyStructure: week(["Monday", "Upper"], ["Wednesday", "Lower"], ["Thursday", "Run"]),
+      sessions: [session("Thursday", "Run")],
+    };
+    expect(mergeUpdatedWeek(existing, update))
+      .toEqual([session("Monday", "Upper"), session("Wednesday", "Lower"), session("Thursday", "Run")]);
+  });
+
+  it("keeps every carried-forward session when the update has no weeklyStructure", () => {
+    expect(mergeUpdatedWeek(existing, { weeklyStructure: [], sessions: [] })).toEqual(existing);
   });
 });
 

@@ -13,8 +13,9 @@ export const dayKey = (day) => normalizeDay(day) ?? day;
 
 // A rest day is sometimes written as a "Rest" session holding a "Rest"
 // placeholder (or nothing) — not a session to train. Judged by its
-// exercises, not its label: a "Recovery run" is still a run.
-export const isRestSession = (session) => (session.exercises || []).every((ex) => /^rest\b/i.test(ex.name || ""));
+// exercises, not its label: a "Recovery run" is still a run, and "Rest"
+// must be a word of its own ("Rest day", not "Rest-pause Bench").
+export const isRestSession = (session) => (session.exercises || []).every((ex) => /^rest(\s|$)/i.test(ex.name || ""));
 
 /** Every session `program` schedules on `day` (a day can hold more than one), without rest placeholders. */
 export const sessionsOn = (program, day) =>

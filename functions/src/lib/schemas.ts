@@ -362,7 +362,7 @@ export const programUpdateJsonSchema = {
     sessions: {
       type: "array",
       items: sessionJsonSchema,
-      description: "Only include an entry for a day whose session you are actually changing. Omit any day whose session should stay exactly as-is in the existing week — it will be carried forward automatically, so do not restate it. May be empty if nothing should change. A day new to the schedule (not present in the existing week) must be included in full, since there is nothing existing to carry forward for it.",
+      description: "Only include an entry for a day whose session you are actually changing. Omit any day whose session should stay exactly as-is in the existing week — it will be carried forward automatically, so do not restate it. A day is replaced as a whole: if you change any session on a day, include every session scheduled that day, unchanged ones too. May be empty if nothing should change. A day new to the schedule (not present in the existing week) must be included in full, since there is nothing existing to carry forward for it.",
     },
     changeSummary: { type: "array", items: { type: "string" }, description: "Short bullet points of what changed vs the previous block, and why." },
     coachNotes: { type: ["string", "null"] },

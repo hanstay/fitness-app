@@ -6,13 +6,12 @@ import {
   programOverviewJsonSchema, programOverviewSchema,
   programScheduleJsonSchema, programScheduleSchema,
   programUpdateJsonSchema, programUpdateSchema,
-  SessionOutput,
 } from "../lib/schemas";
 import {
   decideRegen, personalStructuralChange, inferBlockStart, roadmapForAdvance, buildContinuationText,
   normalizeRoadmap, AthleteProfileSnapshot, REBUILD_CHANGE_NOTE,
 } from "../lib/programDecisions";
-import { mergeIncrementalSessions, normalizeWeek } from "../lib/programMerge";
+import { mergeUpdatedWeek, normalizeWeek } from "../lib/programMerge";
 import { gatherGroundingData } from "./groundingData";
 import { runGenerateGroupProgram } from "./groupProgram";
 
@@ -209,10 +208,12 @@ WORK IN THIS ORDER:
    exercises/sets/reps/load are actually changing based on the fresh data. Omit any day whose
    session should stay exactly as it is in the existing week — it will be carried forward
    automatically, so do not restate it. "sessions" may be empty if nothing should change (e.g.
-   no Hevy data to act on). A day that's new to the schedule (not present in the existing week
-   above) must be included in full, since there is nothing existing to carry forward for it. For
-   any session you do include, use the same exercise-writing rules as a fresh plan: every item
-   (including runs/conditioning) as an exercise with sets/reps/rir/rest_seconds/notes, loads
+   no Hevy data to act on). A day is replaced as a whole: if you change any session on a day,
+   include every session scheduled that day, unchanged ones too — a day you include keeps only
+   the sessions you give for it. A day that's new to the schedule (not present in the existing
+   week above) must be included in full, since there is nothing existing to carry forward for it.
+   For any session you do include, use the same exercise-writing rules as a fresh plan: every
+   item (including runs/conditioning) as an exercise with sets/reps/rir/rest_seconds/notes, loads
    seeded from the athlete's actual recent sets in the log, and exercise names following the
    EXERCISE NAMES rule. Renaming an existing exercise to its Hevy name counts as a change worth
    including.
@@ -471,19 +472,6 @@ export async function runGenerateProgram(
     });
 
     changeSummary = update.changeSummary;
-    // A placement change (e.g. moving a lifting day off an injured day) marks
-    // the old day "Rest"/"Recovery" in the new weeklyStructure without the
-    // model re-emitting that day in "sessions" -- drop the carried-forward
-    // session for any day the update now calls a rest day, so it doesn't
-    // linger attached to a day that no longer trains.
-    const restDays = new Set(
-      update.weeklyStructure
-        .filter((d) => /rest|recovery/i.test(d.focus))
-        .map((d) => d.day)
-    );
-    const existingTrainingSessions = existingWeek!.sessions.filter(
-      (s: SessionOutput) => !restDays.has(s.day)
-    );
     const candidate = {
       title: activeProgram!.title,
       goalSummary: activeProgram!.goalSummary,
@@ -497,7 +485,7 @@ export async function runGenerateProgram(
       sportNotes: activeProgram!.sportNotes,
       currentState: update.currentState,
       weeklyStructure: update.weeklyStructure,
-      sessions: mergeIncrementalSessions(existingTrainingSessions, update.sessions),
+      sessions: mergeUpdatedWeek(existingWeek!.sessions, update),
       coachNotes: update.coachNotes,
       nutritionNote: update.nutritionNote,
       running: update.running,

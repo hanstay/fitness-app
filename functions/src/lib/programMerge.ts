@@ -27,6 +27,28 @@ export function mergeIncrementalSessions(
   return merged;
 }
 
+/**
+ * A weekly update's sessions merged over the stored week, keeping a
+ * carried-forward session only on a day the update's weeklyStructure still
+ * trains on: a placement change (e.g. moving a lifting day off an injured
+ * day, or Tuesday's run to Thursday) marks the old day "Rest"/"Recovery" or
+ * leaves it out without re-emitting it in "sessions", and its old session
+ * mustn't linger there. "Rest"/"Recovery" must lead the focus — "Upper +
+ * recovery run" still trains. An update with no weeklyStructure keeps them all.
+ */
+export function mergeUpdatedWeek(
+  existingSessions: SessionOutput[],
+  update: Pick<ProgramOutput, "weeklyStructure" | "sessions">
+): SessionOutput[] {
+  const trainingDays = new Set(
+    update.weeklyStructure.filter((d) => !/^(rest|recovery)\b/i.test(d.focus)).map((d) => d.day)
+  );
+  const carried = update.weeklyStructure.length === 0
+    ? existingSessions
+    : existingSessions.filter((s) => trainingDays.has(s.day));
+  return mergeIncrementalSessions(carried, update.sessions);
+}
+
 type StoredDay = { day?: unknown };
 
 function withWeekdays<T extends StoredDay>(entries: T[] | null | undefined): Array<T & { day: Weekday }> | null {
