@@ -102,7 +102,7 @@
           <label><input type="checkbox" name="equipment" value="kettlebells"><span>Kettlebells</span></label>
           <label><input type="checkbox" name="equipment" value="machines"><span>Machines</span></label>
           <label><input type="checkbox" name="equipment" value="bodyweight"><span>Bodyweight</span></label>
-          <label><input type="checkbox" id="equipmentOtherToggle" aria-controls="equipmentOtherField"><span>+ Other</span></label>
+          <label><input type="checkbox" id="equipmentOtherToggle" aria-controls="equipmentOtherField" aria-expanded="false"><span><span aria-hidden="true">+ </span>Other</span></label>
         </div>
         <div class="field" id="equipmentOtherField" hidden style="margin-top:12px">
           <label for="equipment_other">Other equipment (comma-separated)</label>
@@ -111,7 +111,7 @@
       </fieldset>
 
       <fieldset class="field-group">
-        <legend>Make it more personal · optional</legend>
+        <legend>Optional extras</legend>
 
         <details class="disclosure">
           <summary><span><span class="disclosure-title">Import past workouts</span><span class="disclosure-hint">Hevy CSV or intervals.icu</span></span></summary>
@@ -122,7 +122,7 @@
             </div>
             <p class="note" id="hevyStatus" role="status"></p>
             <button class="btn secondary" id="icuConnectBtn" type="button">Connect with intervals.icu</button>
-            <p class="note" id="icuStatus"></p>
+            <p class="note" id="icuStatus" role="status"></p>
           </div>
         </details>
 

@@ -79,11 +79,15 @@ document.getElementById("hevyFile").addEventListener("change", async (e) => {
   const file = fileInput.files[0];
   if (!file) return;
   clearMessages();
+  // Drop the previous file's summary so it can't sit next to a new error.
+  const results = document.getElementById("hevyResults");
+  results.style.display = "none";
+  results.innerHTML = "";
   fileInput.disabled = true;
   setStatus("hevyStatus", "Analyzing…");
   try {
     const { sessions, lifts, progression } = analyzeHevyCsv(await file.text());
-    renderImportSummary(document.getElementById("hevyResults"), sessions.length, progression);
+    renderImportSummary(results, sessions.length, progression);
 
     setStatus("hevyStatus", "Saving…");
     await httpsCallable(functions, "saveHevySessions")({ sessions, lifts });

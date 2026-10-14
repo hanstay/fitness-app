@@ -124,16 +124,25 @@ document.getElementById("hevyFile").addEventListener("change", async (e) => {
 });
 
 document.getElementById("equipmentOtherToggle").addEventListener("change", (e) => {
-  const field = document.getElementById("equipmentOtherField");
-  field.hidden = !e.currentTarget.checked;
-  if (!field.hidden) document.getElementById("equipment_other").focus();
+  const { checked } = e.currentTarget;
+  e.currentTarget.setAttribute("aria-expanded", String(checked));
+  document.getElementById("equipmentOtherField").hidden = !checked;
+  if (checked) document.getElementById("equipment_other").focus();
 });
 
-// The ticked equipment chips plus any extras typed under "+ Other": the same
-// string array the old comma-separated field produced.
+// The ticked equipment chips plus any extras typed under "+ Other", without
+// case-insensitive repeats: the same string array the old comma-separated
+// field produced.
 function collectEquipment() {
   const chips = [...document.querySelectorAll('input[name="equipment"]:checked')].map((el) => el.value);
-  return document.getElementById("equipmentOtherToggle").checked ? [...chips, ...splitList("equipment_other")] : chips;
+  const extras = document.getElementById("equipmentOtherToggle").checked ? splitList("equipment_other") : [];
+  const seen = new Set();
+  return [...chips, ...extras].filter((item) => {
+    const key = item.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 // Save training fields with dot-paths so we never clobber nutrition or
