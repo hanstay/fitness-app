@@ -11,29 +11,29 @@ describe("normalizeDay", () => {
     ["Mon.", "Monday"],
     ["  monday ", "Monday"],
     ["Monday (AM)", "Monday"],
-    ["Mo", "Monday"],
+    ["Mon AM", "Monday"],
     ["Tue", "Tuesday"],
     ["Tues", "Tuesday"],
-    ["Tu", "Tuesday"],
+    ["Tue PM", "Tuesday"],
     ["Wed", "Wednesday"],
     ["Weds", "Wednesday"],
     ["Thu", "Thursday"],
     ["Thurs", "Thursday"],
-    ["Th", "Thursday"],
     ["Fri", "Friday"],
     ["Sat", "Saturday"],
     ["Sun", "Sunday"],
     ["Sunday — long run", "Sunday"],
+    ["Mon/Monday", "Monday"],
   ])("maps %j to %s", (raw, day) => {
     expect(normalizeDay(raw)).toBe(day);
   });
 
-  it.each([["Day 1"], ["Rest"], ["T"], ["S"], [""], ["1"], ["Week 1"], [null], [undefined], [3]])(
-    "can't map %j",
-    (raw) => {
-      expect(normalizeDay(raw)).toBeNull();
-    }
-  );
+  it.each([
+    ["Day 1"], ["Rest"], ["Monster"], ["Sunrise run"], ["Tue/Thu"], ["Monday & Wednesday"],
+    ["Tu"], ["M"], [""], ["1"], ["Week 1"], ["constructor"], [null], [undefined], [3],
+  ])("can't map %j", (raw) => {
+    expect(normalizeDay(raw)).toBeNull();
+  });
 });
 
 describe("day names in the program schema", () => {

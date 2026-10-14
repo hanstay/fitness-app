@@ -38,12 +38,31 @@ describe("mergeIncrementalSessions", () => {
     expect(mergeIncrementalSessions([], [])).toEqual([]);
   });
 
-  it("dedups a day duplicated within updatedSessions when it's new to the existing week", () => {
+  it("keeps both sessions of a double day new to the existing week", () => {
     const existing = [session("Monday", "Lower v1")];
-    const dup1 = session("Saturday", "Long Run v1");
-    const dup2 = session("Saturday", "Long Run v2");
-    const result = mergeIncrementalSessions(existing, [dup1, dup2]);
-    expect(result).toEqual([session("Monday", "Lower v1"), dup2]);
+    const am = session("Saturday", "Long Run");
+    const pm = session("Saturday", "Mobility");
+    const result = mergeIncrementalSessions(existing, [am, pm]);
+    expect(result).toEqual([session("Monday", "Lower v1"), am, pm]);
+  });
+
+  describe("a double day (two sessions on one weekday)", () => {
+    const existing = [session("Monday", "Lift"), session("Monday", "Run"), session("Wednesday", "Upper")];
+
+    it("is replaced as a whole by one updated session", () => {
+      const result = mergeIncrementalSessions(existing, [session("Monday", "Run v2")]);
+      expect(result).toEqual([session("Monday", "Run v2"), session("Wednesday", "Upper")]);
+    });
+
+    it("is replaced as a whole by two updated sessions, in place", () => {
+      const result = mergeIncrementalSessions(existing, [session("Monday", "Lift v2"), session("Monday", "Run v2")]);
+      expect(result).toEqual([session("Monday", "Lift v2"), session("Monday", "Run v2"), session("Wednesday", "Upper")]);
+    });
+
+    it("is kept whole when the update leaves it out", () => {
+      const result = mergeIncrementalSessions(existing, [session("Wednesday", "Upper v2")]);
+      expect(result).toEqual([session("Monday", "Lift"), session("Monday", "Run"), session("Wednesday", "Upper v2")]);
+    });
   });
 });
 
@@ -65,6 +84,15 @@ describe("normalizeWeek", () => {
     const week = normalizeWeek(stored(["Mon", "wed"]))!;
     const result = mergeIncrementalSessions(week.sessions, [session("Wednesday", "Upper v2"), session("Friday", "New")]);
     expect(result).toEqual([session("Monday", "Mon session"), session("Wednesday", "Upper v2"), session("Friday", "New")]);
+  });
+
+  it("merges an older \"Mon AM\"/\"Mon PM\" week with one or two updated Monday sessions", () => {
+    const week = normalizeWeek(stored(["Mon AM", "Mon PM", "wed"]))!;
+    expect(week.sessions.map((s) => s.day)).toEqual(["Monday", "Monday", "Wednesday"]);
+    expect(mergeIncrementalSessions(week.sessions, [session("Monday", "Run v2")]))
+      .toEqual([session("Monday", "Run v2"), session("Wednesday", "wed session")]);
+    expect(mergeIncrementalSessions(week.sessions, [session("Monday", "Lift v2"), session("Monday", "Run v2")]))
+      .toEqual([session("Monday", "Lift v2"), session("Monday", "Run v2"), session("Wednesday", "wed session")]);
   });
 
   it("is null when any day names no weekday", () => {

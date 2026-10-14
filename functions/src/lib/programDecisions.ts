@@ -148,6 +148,9 @@ export function inferBlockStart(
  */
 export type RegenMode = "full" | "advance" | "rebuild" | "incremental";
 
+/** Leads a "rebuild"'s changelog, so the athlete sees why their week changed. */
+export const REBUILD_CHANGE_NOTE = "Your week has been laid out on weekdays so it lines up with your calendar.";
+
 export interface RegenDecision {
   mode: RegenMode;
   reason: string;

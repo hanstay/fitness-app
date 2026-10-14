@@ -10,7 +10,7 @@ import {
 } from "../lib/schemas";
 import {
   decideRegen, personalStructuralChange, inferBlockStart, roadmapForAdvance, buildContinuationText,
-  normalizeRoadmap, AthleteProfileSnapshot,
+  normalizeRoadmap, AthleteProfileSnapshot, REBUILD_CHANGE_NOTE,
 } from "../lib/programDecisions";
 import { mergeIncrementalSessions, normalizeWeek } from "../lib/programMerge";
 import { gatherGroundingData } from "./groundingData";
@@ -444,6 +444,7 @@ export async function runGenerateProgram(
       ];
     } else if (decision.mode === "rebuild") {
       candidate.roadmap = normalizeRoadmap(activeProgram!.roadmap);
+      changeSummary = [REBUILD_CHANGE_NOTE, ...(overview.currentState?.highlights ?? [])];
     }
     const parsed = programSchema.safeParse(candidate);
     if (!parsed.success) {

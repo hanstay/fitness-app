@@ -14,6 +14,7 @@ import {
 } from "../lib/schemas";
 import {
   decideRegen, groupStructuralChange, roadmapForAdvance, buildContinuationText, normalizeRoadmap, AthleteProfileSnapshot,
+  REBUILD_CHANGE_NOTE,
 } from "../lib/programDecisions";
 import { gatherGroundingData, loadExerciseVocabulary } from "./groundingData";
 import type { PrescriptionProgram } from "../lib/trainingLog";
@@ -417,6 +418,8 @@ export async function runGenerateGroupProgram(
             ...(memberLayer.currentState?.highlights ?? []),
           ],
         }
-      : {}),
+      : decision.mode === "rebuild"
+        ? { changeSummary: [REBUILD_CHANGE_NOTE, ...(memberLayer.currentState?.highlights ?? [])] }
+        : {}),
   };
 }

@@ -121,7 +121,7 @@
   import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
   import { db } from "./js/firebase-init.js";
   import { requireOnboarded } from "./js/auth-guard.js";
-  import { loadCurrentProgram } from "./js/current-program.js";
+  import { loadCurrentProgram, dayKey, sessionsOn } from "./js/current-program.js";
   import { normalizeDay, todayWeekday } from "./js/days.js";
 
   const session = await requireOnboarded();
@@ -217,11 +217,11 @@
     }
 
     // ---- This week: day strip + selected day's exercises ----
-    const bySessionDay = {};
-    (p.sessions || []).forEach((s) => { (bySessionDay[s.day] = bySessionDay[s.day] || []).push(s); });
     const days = (p.weeklyStructure || []).length
       ? p.weeklyStructure
-      : (p.sessions || []).map((s) => ({ day: s.day, focus: s.label }));
+      : (p.sessions || [])
+        .filter((s, i, all) => all.findIndex((o) => dayKey(o.day) === dayKey(s.day)) === i) // one cell per day
+        .map((s) => ({ day: s.day, focus: s.label }));
 
     if (days.length) {
       main.insertAdjacentHTML("beforeend", section("week", "This week", `
@@ -230,7 +230,7 @@
 
       const weekStrip = document.getElementById("weekStrip");
       const dayDetail = document.getElementById("dayDetail");
-      const isRestDay = (d) => /rest|recovery/i.test(d.focus || "");
+      const isRestDay = (d) => sessionsOn(p, d.day).length === 0;
       const todayIndex = days.findIndex((d) => normalizeDay(d.day) === todayWeekday());
 
       // Opens on today when the week lists it, else on the first training day.
@@ -252,7 +252,7 @@
 
       const renderDetail = () => {
         const d = days[selected];
-        const exs = (bySessionDay[d.day] || []).flatMap((s) => s.exercises || []);
+        const exs = sessionsOn(p, d.day).flatMap((s) => s.exercises || []);
         dayDetail.innerHTML = `
           <h3 style="margin:0 0 4px">${esc(d.day)} <span class="muted">— ${esc(d.focus)}</span>${selected === todayIndex ? ' <span class="phase-badge">Today</span>' : ""}</h3>
           ${exs.length

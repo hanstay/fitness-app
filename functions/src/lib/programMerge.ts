@@ -5,17 +5,23 @@ import { normalizeDay, Weekday } from "./days";
 // covers training days -- so this merges by the union of days present in
 // existingSessions/updatedSessions rather than cross-referencing
 // weeklyStructure (which would demand a session for every rest day too).
+// A day can hold more than one session (e.g. a lift AM and a run PM), so a
+// day is replaced as a whole: every existing session on a day the update
+// covers gives way to all of the update's sessions for it, in its place in
+// the week; days the update leaves out are kept, and new days are appended.
 export function mergeIncrementalSessions(
   existingSessions: SessionOutput[],
   updatedSessions: SessionOutput[]
 ): SessionOutput[] {
-  const updatedByDay = new Map(updatedSessions.map((s) => [s.day, s]));
-  const existingByDay = new Map(existingSessions.map((s) => [s.day, s]));
+  const updatedFor = (day: string) => updatedSessions.filter((s) => s.day === day);
+  const placed = new Set<string>();
+  const merged: SessionOutput[] = [];
 
-  const merged = existingSessions.map((s) => updatedByDay.get(s.day) ?? s);
-
-  for (const s of updatedByDay.values()) {
-    if (!existingByDay.has(s.day)) merged.push(s);
+  for (const s of [...existingSessions, ...updatedSessions]) {
+    const updated = updatedFor(s.day);
+    if (updated.length === 0) merged.push(s);
+    else if (!placed.has(s.day)) merged.push(...updated);
+    placed.add(s.day);
   }
 
   return merged;

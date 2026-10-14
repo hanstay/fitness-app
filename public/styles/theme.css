@@ -254,7 +254,7 @@ button.item-card{width:100%; text-align:left; cursor:pointer; font-family:inheri
   color:var(--text-secondary); font-size:.68rem; font-weight:600; -webkit-tap-highlight-color:transparent;
 }
 .tabbar a:hover{color:var(--text-primary)}
-.tabbar a[aria-current="page"]{color:var(--accent-dark)}
+.tabbar a[aria-current]{color:var(--accent-dark)}
 .tabbar a:focus-visible{outline:2px solid var(--accent); outline-offset:-4px; border-radius:var(--radius-sm)}
 .tabbar svg{width:24px; height:24px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round}
 

@@ -7,28 +7,41 @@ import { doc, getDoc, collection, query, where, limit, getDocs } from "https://w
 import { db } from "./firebase-init.js";
 import { normalizeDay } from "./days.js";
 
+// Compares stored day names as weekdays ("Mon" and "Monday" are one day),
+// falling back to the exact text for one that names no weekday ("Day 1").
+export const dayKey = (day) => normalizeDay(day) ?? day;
+
+// A rest day is sometimes written as a "Rest" session holding a "Rest"
+// placeholder (or nothing) — not a session to train. Judged by its
+// exercises, not its label: a "Recovery run" is still a run.
+export const isRestSession = (session) => (session.exercises || []).every((ex) => /^rest\b/i.test(ex.name || ""));
+
+/** Every session `program` schedules on `day` (a day can hold more than one), without rest placeholders. */
+export const sessionsOn = (program, day) =>
+  (program.sessions || []).filter((s) => dayKey(s.day) === dayKey(day) && !isRestSession(s));
+
 // A group's shared session skeleton has load_note stripped; overlay this
 // member's own sessionLoads (from groups/{groupId}/members/{uid}) onto it
-// by day + exercise name + occurrence order (the Nth "Running" in a session
-// gets the Nth "Running" load) — mirrors functions/src/lib/sessionLoads.ts.
+// by day + exercise name + occurrence order (the Nth "Running" on a day gets
+// the Nth "Running" load, across all of that day's sessions) — mirrors
+// functions/src/lib/sessionLoads.ts.
 function applySessionLoads(sessions, sessionLoads) {
   const loadsByDay = new Map();
   for (const day of sessionLoads || []) {
-    const byName = new Map();
-    for (const ex of day.exercises || []) byName.set(ex.name, [...(byName.get(ex.name) || []), ex.load_note]);
-    loadsByDay.set(normalizeDay(day.day) ?? day.day, byName);
+    const loads = loadsByDay.get(dayKey(day.day)) ?? { byName: new Map(), seen: new Map() };
+    for (const ex of day.exercises || []) loads.byName.set(ex.name, [...(loads.byName.get(ex.name) || []), ex.load_note]);
+    loadsByDay.set(dayKey(day.day), loads);
   }
   return (sessions || []).map((session) => {
-    const byName = loadsByDay.get(normalizeDay(session.day) ?? session.day);
-    if (!byName) return session;
-    const seen = new Map();
+    const loads = loadsByDay.get(dayKey(session.day));
+    if (!loads) return session;
     return {
       ...session,
       exercises: (session.exercises || []).map((ex) => {
-        const n = seen.get(ex.name) || 0;
-        seen.set(ex.name, n + 1);
-        const loads = byName.get(ex.name);
-        return loads && n < loads.length ? { ...ex, load_note: loads[n] ?? null } : ex;
+        const n = loads.seen.get(ex.name) || 0;
+        loads.seen.set(ex.name, n + 1);
+        const notes = loads.byName.get(ex.name);
+        return notes && n < notes.length ? { ...ex, load_note: notes[n] ?? null } : ex;
       }),
     };
   });

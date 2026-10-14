@@ -1,20 +1,32 @@
-// Weekday names — WEEKDAYS and normalizeDay are duplicated by hand from
-// functions/src/lib/days.ts (no build step shares that file with the
-// browser); keep the two identical. Plans written since day names were
+// Weekday names — WEEKDAYS, DAY_BY_WORD and normalizeDay are duplicated by
+// hand from functions/src/lib/days.ts (no build step shares that file with
+// the browser); keep the two identical. Plans written since day names were
 // locked use these full names; older ones can say "Mon" or "Day 1".
 
 export const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
+// Each weekday's full name and its standard abbreviations, as whole words.
+const DAY_BY_WORD = new Map([
+  ["monday", "Monday"], ["mon", "Monday"],
+  ["tuesday", "Tuesday"], ["tue", "Tuesday"], ["tues", "Tuesday"],
+  ["wednesday", "Wednesday"], ["wed", "Wednesday"], ["weds", "Wednesday"],
+  ["thursday", "Thursday"], ["thu", "Thursday"], ["thur", "Thursday"], ["thurs", "Thursday"],
+  ["friday", "Friday"], ["fri", "Friday"],
+  ["saturday", "Saturday"], ["sat", "Saturday"],
+  ["sunday", "Sunday"], ["sun", "Sunday"],
+]);
+
 /**
- * The weekday a stored day name means ("Mon", "mon.", "MONDAY" and
- * "Monday (AM)" all mean "Monday"; "Tues" and "Th" mean "Tuesday" and
- * "Thursday"), or null when it names no weekday ("Day 1", "Rest", "").
- * Matches the leading word's first three letters, or both of a two-letter one.
+ * The weekday a stored day name means, or null when it doesn't clearly name
+ * one. It must start with a weekday's full name or standard abbreviation as
+ * a whole word, in any case ("Mon", "mon.", "MONDAY", "Tue AM" and
+ * "Monday (AM)" all work), and name no other weekday: "Day 1", "Monster",
+ * "Sunrise run" and "Tue/Thu" give null.
  */
 export function normalizeDay(raw) {
-  const word = typeof raw === "string" ? raw.trim().toLowerCase().match(/^[a-z]+/)?.[0] ?? "" : "";
-  if (word.length < 2) return null;
-  return WEEKDAYS.find((d) => d.toLowerCase().startsWith(word.slice(0, 3))) ?? null;
+  const words = typeof raw === "string" ? raw.toLowerCase().match(/[a-z]+/g) ?? [] : [];
+  const day = DAY_BY_WORD.get(words[0]);
+  return day && words.every((w) => (DAY_BY_WORD.get(w) ?? day) === day) ? day : null;
 }
 
 /** Today's weekday in the athlete's own timezone (getDay() counts from Sunday). */

@@ -84,7 +84,7 @@
   import { db, functions } from "./js/firebase-init.js";
   import { requireOnboarded, signOut } from "./js/auth-guard.js";
   import { showToast } from "./js/ui-messages.js";
-  import { loadCurrentProgram } from "./js/current-program.js";
+  import { loadCurrentProgram, sessionsOn } from "./js/current-program.js";
   import { WEEKDAYS, normalizeDay, todayWeekday } from "./js/days.js";
 
   const session = await requireOnboarded();
@@ -125,18 +125,25 @@
 
   const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 
-  // Today's session from the current plan — or, on a rest day, the next one.
-  // Some plans list a rest day as a "Rest" session, which doesn't count.
+  // Today's sessions from the current plan (a day can hold more than one) —
+  // or, on a rest day, the next ones.
   function todayCardHtml(p) {
     const today = todayWeekday();
-    const sessionOn = (day) =>
-      (p.sessions || []).find((s) => normalizeDay(s.day) === day && !/rest|recovery/i.test(s.label || ""));
     const heading = `<h2><span class="dot"></span>Today · ${today}</h2>`;
-    const session = sessionOn(today);
-    if (session) {
-      const exercises = session.exercises || [];
+    const labels = (sessions) => esc(sessions.map((s) => s.label).join(" + "));
+    // An older plan whose days aren't weekdays ("Day 1") can't say what's
+    // on today; its next check-in lays the week out on weekdays.
+    if ((p.sessions || []).some((s) => !normalizeDay(s.day))) {
       return `${heading}
-        <p class="item-title">${esc(session.label)}</p>
+        <p class="item-title">Open your plan</p>
+        <p class="muted small">Your next check-in will put your sessions on weekdays.</p>
+        <div class="btn-row"><a class="btn secondary grow" href="program.html">See your plan</a></div>`;
+    }
+    const sessions = sessionsOn(p, today);
+    if (sessions.length) {
+      const exercises = sessions.flatMap((s) => s.exercises || []);
+      return `${heading}
+        <p class="item-title">${labels(sessions)}</p>
         ${exercises.slice(0, 3).map((ex) => `<div class="ex"><div class="row">
           <span class="name">${esc(ex.name)}</span><span class="sets">${ex.sets} × ${esc(ex.reps)}</span>
         </div></div>`).join("")}
@@ -144,10 +151,10 @@
         <div class="btn-row"><a class="btn grow" href="program.html#today">See today's session</a></div>`;
     }
     const start = WEEKDAYS.indexOf(today);
-    const nextDay = [1, 2, 3, 4, 5, 6].map((n) => WEEKDAYS[(start + n) % 7]).find((day) => sessionOn(day));
+    const nextDay = [1, 2, 3, 4, 5, 6].map((n) => WEEKDAYS[(start + n) % 7]).find((day) => sessionsOn(p, day).length);
     return `${heading}
       <p class="item-title">Rest day</p>
-      ${nextDay ? `<p class="muted small">Next: ${nextDay} · ${esc(sessionOn(nextDay).label)}</p>` : ""}
+      ${nextDay ? `<p class="muted small">Next: ${nextDay} · ${labels(sessionsOn(p, nextDay))}</p>` : ""}
       <div class="btn-row"><a class="btn secondary grow" href="program.html#today">See your week</a></div>`;
   }
 

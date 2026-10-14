@@ -9,6 +9,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { getTestDb, clearFirestoreEmulator } from "./helpers/emulatorFirestore";
 import { FIXTURES, defaultFixtureResponse } from "./fixtures/llmFixtures";
 import { runGenerateProgram } from "../src/generate/generateProgram";
+import { REBUILD_CHANGE_NOTE } from "../src/lib/programDecisions";
 
 // vi.mock calls are hoisted above imports by Vitest, so this takes effect
 // before generateProgram.ts (and its groupProgram.ts import) load claude.ts.
@@ -204,7 +205,7 @@ describe("group generation", () => {
     const keptRoadmap = before.data().roadmap.map((p: Record<string, unknown>) => ({ ...p, phase: "Base (kept)" }));
     await before.ref.update({ roadmap: keptRoadmap });
 
-    await runGenerateProgram("a");
+    const result = await runGenerateProgram("a");
 
     const groupCall = mockExtractStructuredJson.mock.calls.find((c) => c[0].toolName === "record_group_program")!;
     expect(groupCall[0].userText).toContain("REBUILDING THIS PHASE'S WEEK");
@@ -214,5 +215,6 @@ describe("group generation", () => {
     expect(after.data().currentPhaseIndex).toBe(0);
     expect(after.data().blockStartedAt.toMillis()).toBe(before.data().blockStartedAt.toMillis());
     expect(after.data().sessions[0].day).toBe("Monday");
+    expect(result.changeSummary?.[0]).toBe(REBUILD_CHANGE_NOTE);
   });
 });

@@ -27,6 +27,22 @@ describe("applySessionLoads", () => {
     expect(out[1].exercises[0].load_note).toBeNull();
   });
 
+  it("gives each session of a double day its own loads, whether listed per session or together", () => {
+    const sessions = [
+      { day: "Monday" as const, label: "Lift", focus_note: null, exercises: [ex("Squat (Barbell)"), ex("Running")] },
+      { day: "Monday" as const, label: "Run", focus_note: null, exercises: [ex("Running")] },
+    ];
+    const perSession = [
+      { day: "Monday" as const, exercises: [{ name: "Squat (Barbell)", load_note: "100kg" }, { name: "Running", load_note: "warm-up" }] },
+      { day: "Monday" as const, exercises: [{ name: "Running", load_note: "tempo" }] },
+    ];
+    const together = [{ day: "Monday" as const, exercises: perSession.flatMap((d) => d.exercises) }];
+    for (const loads of [perSession, together]) {
+      expect(applySessionLoads(sessions, loads).map((s) => s.exercises.map((e) => e.load_note)))
+        .toEqual([["100kg", "warm-up"], ["tempo"]]);
+    }
+  });
+
   it("matches an older skeleton's abbreviated day to loads written in full", () => {
     const sessions = [{ day: "Tue", label: "Run", focus_note: null, exercises: [ex("Running")] }] as unknown as SessionOutput[]; // stored before day names were locked
     const out = applySessionLoads(sessions, [{ day: "Tuesday", exercises: [{ name: "Running", load_note: "easy" }] }]);

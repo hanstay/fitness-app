@@ -6,6 +6,7 @@ import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getTestDb, clearFirestoreEmulator } from "./helpers/emulatorFirestore";
 import { defaultFixtureResponse } from "./fixtures/llmFixtures";
 import { runGenerateProgram } from "../src/generate/generateProgram";
+import { REBUILD_CHANGE_NOTE } from "../src/lib/programDecisions";
 
 const mockExtractStructuredJson = vi.hoisted(() => vi.fn());
 vi.mock("../src/lib/claude", () => ({
@@ -259,6 +260,6 @@ describe("older plans' day names", () => {
     expect(p.currentPhaseIndex).toBe(0);
     expect(p.blockStartedAt.toMillis()).toBe(before.blockStartedAt.toMillis());
     expect(p.sessions.map((s: { day: string }) => s.day)).toEqual(["Monday", "Tuesday", "Thursday", "Friday"]);
-    expect(result.changeSummary).toBeUndefined();
+    expect(result.changeSummary?.[0]).toBe(REBUILD_CHANGE_NOTE);
   });
 });
