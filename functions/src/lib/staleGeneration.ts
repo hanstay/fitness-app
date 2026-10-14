@@ -2,9 +2,10 @@
 // background function was killed by its own 300s platform timeout before it
 // could write an error (see onProgramGenerationRequested.ts /
 // onMealPlanGenerationRequested.ts). No Firebase imports, so it's usable from
-// both the server-side sweep and, duplicated by hand in dashboard.html (a
-// plain script with no build step to share this file across the client/
-// server boundary), the client-side "still working?" check.
+// both the server-side sweep and, duplicated by hand in
+// public/js/plan-updates.js (plain browser modules with no build step to
+// share this file across the client/server boundary), the client-side
+// "still working?" check.
 
 // Comfortably above the 300s function timeout so we never flag a job that's
 // still legitimately running.

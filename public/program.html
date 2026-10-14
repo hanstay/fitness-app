@@ -16,6 +16,9 @@
 <link rel="stylesheet" href="styles/theme.css">
 <style>
   .adviceLink{display:none; margin-top:10px}
+  .dismiss{margin-left:auto; background:none; border:0; padding:4px; cursor:pointer; line-height:1;
+    font-size:.95rem; color:var(--text-secondary)}
+  #changes ul{margin:0; padding-left:20px}
 
   /* Target events: a card per event instead of a table — a table's columns
      (esp. "Goal", which is a full sentence) don't have a width they can
@@ -121,6 +124,7 @@
   import { doc, getDoc, collection, query, where, limit, getDocs } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
   import { db } from "./js/firebase-init.js";
   import { requireOnboarded } from "./js/auth-guard.js";
+  import { markPlanSeen, changesDismissed, dismissChanges } from "./js/plan-updates.js";
 
   const session = await requireOnboarded();
   if (!session) throw new Error("redirecting");
@@ -173,6 +177,7 @@
   }
 
   let p = null;
+  let planId = null; // see js/plan-updates.js
   if (summary?.activeProgramSource === "group" && summary?.groupId) {
     const activeSnap = await getDocs(query(
       collection(db, "groups", summary.groupId, "programs"),
@@ -184,6 +189,7 @@
       const shared = sharedDoc.data();
       const memberSnap = await getDoc(doc(db, "groups", summary.groupId, "members", user.uid));
       const member = memberSnap.exists() ? memberSnap.data() : null;
+      planId = sharedDoc.id;
       p = {
         ...shared,
         sessions: applySessionLoads(shared.sessions, member?.sessionLoads),
@@ -191,10 +197,12 @@
         coachNotes: member?.coachNotes ?? null,
         sportNotes: member?.sportNotes ?? null,
         nutritionNote: member?.nutritionNote ?? null,
+        changeSummary: member?.changeSummary ?? null,
       };
     }
   } else if (summary?.currentProgramId) {
     const programSnap = await getDoc(doc(db, "users", user.uid, "programs", summary.currentProgramId));
+    planId = programSnap.id;
     p = programSnap.data();
   }
 
@@ -210,6 +218,7 @@
     document.getElementById("headerBadges").innerHTML =
       `<span class="badge">🏋️ <b>${esc(p.split)}</b></span><span class="badge"><b>${p.daysPerWeek}</b> days/week</span>${eventBadges}`;
     document.getElementById("adviceLink").style.display = "inline-flex";
+    markPlanSeen(planId); // clears the dashboard's "Your plan is updated" notice
 
     const section = (id, label, innerHtml) => `
       <section id="${id}">
@@ -235,6 +244,19 @@
       ${loadLine(ex)}
       ${ex.substitution_note ? `<div class="sub"><span class="pill">Sub: ${esc(ex.substitution_note)}</span></div>` : ""}
     </div>`;
+
+    // ---- What changed in the latest update, until closed ----
+    if ((p.changeSummary || []).length && !changesDismissed(planId)) {
+      main.insertAdjacentHTML("beforeend", `
+        <section id="changes">
+          <h2><span class="dot"></span>What changed<button class="dismiss" id="dismissChanges" type="button" aria-label="Dismiss">✕</button></h2>
+          <ul class="small">${p.changeSummary.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
+        </section>`);
+      document.getElementById("dismissChanges").addEventListener("click", () => {
+        dismissChanges(planId);
+        document.getElementById("changes").remove();
+      });
+    }
 
     // ---- Target events ----
     if ((p.events || []).length) {
