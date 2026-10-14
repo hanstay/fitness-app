@@ -297,7 +297,7 @@
       const { planId, changeSummary } = await currentPlanChanges();
       if (key !== planNoticeKey) return; // a newer snapshot has taken over
       // isUnseenUpdate first: it records the first plan this device sees.
-      notice.style.display = planId && isUnseenUpdate(planId) && changeSummary?.length ? "block" : "none";
+      notice.style.display = planId && isUnseenUpdate(user.uid, planId) && changeSummary?.length ? "block" : "none";
     } catch (err) {
       console.error("[dashboard] couldn't check for an updated plan", err);
     }

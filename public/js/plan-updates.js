@@ -26,27 +26,27 @@ export function groupPlan(sharedProgramId, member) {
   };
 }
 
-// Per device, by plan id: the personal program doc id, or groupPlan's id.
-// localStorage can throw (private mode, blocked storage); losing these only
-// means a notice shows again, or not at all.
-function read(key) {
-  try { return localStorage.getItem(key); } catch { return null; }
+// Per device and account, by plan id: the personal program doc id, or
+// groupPlan's id. localStorage can throw (private mode, blocked storage);
+// losing these only means a notice shows again, or not at all.
+function read(key, uid) {
+  try { return localStorage.getItem(`${key}:${uid}`); } catch { return null; }
 }
-function write(key, value) {
-  try { localStorage.setItem(key, value); } catch { /* see above */ }
+function write(key, uid, value) {
+  try { localStorage.setItem(`${key}:${uid}`, value); } catch { /* see above */ }
 }
 
 // The dashboard's "Your plan is updated" notice, until the plan is opened.
 // With nothing recorded yet (the first visit since this shipped, or cleared
 // storage) the current plan counts as seen, rather than announcing an update
 // that may be weeks old.
-export function isUnseenUpdate(planId) {
-  const seenId = read("planSeenId");
-  if (seenId === null) markPlanSeen(planId);
+export function isUnseenUpdate(uid, planId) {
+  const seenId = read("planSeenId", uid);
+  if (seenId === null) markPlanSeen(uid, planId);
   return seenId !== null && seenId !== planId;
 }
-export const markPlanSeen = (planId) => write("planSeenId", planId);
+export const markPlanSeen = (uid, planId) => write("planSeenId", uid, planId);
 
 // The program page's "What changed" box, until it's closed.
-export const changesDismissed = (planId) => read("changesDismissedId") === planId;
-export const dismissChanges = (planId) => write("changesDismissedId", planId);
+export const changesDismissed = (uid, planId) => read("changesDismissedId", uid) === planId;
+export const dismissChanges = (uid, planId) => write("changesDismissedId", uid, planId);

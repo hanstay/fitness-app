@@ -220,7 +220,7 @@
     document.getElementById("headerBadges").innerHTML =
       `<span class="badge">🏋️ <b>${esc(p.split)}</b></span><span class="badge"><b>${p.daysPerWeek}</b> days/week</span>${eventBadges}`;
     document.getElementById("adviceLink").style.display = "inline-flex";
-    markPlanSeen(planId); // clears the dashboard's "Your plan is updated" notice
+    markPlanSeen(user.uid, planId); // clears the dashboard's "Your plan is updated" notice
 
     const section = (id, label, innerHtml) => `
       <section id="${id}">
@@ -248,7 +248,7 @@
     </div>`;
 
     // ---- What changed in the latest update, until closed ----
-    if ((p.changeSummary || []).length && !changesDismissed(planId)) {
+    if ((p.changeSummary || []).length && !changesDismissed(user.uid, planId)) {
       main.insertAdjacentHTML("beforeend", `
         <section id="changes">
           <h2><span class="dot"></span>What changed</h2>
@@ -256,7 +256,7 @@
           <button class="dismiss" id="dismissChanges" type="button" aria-label="Dismiss what changed">✕</button>
         </section>`);
       document.getElementById("dismissChanges").addEventListener("click", () => {
-        dismissChanges(planId);
+        dismissChanges(user.uid, planId);
         // Keep keyboard focus on the page rather than losing it with the button.
         const changes = document.getElementById("changes");
         const next = changes.nextElementSibling ?? main;

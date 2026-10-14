@@ -19,6 +19,8 @@ import { gatherGroundingData, loadExerciseVocabulary } from "./groundingData";
 import type { PrescriptionProgram } from "../lib/trainingLog";
 import { applySessionLoads } from "../lib/sessionLoads";
 import { reconcileEvents } from "../lib/eventReconciliation";
+import { commitProgramGeneration } from "./settleGeneration";
+import type { GenerateProgramOptions } from "./generateProgram";
 
 const GROUP_PREAMBLE = `You are an expert strength & conditioning coach writing ONE periodized, data-grounded
 training program shared by a small group of athletes who train together. They will do the same
@@ -222,7 +224,7 @@ export async function runGenerateGroupProgram(
   uid: string,
   groupId: string,
   athlete: AthleteProfileSnapshotFull,
-  opts?: { force?: boolean }
+  opts?: GenerateProgramOptions
 ): Promise<{ programId: string } & ProgramOutput & { changeSummary?: string[] }> {
   const db = getFirestore();
   const group = await loadGroup(db, groupId);
@@ -393,12 +395,14 @@ export async function runGenerateGroupProgram(
   // there); set() replaces the whole doc, so a later run without one clears it.
   // groupProgramId: the shared program this layer was written against, so the
   // summary isn't shown once another member's run has replaced that program.
-  await db.doc(`groups/${groupId}/members/${uid}`).set({
-    ...memberLayer,
-    ...(changeSummary ? { changeSummary } : {}),
-    groupProgramId: groupProgramRef!.id,
-    profileSnapshot: athlete,
-    updatedAt: FieldValue.serverTimestamp(),
+  await commitProgramGeneration(uid, opts?.placeholder, (tx) => {
+    tx.set(db.doc(`groups/${groupId}/members/${uid}`), {
+      ...memberLayer,
+      ...(changeSummary ? { changeSummary } : {}),
+      groupProgramId: groupProgramRef!.id,
+      profileSnapshot: athlete,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
   });
 
   const sessions = applySessionLoads(sharedProgram.sessions, memberLayer.sessionLoads);

@@ -27,7 +27,14 @@ export const onProgramGenerationRequested = onDocumentWritten(
     if (!after?.exists || after.data()?.status !== "generating") return;
 
     try {
-      await runGenerateProgram(event.params.uid, toProgramGenerationRequest(after.data()?.request));
+      // runGenerateProgram archives every prior "active" program and writes a
+      // fresh doc of its own; the "generating" placeholder never becomes
+      // active, so it deletes that too, in the same commit, and clears the
+      // status (see settleGeneration.ts).
+      await runGenerateProgram(event.params.uid, {
+        ...toProgramGenerationRequest(after.data()?.request),
+        placeholder: after.ref,
+      });
     } catch (err) {
       const message = err instanceof HttpsError ? err.message : err instanceof Error ? err.message : String(err);
       await settleGeneration(after.ref, "programGenerationId", {
@@ -35,15 +42,6 @@ export const onProgramGenerationRequested = onDocumentWritten(
         programGenerationError: message,
         programGenerationStartedAt: FieldValue.delete(),
       });
-      return;
     }
-    // runGenerateProgram archives every prior "active" program and writes a
-    // fresh doc of its own; the "generating" placeholder never became active,
-    // so it'd be left dangling — delete it, and clear the status (which
-    // runGenerateProgram leaves alone: see settleGeneration.ts).
-    await settleGeneration(after.ref, "programGenerationId", {
-      programGenerationStatus: FieldValue.delete(),
-      programGenerationStartedAt: FieldValue.delete(),
-    });
   }
 );

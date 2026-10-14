@@ -165,6 +165,7 @@ document.getElementById("icuSyncBtn").addEventListener("click", (e) => {
 const regenBtn = document.getElementById("regenBtn");
 const regenLabel = regenBtn.innerHTML;
 const UPDATING_MSG = "Updating your plan. You can leave this page; it'll be ready on your dashboard in a few minutes.";
+const STALLED_MSG = "This update seems to have stalled. Please try again.";
 
 let queuing = false;    // the queue call itself is in flight
 let followingId = null; // the generation whose outcome this page reports
@@ -205,11 +206,15 @@ function renderGenerationStatus() {
     followingId ??= s.programGenerationId ?? null;
     statusEl.textContent = UPDATING_MSG;
   } else if (followingId && s?.programGenerationId === followingId) {
-    followingId = null;
-    if (s.programGenerationStatus === "error") {
+    if (s.programGenerationStatus === "generating") {
+      // Stalled: keep following it, so the stale sweep's error still shows.
+      statusEl.textContent = STALLED_MSG;
+    } else if (s.programGenerationStatus === "error") {
+      followingId = null;
       statusEl.textContent = "";
       showError(`Couldn't update your program: ${s.programGenerationError || "unknown error"}`);
     } else {
+      followingId = null;
       statusEl.innerHTML = `Your plan is updated. <a href="program.html">See your updated plan →</a>`;
     }
   } else if (statusEl.textContent === UPDATING_MSG) {

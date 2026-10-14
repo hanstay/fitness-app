@@ -1,5 +1,5 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
+import { getFirestore, FieldValue, Timestamp, DocumentReference } from "firebase-admin/firestore";
 import { extractStructuredJson, MODEL } from "../lib/claude";
 import {
   programSchema, ProgramOutput,
@@ -15,6 +15,7 @@ import {
 import { mergeIncrementalSessions } from "../lib/programMerge";
 import { gatherGroundingData } from "./groundingData";
 import { runGenerateGroupProgram } from "./groupProgram";
+import { commitProgramGeneration } from "./settleGeneration";
 
 // Shared framing every path needs: goal-driven training style and how to
 // ground the program in the athlete's actual data.
@@ -268,6 +269,13 @@ export const generateProgram = onCall({ secrets: ["ANTHROPIC_API_KEY"], timeoutS
   }
 });
 
+export interface GenerateProgramOptions {
+  force?: boolean;
+  // The queued run's "generating" placeholder, settled in the same commit as
+  // the new program (see settleGeneration.ts).
+  placeholder?: DocumentReference;
+}
+
 /**
  * Does the actual grounding-data fetch + generation + Firestore write for one
  * athlete. Called synchronously from the `generateProgram` onCall above
@@ -277,7 +285,7 @@ export const generateProgram = onCall({ secrets: ["ANTHROPIC_API_KEY"], timeoutS
  */
 export async function runGenerateProgram(
   uid: string,
-  opts?: { force?: boolean }
+  opts?: GenerateProgramOptions
 ): Promise<{ programId: string } & ProgramOutput & { changeSummary?: string[] }> {
   const db = getFirestore();
   const userSnap = await db.doc(`users/${uid}`).get();
@@ -501,30 +509,27 @@ export async function runGenerateProgram(
     mergedProgram = parsed.data;
   }
 
-  const batch = db.batch();
-  existingActiveSnap.forEach((d) => batch.update(d.ref, { status: "archived" }));
-
   const newRef = db.collection(`users/${uid}/programs`).doc();
-  batch.set(newRef, {
-    createdAt: FieldValue.serverTimestamp(),
-    status: "active",
-    model: MODEL,
-    ...mergedProgram,
-    ...(changeSummary ? { changeSummary } : {}),
-    profileSnapshot: athlete,
-    // Where this program is in its periodization. A weekly update carries
-    // both forward unchanged (so the block's age isn't reset every week);
-    // moving to a new phase or a redesign starts a new block today.
-    currentPhaseIndex: decision.mode === "incremental" ? decision.fromPhaseIndex ?? 0
-      : decision.mode === "advance" ? decision.targetPhaseIndex : 0,
-    blockStartedAt: decision.mode === "incremental" && blockStartedAtMs != null
-      ? Timestamp.fromMillis(blockStartedAtMs)
-      : FieldValue.serverTimestamp(),
+  await commitProgramGeneration(uid, opts?.placeholder, (tx) => {
+    existingActiveSnap.forEach((d) => tx.update(d.ref, { status: "archived" }));
+    tx.set(newRef, {
+      createdAt: FieldValue.serverTimestamp(),
+      status: "active",
+      model: MODEL,
+      ...mergedProgram,
+      ...(changeSummary ? { changeSummary } : {}),
+      profileSnapshot: athlete,
+      // Where this program is in its periodization. A weekly update carries
+      // both forward unchanged (so the block's age isn't reset every week);
+      // moving to a new phase or a redesign starts a new block today.
+      currentPhaseIndex: decision.mode === "incremental" ? decision.fromPhaseIndex ?? 0
+        : decision.mode === "advance" ? decision.targetPhaseIndex : 0,
+      blockStartedAt: decision.mode === "incremental" && blockStartedAtMs != null
+        ? Timestamp.fromMillis(blockStartedAtMs)
+        : FieldValue.serverTimestamp(),
+    });
+    tx.update(db.doc(`users/${uid}/state/summary`), { currentProgramId: newRef.id });
   });
-  // The generation status is left to the background trigger, which only
-  // clears it if no newer generation has been queued since (settleGeneration.ts).
-  batch.update(db.doc(`users/${uid}/state/summary`), { currentProgramId: newRef.id });
-  await batch.commit();
 
   return { programId: newRef.id, ...mergedProgram, ...(changeSummary ? { changeSummary } : {}) };
 }
