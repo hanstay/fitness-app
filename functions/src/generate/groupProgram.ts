@@ -382,8 +382,18 @@ export async function runGenerateGroupProgram(
     maxTokens: 4000,
   });
 
+  const changeSummary = decision.mode === "advance"
+    ? [
+        `Moved to the next phase of the group plan: ${activeGroupProgram?.roadmap?.[decision.fromPhaseIndex!]?.phase ?? "previous phase"} → ${sharedProgram.roadmap[currentPhaseIndex]?.phase ?? "next phase"}.`,
+        ...(memberLayer.currentState?.highlights ?? []),
+      ]
+    : undefined;
+
+  // Stored on the member doc (program.html's "What changed" box reads it
+  // there); set() replaces the whole doc, so a later run without one clears it.
   await db.doc(`groups/${groupId}/members/${uid}`).set({
     ...memberLayer,
+    ...(changeSummary ? { changeSummary } : {}),
     profileSnapshot: athlete,
     updatedAt: FieldValue.serverTimestamp(),
   });
@@ -398,13 +408,6 @@ export async function runGenerateGroupProgram(
     coachNotes: memberLayer.coachNotes,
     sportNotes: memberLayer.sportNotes,
     nutritionNote: memberLayer.nutritionNote,
-    ...(decision.mode === "advance"
-      ? {
-          changeSummary: [
-            `Moved to the next phase of the group plan: ${activeGroupProgram?.roadmap?.[decision.fromPhaseIndex!]?.phase ?? "previous phase"} → ${sharedProgram.roadmap[currentPhaseIndex]?.phase ?? "next phase"}.`,
-            ...(memberLayer.currentState?.highlights ?? []),
-          ],
-        }
-      : {}),
+    ...(changeSummary ? { changeSummary } : {}),
   };
 }

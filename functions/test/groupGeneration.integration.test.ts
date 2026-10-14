@@ -175,4 +175,26 @@ describe("group generation", () => {
     const aBefore = await db.doc("groups/g6/members/a").get();
     expect(aBefore.exists).toBe(true);
   });
+
+  it("scenario 7: moving to the next phase stores the change summary on the member's doc until their next update", async () => {
+    await seedGroup("g7", ["a", "b"]);
+    await seedMember("a", "a", "g7");
+    await seedMember("b", "b", "g7");
+    const fixture = FIXTURES.record_group_program as { roadmap: Array<Record<string, unknown>> };
+    const twoPhases = {
+      ...fixture,
+      roadmap: [fixture.roadmap[0], { ...fixture.roadmap[0], phase: "Build", dates: "Weeks 9-14", startDate: "2026-10-06", endDate: "2026-11-28" }],
+    };
+    mockExtractStructuredJson.mockImplementation(async (params: { toolName: string }) =>
+      params.toolName === "record_group_program" ? twoPhases : defaultFixtureResponse(params));
+    await runGenerateProgram("a");
+
+    await runGenerateProgram("a", { force: true });
+    const advanced = await db.doc("groups/g7/members/a").get();
+    expect(advanced.data()?.changeSummary?.[0]).toContain("Base → Build");
+
+    await runGenerateProgram("a");
+    const updated = await db.doc("groups/g7/members/a").get();
+    expect(updated.data()).not.toHaveProperty("changeSummary");
+  });
 });

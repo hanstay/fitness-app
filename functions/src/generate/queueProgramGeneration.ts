@@ -1,10 +1,11 @@
 // Thin, fast onCall that just queues a program generation — used by
-// onboarding so the client can navigate to the dashboard immediately instead
-// of holding an in-flight connection open for the multi-minute LLM call (see
-// onProgramGenerationRequested.ts, which does the actual work in the
-// background once this placeholder lands).
+// onboarding, the dashboard and the check-in so the client can move on
+// immediately instead of holding an in-flight connection open for the
+// multi-minute LLM call (see onProgramGenerationRequested.ts, which does the
+// actual work in the background once this placeholder lands).
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { toProgramGenerationRequest } from "../lib/programGenerationRequest";
 
 export const queueProgramGeneration = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
@@ -13,14 +14,22 @@ export const queueProgramGeneration = onCall(async (request) => {
   const db = getFirestore();
   const userSnap = await db.doc(`users/${uid}`).get();
   const athlete = userSnap.data()?.athlete;
+  const { groupId, activeProgramSource } = (await db.doc(`users/${uid}/state/summary`).get()).data() ?? {};
 
-  if (!athlete?.training_days_per_week || !athlete?.session_length_minutes) {
+  // Same precondition, and the same group exemption, as runGenerateProgram —
+  // checked here too so it fails fast instead of in the background.
+  const followsGroup = activeProgramSource === "group" && groupId;
+  if (!followsGroup && (!athlete?.training_days_per_week || !athlete?.session_length_minutes)) {
     throw new HttpsError("failed-precondition", "Complete your training profile first (days/week, session length).");
   }
 
   const placeholderRef = db.collection(`users/${uid}/programs`).doc();
   await db.batch()
-    .set(placeholderRef, { status: "generating", createdAt: FieldValue.serverTimestamp() })
+    .set(placeholderRef, {
+      status: "generating",
+      createdAt: FieldValue.serverTimestamp(),
+      request: toProgramGenerationRequest(request.data),
+    })
     .update(db.doc(`users/${uid}/state/summary`), {
       programGenerationStatus: "generating",
       programGenerationError: FieldValue.delete(),

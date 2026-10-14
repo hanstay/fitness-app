@@ -252,6 +252,7 @@ function computePhaseSignal(
   return `Nearest event: ${eventPart}. Current form: ${loadPart}.`;
 }
 
+// Kept for groups.html and for older cached check-in pages; the check-in now queues (queueProgramGeneration.ts).
 export const generateProgram = onCall({ secrets: ["ANTHROPIC_API_KEY"], timeoutSeconds: 300 }, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
   try {
@@ -270,8 +271,8 @@ export const generateProgram = onCall({ secrets: ["ANTHROPIC_API_KEY"], timeoutS
 /**
  * Does the actual grounding-data fetch + generation + Firestore write for one
  * athlete. Called synchronously from the `generateProgram` onCall above
- * (dashboard "Regenerate", check-in update) and, separately, from the
- * background trigger that runs queued onboarding generations
+ * (groups.html) and, separately, from the background trigger that runs
+ * queued generations — onboarding, dashboard, check-in update
  * (onProgramGenerationRequested.ts) — same logic either way.
  */
 export async function runGenerateProgram(
