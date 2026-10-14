@@ -15,9 +15,20 @@ export function isStale(startedAt) {
   return Date.now() - ms > GENERATION_STALE_AFTER_MS;
 }
 
-// Per device, by plan id: the personal program doc id, or the group program
-// doc id for a group plan (see program.html). localStorage can throw (private
-// mode, blocked storage); losing these only means a notice shows again.
+// A group plan is the shared program plus this member's own layer, and a
+// weekly update only rewrites the layer — so its id covers both. The layer's
+// change summary only describes the shared program it was written against;
+// once another member's run replaces that program, it's out of date.
+export function groupPlan(sharedProgramId, member) {
+  return {
+    planId: `${sharedProgramId}@${member?.updatedAt?.toMillis?.() ?? ""}`,
+    changeSummary: member?.groupProgramId === sharedProgramId ? member.changeSummary : null,
+  };
+}
+
+// Per device, by plan id: the personal program doc id, or groupPlan's id.
+// localStorage can throw (private mode, blocked storage); losing these only
+// means a notice shows again, or not at all.
 function read(key) {
   try { return localStorage.getItem(key); } catch { return null; }
 }
@@ -26,7 +37,14 @@ function write(key, value) {
 }
 
 // The dashboard's "Your plan is updated" notice, until the plan is opened.
-export const planSeen = (planId) => read("planSeenId") === planId;
+// With nothing recorded yet (the first visit since this shipped, or cleared
+// storage) the current plan counts as seen, rather than announcing an update
+// that may be weeks old.
+export function isUnseenUpdate(planId) {
+  const seenId = read("planSeenId");
+  if (seenId === null) markPlanSeen(planId);
+  return seenId !== null && seenId !== planId;
+}
 export const markPlanSeen = (planId) => write("planSeenId", planId);
 
 // The program page's "What changed" box, until it's closed.

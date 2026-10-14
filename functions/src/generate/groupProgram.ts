@@ -391,9 +391,12 @@ export async function runGenerateGroupProgram(
 
   // Stored on the member doc (program.html's "What changed" box reads it
   // there); set() replaces the whole doc, so a later run without one clears it.
+  // groupProgramId: the shared program this layer was written against, so the
+  // summary isn't shown once another member's run has replaced that program.
   await db.doc(`groups/${groupId}/members/${uid}`).set({
     ...memberLayer,
     ...(changeSummary ? { changeSummary } : {}),
+    groupProgramId: groupProgramRef!.id,
     profileSnapshot: athlete,
     updatedAt: FieldValue.serverTimestamp(),
   });

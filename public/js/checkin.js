@@ -24,9 +24,8 @@ const setStatus = (id, msg) => { document.getElementById(id).textContent = msg; 
 // Guards a control that fires a side-effectful / costly API call. The control is
 // clickable ONLY before its first send (idle) or after a failed attempt (retry).
 // While the request is in flight — and after it succeeds — the control stays
-// disabled, so an expensive call (queueing a plan update, saveHevySessions,
-// credential writes) can't be double-fired or spammed. Reload the page to run
-// it again after a success.
+// disabled, so an expensive call (saveHevySessions, credential writes) can't be
+// double-fired or spammed. Reload the page to run it again after a success.
 async function withButtonBusy(btn, busyLabel, fn) {
   if (btn.disabled) return; // already in flight, or completed successfully
   const original = btn.innerHTML;
@@ -159,55 +158,71 @@ document.getElementById("icuSyncBtn").addEventListener("click", (e) => {
 
 /* ---------- Section 3: regenerate program ---------- */
 
-// The update runs in the background (see queueProgramGeneration.ts), so this
-// only queues it. The summary listener below then keeps the button disabled
-// while a generation is in flight, wherever it was started, and reports how
+// The update runs in the background (see queueProgramGeneration.ts), so a
+// click only queues it. The summary listener owns the button and status line:
+// disabled while a generation is in flight, wherever it was started, then how
 // it ended; the new plan itself is on the program page.
 const regenBtn = document.getElementById("regenBtn");
+const regenLabel = regenBtn.innerHTML;
 const UPDATING_MSG = "Updating your plan. You can leave this page; it'll be ready on your dashboard in a few minutes.";
 
-regenBtn.addEventListener("click", () => {
+let queuing = false;    // the queue call itself is in flight
+let followingId = null; // the generation whose outcome this page reports
+let latestSummary = null;
+
+regenBtn.addEventListener("click", async () => {
+  if (regenBtn.disabled) return;
   clearMessages();
-  withButtonBusy(regenBtn, "Starting…", async () => {
+  queuing = true;
+  renderGenerationStatus();
+  try {
     const force = document.getElementById("forceRegenCheck")?.checked === true;
-    await httpsCallable(functions, "queueProgramGeneration")({ force });
-    setStatus("regenStatus", UPDATING_MSG);
-  }).catch((err) => {
+    const result = await httpsCallable(functions, "queueProgramGeneration")({ force });
+    followingId = result.data.programId;
+  } catch (err) {
     const msg = String(err?.message || err);
     const isPrecondition = /first|required|Complete/i.test(msg);
-    setStatus("regenStatus", "");
     showError(isPrecondition
       ? "Add your training details (days/week, session length) in your profile first."
       : `Couldn't update your program: ${msg}`);
-  });
+  } finally {
+    queuing = false;
+    renderGenerationStatus();
+  }
 });
 
-// Reports only the outcome of a generation this page saw in flight, so an
-// error left over from an earlier attempt isn't shown again on every visit.
-let generating = false;
-function renderGenerationStatus(s) {
-  const wasGenerating = generating;
-  generating = s?.programGenerationStatus === "generating" && !isStale(s.programGenerationStartedAt);
-  if (generating) {
-    regenBtn.disabled = true;
-    setStatus("regenStatus", UPDATING_MSG);
-    return;
-  }
-  if (!wasGenerating) return;
-  regenBtn.disabled = false;
-  if (s?.programGenerationStatus === "error") {
-    setStatus("regenStatus", "");
-    showError(`Couldn't update your program: ${s.programGenerationError || "unknown error"}`);
-  } else {
-    document.getElementById("regenStatus").innerHTML = `Your plan is updated. <a href="program.html">See what changed →</a>`;
+// Outcomes are matched to the generation by the summary's
+// programGenerationId, so a snapshot from before the queue's write isn't
+// taken for the end of the new generation, and an error left over from an
+// earlier attempt isn't shown again on every visit.
+function renderGenerationStatus() {
+  const s = latestSummary;
+  const inFlight = s?.programGenerationStatus === "generating" && !isStale(s.programGenerationStartedAt);
+  regenBtn.disabled = queuing || inFlight;
+  regenBtn.innerHTML = queuing ? `<span class="spinner"></span> Starting…` : regenLabel;
+  const statusEl = document.getElementById("regenStatus");
+  if (inFlight) {
+    followingId ??= s.programGenerationId ?? null;
+    statusEl.textContent = UPDATING_MSG;
+  } else if (followingId && s?.programGenerationId === followingId) {
+    followingId = null;
+    if (s.programGenerationStatus === "error") {
+      statusEl.textContent = "";
+      showError(`Couldn't update your program: ${s.programGenerationError || "unknown error"}`);
+    } else {
+      statusEl.innerHTML = `Your plan is updated. <a href="program.html">See your updated plan →</a>`;
+    }
+  } else if (statusEl.textContent === UPDATING_MSG) {
+    statusEl.textContent = ""; // one whose outcome isn't ours to report (no id, or stalled)
   }
 }
 
 /* ---------- init ---------- */
 
-onSnapshot(doc(db, "users", user.uid, "state", "summary"),
-  (snap) => renderGenerationStatus(snap.data()),
-  (err) => console.error("[checkin] plan update status listener failed", err));
+onSnapshot(doc(db, "users", user.uid, "state", "summary"), (snap) => {
+  latestSummary = snap.data();
+  renderGenerationStatus();
+}, (err) => console.error("[checkin] plan update status listener failed", err));
 
 async function loadSummary() {
   const snap = await getDoc(doc(db, "users", user.uid, "state", "summary"));

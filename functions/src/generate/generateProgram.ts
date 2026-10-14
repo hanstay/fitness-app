@@ -521,11 +521,9 @@ export async function runGenerateProgram(
       ? Timestamp.fromMillis(blockStartedAtMs)
       : FieldValue.serverTimestamp(),
   });
-  batch.update(db.doc(`users/${uid}/state/summary`), {
-    currentProgramId: newRef.id,
-    programGenerationStatus: FieldValue.delete(),
-    programGenerationStartedAt: FieldValue.delete(),
-  });
+  // The generation status is left to the background trigger, which only
+  // clears it if no newer generation has been queued since (settleGeneration.ts).
+  batch.update(db.doc(`users/${uid}/state/summary`), { currentProgramId: newRef.id });
   await batch.commit();
 
   return { programId: newRef.id, ...mergedProgram, ...(changeSummary ? { changeSummary } : {}) };

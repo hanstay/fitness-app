@@ -192,6 +192,8 @@ describe("group generation", () => {
     await runGenerateProgram("a", { force: true });
     const advanced = await db.doc("groups/g7/members/a").get();
     expect(advanced.data()?.changeSummary?.[0]).toContain("Base → Build");
+    const active = await db.collection("groups/g7/programs").where("status", "==", "active").get();
+    expect(advanced.data()?.groupProgramId).toBe(active.docs[0].id);
 
     await runGenerateProgram("a");
     const updated = await db.doc("groups/g7/members/a").get();

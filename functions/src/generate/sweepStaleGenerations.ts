@@ -7,6 +7,7 @@
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { getFirestore, Timestamp, FieldValue } from "firebase-admin/firestore";
 import { GENERATION_STALE_AFTER_MS } from "../lib/staleGeneration";
+import { settleGeneration } from "./settleGeneration";
 
 const STALE_MESSAGE = "This took longer than expected and appears to have stalled. Please try again.";
 
@@ -15,11 +16,12 @@ interface SweepTarget {
   statusField: "programGenerationStatus" | "mealPlanGenerationStatus";
   errorField: "programGenerationError" | "mealPlanGenerationError";
   startedAtField: "programGenerationStartedAt" | "mealPlanGenerationStartedAt";
+  idField: "programGenerationId" | "mealPlanGenerationId";
 }
 
 const TARGETS: SweepTarget[] = [
-  { collectionId: "programs", statusField: "programGenerationStatus", errorField: "programGenerationError", startedAtField: "programGenerationStartedAt" },
-  { collectionId: "mealPlans", statusField: "mealPlanGenerationStatus", errorField: "mealPlanGenerationError", startedAtField: "mealPlanGenerationStartedAt" },
+  { collectionId: "programs", statusField: "programGenerationStatus", errorField: "programGenerationError", startedAtField: "programGenerationStartedAt", idField: "programGenerationId" },
+  { collectionId: "mealPlans", statusField: "mealPlanGenerationStatus", errorField: "mealPlanGenerationError", startedAtField: "mealPlanGenerationStartedAt", idField: "mealPlanGenerationId" },
 ];
 
 async function sweep(db: FirebaseFirestore.Firestore, target: SweepTarget): Promise<number> {
@@ -31,19 +33,11 @@ async function sweep(db: FirebaseFirestore.Firestore, target: SweepTarget): Prom
     .get();
 
   for (const doc of snap.docs) {
-    // Placeholders live at users/{uid}/{collectionId}/{id} — uid is the
-    // grandparent of the doc ref.
-    const uid = doc.ref.parent.parent?.id;
-    if (!uid) continue;
-    await db
-      .batch()
-      .delete(doc.ref)
-      .update(db.doc(`users/${uid}/state/summary`), {
-        [target.statusField]: "error",
-        [target.errorField]: STALE_MESSAGE,
-        [target.startedAtField]: FieldValue.delete(),
-      })
-      .commit();
+    await settleGeneration(doc.ref, target.idField, {
+      [target.statusField]: "error",
+      [target.errorField]: STALE_MESSAGE,
+      [target.startedAtField]: FieldValue.delete(),
+    });
   }
 
   return snap.size;

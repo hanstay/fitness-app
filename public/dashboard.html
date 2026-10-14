@@ -87,7 +87,7 @@
   import { db, functions } from "./js/firebase-init.js";
   import { requireOnboarded, signOut } from "./js/auth-guard.js";
   import { showToast } from "./js/ui-messages.js";
-  import { isStale, planSeen } from "./js/plan-updates.js";
+  import { isStale, groupPlan, isUnseenUpdate } from "./js/plan-updates.js";
 
   const session = await requireOnboarded();
   if (!session) throw new Error("redirecting"); // requireOnboarded already redirected
@@ -265,14 +265,14 @@
   }
 
   // The current plan's id and change summary, from the same source
-  // program.html shows (a group plan's summary is on the member's own doc).
+  // program.html shows.
   async function currentPlanChanges() {
     if (summary?.activeProgramSource === "group" && summary?.groupId) {
       const [activeSnap, memberSnap] = await Promise.all([
         getDocs(query(collection(db, "groups", summary.groupId, "programs"), where("status", "==", "active"), limit(1))),
         getDoc(doc(db, "groups", summary.groupId, "members", user.uid)),
       ]);
-      return { planId: activeSnap.docs[0]?.id, changeSummary: memberSnap.data()?.changeSummary };
+      return activeSnap.docs[0] ? groupPlan(activeSnap.docs[0].id, memberSnap.data()) : {};
     }
     if (!summary?.currentProgramId) return {};
     const programSnap = await getDoc(doc(db, "users", user.uid, "programs", summary.currentProgramId));
@@ -296,7 +296,8 @@
     try {
       const { planId, changeSummary } = await currentPlanChanges();
       if (key !== planNoticeKey) return; // a newer snapshot has taken over
-      notice.style.display = planId && changeSummary?.length && !planSeen(planId) ? "block" : "none";
+      // isUnseenUpdate first: it records the first plan this device sees.
+      notice.style.display = planId && isUnseenUpdate(planId) && changeSummary?.length ? "block" : "none";
     } catch (err) {
       console.error("[dashboard] couldn't check for an updated plan", err);
     }

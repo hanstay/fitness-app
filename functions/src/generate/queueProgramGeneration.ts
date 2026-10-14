@@ -36,6 +36,8 @@ export const queueProgramGeneration = onCall(async (request) => {
       // Lets the client judge staleness (see lib/staleGeneration.ts) without a
       // second listener on the placeholder doc itself.
       programGenerationStartedAt: FieldValue.serverTimestamp(),
+      // The generation the status now belongs to (see settleGeneration.ts).
+      programGenerationId: placeholderRef.id,
     })
     .commit();
 

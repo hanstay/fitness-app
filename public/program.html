@@ -16,9 +16,10 @@
 <link rel="stylesheet" href="styles/theme.css">
 <style>
   .adviceLink{display:none; margin-top:10px}
-  .dismiss{margin-left:auto; background:none; border:0; padding:4px; cursor:pointer; line-height:1;
-    font-size:.95rem; color:var(--text-secondary)}
+  #changes{position:relative}
   #changes ul{margin:0; padding-left:20px}
+  #changes .dismiss{position:absolute; top:8px; right:8px; width:44px; height:44px; background:none; border:0;
+    border-radius:var(--radius-sm); cursor:pointer; font-size:.95rem; color:var(--text-secondary)}
 
   /* Target events: a card per event instead of a table — a table's columns
      (esp. "Goal", which is a full sentence) don't have a width they can
@@ -124,7 +125,7 @@
   import { doc, getDoc, collection, query, where, limit, getDocs } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
   import { db } from "./js/firebase-init.js";
   import { requireOnboarded } from "./js/auth-guard.js";
-  import { markPlanSeen, changesDismissed, dismissChanges } from "./js/plan-updates.js";
+  import { groupPlan, markPlanSeen, changesDismissed, dismissChanges } from "./js/plan-updates.js";
 
   const session = await requireOnboarded();
   if (!session) throw new Error("redirecting");
@@ -189,7 +190,8 @@
       const shared = sharedDoc.data();
       const memberSnap = await getDoc(doc(db, "groups", summary.groupId, "members", user.uid));
       const member = memberSnap.exists() ? memberSnap.data() : null;
-      planId = sharedDoc.id;
+      const plan = groupPlan(sharedDoc.id, member);
+      planId = plan.planId;
       p = {
         ...shared,
         sessions: applySessionLoads(shared.sessions, member?.sessionLoads),
@@ -197,7 +199,7 @@
         coachNotes: member?.coachNotes ?? null,
         sportNotes: member?.sportNotes ?? null,
         nutritionNote: member?.nutritionNote ?? null,
-        changeSummary: member?.changeSummary ?? null,
+        changeSummary: plan.changeSummary,
       };
     }
   } else if (summary?.currentProgramId) {
@@ -249,12 +251,18 @@
     if ((p.changeSummary || []).length && !changesDismissed(planId)) {
       main.insertAdjacentHTML("beforeend", `
         <section id="changes">
-          <h2><span class="dot"></span>What changed<button class="dismiss" id="dismissChanges" type="button" aria-label="Dismiss">✕</button></h2>
+          <h2><span class="dot"></span>What changed</h2>
           <ul class="small">${p.changeSummary.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
+          <button class="dismiss" id="dismissChanges" type="button" aria-label="Dismiss what changed">✕</button>
         </section>`);
       document.getElementById("dismissChanges").addEventListener("click", () => {
         dismissChanges(planId);
-        document.getElementById("changes").remove();
+        // Keep keyboard focus on the page rather than losing it with the button.
+        const changes = document.getElementById("changes");
+        const next = changes.nextElementSibling ?? main;
+        changes.remove();
+        next.tabIndex = -1;
+        next.focus();
       });
     }
 
