@@ -347,11 +347,25 @@ describe("feedback notes and exercise swaps in a weekly update", () => {
     const call = mockExtractStructuredJson.mock.calls[0][0] as { system: string; userText: string; inputSchema: { properties: object } };
     expect(call.system).not.toContain("ATHLETE FEEDBACK");
     expect(call.inputSchema.properties).not.toHaveProperty("feedbackResponses");
-    expect(call.userText).toContain("- Tuesday: Old Squat → Box Step-Up (Dumbbell) (doesn't like it)");
+    expect(call.userText).toContain('- Tuesday: "Old Squat" → "Box Step-Up (Dumbbell)" (doesn\'t like it)');
     const program = (await db.doc(`users/f2/programs/${result.programId}`).get()).data()!;
     expect(program.swaps).toHaveLength(1);
     expect(program.sessions.find((s: { day: string }) => s.day === "Tuesday").exercises[0].name).toBe("Box Step-Up (Dumbbell)");
     expect(program.feedbackResponses).toBeUndefined();
+  });
+
+  it("doesn't replace a plan that was swapped on while the update ran", async () => {
+    await seedUser("f4");
+    await seedSwappedProgram("f4", []);
+    mockExtractStructuredJson.mockImplementation(async (params: { toolName: string }) => {
+      const active = await db.collection("users/f4/programs").where("status", "==", "active").get();
+      await active.docs[0].ref.update({ swaps: [swap("this_week")] });
+      return defaultFixtureResponse(params);
+    });
+
+    await expect(runGenerateProgram("f4")).rejects.toMatchObject({ code: "aborted" });
+    const active = await db.collection("users/f4/programs").where("status", "==", "active").get();
+    expect(active.docs[0].data().swaps).toHaveLength(1);
   });
 
   it("keeps a this-week swap made for pain while that pain note is still open", async () => {

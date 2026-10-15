@@ -6,7 +6,7 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import {
-  normalizeNoteInput, MAX_PENDING_NOTES, FOLLOW_UP_OUTCOMES, FollowUpOutcome, followUpChange,
+  normalizeNoteInput, MAX_PENDING_NOTES, MAX_ACTIVE_NOTES, FOLLOW_UP_OUTCOMES, FollowUpOutcome, followUpChange,
 } from "../lib/planFeedback";
 
 // Group plans are written for the whole group, and a note can't change one
@@ -27,9 +27,15 @@ export const addFeedbackNote = onCall(async (request) => {
 
   const db = getFirestore();
   const notes = db.collection(`users/${uid}/feedbackNotes`);
-  const pending = await notes.where("status", "==", "pending").count().get();
+  const [pending, active] = await Promise.all([
+    notes.where("status", "==", "pending").count().get(),
+    notes.where("status", "in", ["pending", "open"]).count().get(),
+  ]);
   if (pending.data().count >= MAX_PENDING_NOTES) {
     throw new HttpsError("resource-exhausted", `You already have ${MAX_PENDING_NOTES} notes waiting. Update your plan first, then add more.`);
+  }
+  if (active.data().count >= MAX_ACTIVE_NOTES) {
+    throw new HttpsError("resource-exhausted", `Your plan is already working around ${MAX_ACTIVE_NOTES} notes. Mark some as better at check-in, then add more.`);
   }
   const ref = await notes.add({
     ...normalized.note,

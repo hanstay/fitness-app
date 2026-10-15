@@ -6,7 +6,7 @@ import { Timestamp } from "firebase-admin/firestore";
 import { getTestDb, clearFirestoreEmulator } from "./helpers/emulatorFirestore";
 import { addFeedbackNote, removeFeedbackNote, followUpFeedbackNote } from "../src/feedback/feedbackNotes";
 import { suggestExerciseSwaps, applyExerciseSwap, undoExerciseSwap, SWAP_SUGGESTIONS_PER_DAY } from "../src/feedback/exerciseSwap";
-import { MAX_PENDING_NOTES } from "../src/lib/planFeedback";
+import { MAX_PENDING_NOTES, MAX_ACTIVE_NOTES } from "../src/lib/planFeedback";
 
 const mockExtractStructuredJson = vi.hoisted(() => vi.fn());
 vi.mock("../src/lib/claude", () => ({
@@ -65,6 +65,10 @@ describe("check-in notes", () => {
     for (let i = 0; i < MAX_PENDING_NOTES; i++) await db.collection("users/n2/feedbackNotes").add({ status: "pending" });
     await expect(call(addFeedbackNote, "n2", { tags: ["dislike"], text: "x" })).rejects.toMatchObject({ code: "resource-exhausted" });
 
+    await seedUser("n6");
+    for (let i = 0; i < MAX_ACTIVE_NOTES; i++) await db.collection("users/n6/feedbackNotes").add({ status: "open" });
+    await expect(call(addFeedbackNote, "n6", { tags: ["dislike"], text: "x" })).rejects.toMatchObject({ code: "resource-exhausted" });
+
     await seedUser("n3", { activeProgramSource: "group", groupId: "g1" });
     await expect(call(addFeedbackNote, "n3", { tags: ["dislike"], text: "x" })).rejects.toMatchObject({ code: "failed-precondition" });
   });
@@ -105,6 +109,27 @@ describe("exercise swaps", () => {
     await expect(call(suggestExerciseSwaps, "s2", { programId, sessionIndex: 0, exerciseIndex: 1, reason: "dislike" }))
       .rejects.toMatchObject({ code: "resource-exhausted" });
     expect(mockExtractStructuredJson).not.toHaveBeenCalled();
+  });
+
+  it("doesn't count a failed suggestion against the day's allowance", async () => {
+    await seedUser("s5");
+    const programId = await seedProgram("s5");
+    mockExtractStructuredJson.mockRejectedValue(new Error("model down"));
+    await expect(call(suggestExerciseSwaps, "s5", { programId, sessionIndex: 0, exerciseIndex: 1, reason: "dislike" }))
+      .rejects.toMatchObject({ code: "unavailable" });
+    expect((await db.doc("users/s5/state/usage").get()).get("swapSuggestions.count")).toBe(0);
+  });
+
+  it("keeps one pain note when an exercise swapped in for pain is swapped again", async () => {
+    await seedUser("s6");
+    const programId = await seedProgram("s6");
+    const base = { programId, sessionIndex: 0, exerciseIndex: 1, reason: "hurts", scope: "this_week" };
+    await call(applyExerciseSwap, "s6", { ...base, expectedName: "Walking Lunge (Dumbbell)", option: option("Box Step-Up (Dumbbell)") });
+    const { swap } = await call<{ swap: { noteId: string; from: { name: string } } }>(applyExerciseSwap, "s6",
+      { ...base, expectedName: "Box Step-Up (Dumbbell)", option: option("Split Squat (Dumbbell)") });
+    expect(await noteDocs("s6")).toHaveLength(1);
+    expect(swap.noteId).toBe((await noteDocs("s6"))[0].id);
+    expect(swap.from.name).toBe("Walking Lunge (Dumbbell)");
   });
 
   it("swaps an exercise for pain with a linked note, and undo puts both back", async () => {

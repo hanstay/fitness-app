@@ -259,7 +259,8 @@ try {
   showError("Couldn't load your intervals.icu status — Hevy import and program updates below still work.");
 }
 
-initCheckinNotes(user.uid, summary).catch((err) => console.error("[checkin] notes section failed to load", err));
+// Without the summary it can't tell a group plan (no notes) from a personal one.
+if (summary) initCheckinNotes(user.uid, summary).catch((err) => console.error("[checkin] notes section failed to load", err));
 
 // Fire-and-forget: runs in parallel with the user's own Hevy CSV export/
 // upload instead of adding latency later, at "Update my plan" time.

@@ -3,16 +3,17 @@
 import { Firestore, FieldValue, Transaction } from "firebase-admin/firestore";
 import { ACTIVE_NOTE_STATUSES, ActiveNote, NoteSettlement, readActiveNote } from "../lib/planFeedback";
 
-/** At most this many notes go into one update, oldest first; the rest wait for the next one. */
-export const MAX_NOTES_PER_UPDATE = 15;
-
+/**
+ * Every note in play, oldest first. Not capped here: adding notes is
+ * (MAX_ACTIVE_NOTES), and an update must see every open note so swaps made
+ * for them aren't put back.
+ */
 export async function loadActiveNotes(db: Firestore, uid: string): Promise<ActiveNote[]> {
   const snap = await db.collection(`users/${uid}/feedbackNotes`).where("status", "in", ACTIVE_NOTE_STATUSES).get();
   return snap.docs
     .map((d) => ({ note: readActiveNote(d.id, d.data()), at: d.get("createdAt")?.toMillis?.() ?? 0 }))
     .filter((n): n is { note: ActiveNote; at: number } => n.note != null)
     .sort((a, b) => a.at - b.at)
-    .slice(0, MAX_NOTES_PER_UPDATE)
     .map((n) => n.note);
 }
 

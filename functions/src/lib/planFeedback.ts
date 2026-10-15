@@ -29,6 +29,12 @@ export const isQuestionOnly = (tags: readonly FeedbackTag[]): boolean =>
 
 export const NOTE_TEXT_MAX = 1000;
 export const MAX_PENDING_NOTES = 10;
+/**
+ * Notes still in play (waiting, or ongoing until the athlete says it's
+ * better). Every one goes into each update, so this bounds the prompt; past
+ * it, new notes wait until some are marked better.
+ */
+export const MAX_ACTIVE_NOTES = 20;
 
 export const feedbackNoteInputSchema = z.object({
   tags: z.array(z.enum(FEEDBACK_TAGS)).min(1).max(FEEDBACK_TAGS.length),

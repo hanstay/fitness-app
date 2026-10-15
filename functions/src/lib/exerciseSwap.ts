@@ -4,7 +4,7 @@
 // duplicated by hand in public/js/plan-feedback.js — keep the two in step.
 import { z } from "zod";
 import { exerciseSchema, SessionOutput } from "./schemas";
-import { WEEKDAYS } from "./days";
+import { WEEKDAYS, normalizeDay } from "./days";
 
 export const SWAP_REASONS = ["hurts", "no_equipment", "dislike", "too_hard", "too_easy"] as const;
 export type SwapReason = (typeof SWAP_REASONS)[number];
@@ -44,16 +44,18 @@ export const swapOptionsJsonSchema = {
     options: {
       type: "array",
       description: "Exactly 3 alternatives, best fit first.",
+      minItems: 1,
+      maxItems: 3,
       items: {
         type: "object",
         properties: {
-          name: { type: "string", description: "Exercise name, in the athlete's Hevy naming where they already do it." },
-          why: { type: "string", description: "Why it fits, in under 12 plain words." },
-          sets: { type: "integer" },
-          reps: { type: "string" },
-          rir: { type: "string", description: "Reps in reserve, or 'n/a' for conditioning." },
-          rest_seconds: { type: "integer" },
-          load_note: { type: ["string", "null"], description: "A conservative starting load, e.g. '2 × 14 kg', or null." },
+          name: { type: "string", maxLength: 120, description: "Exercise name, in the athlete's Hevy naming where they already do it." },
+          why: { type: "string", maxLength: 200, description: "Why it fits, in under 12 plain words." },
+          sets: { type: "integer", minimum: 1, maximum: 12 },
+          reps: { type: "string", maxLength: 60 },
+          rir: { type: "string", maxLength: 20, description: "Reps in reserve, or 'n/a' for conditioning." },
+          rest_seconds: { type: "integer", minimum: 0, maximum: 600 },
+          load_note: { type: ["string", "null"], maxLength: 200, description: "A conservative starting load, e.g. '2 × 14 kg', or null." },
         },
         required: ["name", "why", "sets", "reps", "rir", "rest_seconds", "load_note"],
       },
@@ -94,6 +96,9 @@ export function toExercise(option: SwapOption): Exercise {
  * Where `name` is on `day`: at the hinted position if it's still there,
  * else its first occurrence that day. Null if the day no longer has it.
  */
+// Plans saved before day names were locked can say "Mon"; compare as weekdays.
+const sameDay = (a: string, b: string) => (normalizeDay(a) ?? a) === (normalizeDay(b) ?? b);
+
 export function locateExercise(
   sessions: SessionOutput[],
   day: string,
@@ -102,10 +107,10 @@ export function locateExercise(
 ): { sessionIndex: number; exerciseIndex: number } | null {
   if (hint) {
     const s = sessions[hint.sessionIndex];
-    if (s?.day === day && s.exercises[hint.exerciseIndex]?.name === name) return hint;
+    if (s && sameDay(s.day, day) && s.exercises[hint.exerciseIndex]?.name === name) return hint;
   }
   for (let si = 0; si < sessions.length; si++) {
-    if (sessions[si].day !== day) continue;
+    if (!sameDay(sessions[si].day, day)) continue;
     const ei = sessions[si].exercises.findIndex((ex) => ex.name === name);
     if (ei !== -1) return { sessionIndex: si, exerciseIndex: ei };
   }
@@ -164,7 +169,7 @@ export function formatSwapsBlock(swaps: SwapRecord[]): string {
   if (!swaps.length) return "";
   return [
     "Exercise swaps the athlete made in the app (keep them; don't swap back while they're listed):",
-    ...swaps.map((s) => `- ${s.day}: ${s.from.name} → ${s.to.name} (${reasonLabel(s.reason)})`),
+    ...swaps.map((s) => `- ${s.day}: ${JSON.stringify(s.from.name)} → ${JSON.stringify(s.to.name)} (${reasonLabel(s.reason)})`),
   ].join("\n");
 }
 
@@ -182,7 +187,7 @@ export function freshOptions(options: SwapOption[], dayExerciseNames: string[]):
 }
 
 /** The swap whose swapped-in exercise is at `at`, if any. */
-function swapAt(sessions: SessionOutput[], swaps: SwapRecord[], at: { sessionIndex: number; exerciseIndex: number }) {
+export function swapAt(sessions: SessionOutput[], swaps: SwapRecord[], at: { sessionIndex: number; exerciseIndex: number }) {
   return swaps.find((s) => {
     const found = locateExercise(sessions, s.day, s.to.name, s);
     return found?.sessionIndex === at.sessionIndex && found.exerciseIndex === at.exerciseIndex;
@@ -206,7 +211,7 @@ export function applySwap(
   const record: SwapRecord = {
     ...meta,
     noteId: meta.noteId ?? earlier?.noteId ?? null,
-    day: session.day,
+    day: (normalizeDay(session.day) ?? session.day) as SwapRecord["day"],
     ...at,
     from: earlier?.from ?? session.exercises[at.exerciseIndex],
     to,

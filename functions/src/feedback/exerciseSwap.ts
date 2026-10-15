@@ -8,8 +8,10 @@ import { getFirestore, FieldValue, DocumentSnapshot, Transaction } from "firebas
 import { extractStructuredJson, FAST_MODEL } from "../lib/claude";
 import {
   SWAP_REASONS, SWAP_SCOPES, SwapReason, SwapScope, SwapRecord, reasonLabel, swapOptionSchema, swapOptionsSchema,
-  swapOptionsJsonSchema, freshOptions, toExercise, applySwap, undoSwap,
+  swapOptionsJsonSchema, freshOptions, toExercise, applySwap, undoSwap, swapAt,
 } from "../lib/exerciseSwap";
+import { MAX_ACTIVE_NOTES } from "../lib/planFeedback";
+import { normalizeDay } from "../lib/days";
 import { SessionOutput } from "../lib/schemas";
 import { isStaleGeneration } from "../lib/staleGeneration";
 import { loadExerciseVocabulary } from "../generate/groundingData";
@@ -70,8 +72,11 @@ function exerciseAt(sessions: SessionOutput[], sessionIndex: number, exerciseInd
   return exercise;
 }
 
-/** Counts one suggestion request against today's allowance, or refuses it. */
-async function takeSuggestion(uid: string): Promise<void> {
+/**
+ * Counts one suggestion request against today's allowance, or refuses it.
+ * Returns a refund for a request that fails, so a failure costs nothing.
+ */
+async function takeSuggestion(uid: string): Promise<() => Promise<void>> {
   const db = getFirestore();
   const ref = db.doc(`users/${uid}/state/usage`);
   const today = new Date().toISOString().slice(0, 10);
@@ -83,6 +88,10 @@ async function takeSuggestion(uid: string): Promise<void> {
     }
     tx.set(ref, { swapSuggestions: { day: today, count: count + 1 } }, { merge: true });
   });
+  return () => db.runTransaction(async (tx: Transaction) => {
+    const used = (await tx.get(ref)).get("swapSuggestions") as { day?: string; count?: number } | undefined;
+    if (used?.day === today && (used.count ?? 0) > 0) tx.set(ref, { swapSuggestions: { day: today, count: used.count! - 1 } }, { merge: true });
+  }).catch((err) => logger.warn("suggestExerciseSwaps refund failed", { uid, err: String(err) }));
 }
 
 export const suggestExerciseSwaps = onCall({ secrets: ["ANTHROPIC_API_KEY"], timeoutSeconds: 60 }, async (request) => {
@@ -104,45 +113,53 @@ export const suggestExerciseSwaps = onCall({ secrets: ["ANTHROPIC_API_KEY"], tim
   const day = sessions[sessionIndex].day;
   const dayNames = sessions.filter((s) => s.day === day).flatMap((s) => s.exercises.map((ex) => ex.name));
 
-  await takeSuggestion(uid);
+  const refund = await takeSuggestion(uid);
+  try {
+    return { options: await suggest() };
+  } catch (err) {
+    await refund();
+    throw err;
+  }
 
-  const athlete = userSnap.get("athlete") ?? {};
-  const [vocabulary, painNotes] = await Promise.all([
-    loadExerciseVocabulary(db, uid, 40),
-    db.collection(`users/${uid}/feedbackNotes`).where("status", "in", ["pending", "open"]).get(),
-  ]);
-  const painLines = painNotes.docs
-    .filter((d) => (d.get("tags") ?? []).includes("pain"))
-    .map((d) => `- ${d.get("exercise") ?? "general"}: ${JSON.stringify(d.get("text") ?? "")}`);
+  async function suggest() {
+    const athlete = userSnap.get("athlete") ?? {};
+    const [vocabulary, painNotes] = await Promise.all([
+      loadExerciseVocabulary(db, uid, 40),
+      db.collection(`users/${uid}/feedbackNotes`).where("status", "in", ["pending", "open"]).get(),
+    ]);
+    const painLines = painNotes.docs
+      .filter((d) => (d.get("tags") ?? []).includes("pain"))
+      .map((d) => `- ${d.get("exercise") ?? "general"}: ${JSON.stringify(d.get("text") ?? "")}`);
 
-  const userText = [
-    `Swap: ${JSON.stringify(original)}`,
-    `Reason: ${reasonLabel(reason)}`,
-    `Day: ${day}. That day's exercises: ${dayNames.join(", ")}`,
-    `Goal: ${athlete.goal || "general fitness"}`,
-    `Equipment: ${(athlete.equipment || []).join(", ") || "standard commercial gym"}`,
-    `Injuries/constraints: ${athlete.injuries_constraints || "none reported"}`,
-    `Current pain notes:\n${painLines.join("\n") || "none"}`,
-    `Athlete's Hevy exercise names (most used first):\n${vocabulary}`,
-  ].join("\n");
+    const userText = [
+      `Swap: ${JSON.stringify(original)}`,
+      `Reason: ${reasonLabel(reason)}`,
+      `Day: ${day}. That day's exercises: ${dayNames.join(", ")}`,
+      `Goal: ${athlete.goal || "general fitness"}`,
+      `Equipment: ${(athlete.equipment || []).join(", ") || "standard commercial gym"}`,
+      `Injuries/constraints: ${athlete.injuries_constraints || "none reported"}`,
+      `Current pain notes:\n${painLines.join("\n") || "none"}`,
+      `Athlete's Hevy exercise names (most used first):\n${vocabulary}`,
+    ].join("\n");
 
-  const result = await extractStructuredJson({
-    system: SWAP_SYSTEM_PROMPT,
-    userText,
-    toolName: "record_swap_options",
-    toolDescription: "Record the alternatives for the exercise being swapped.",
-    inputSchema: swapOptionsJsonSchema,
-    validator: swapOptionsSchema,
-    maxTokens: 1200,
-    model: FAST_MODEL,
-  }).catch((err) => {
-    logger.error("suggestExerciseSwaps failed", { uid, err: err instanceof Error ? err.message : String(err) });
-    throw new HttpsError("unavailable", "Couldn't find alternatives right now. Try again.");
-  });
+    const result = await extractStructuredJson({
+      system: SWAP_SYSTEM_PROMPT,
+      userText,
+      toolName: "record_swap_options",
+      toolDescription: "Record the alternatives for the exercise being swapped.",
+      inputSchema: swapOptionsJsonSchema,
+      validator: swapOptionsSchema,
+      maxTokens: 1200,
+      model: FAST_MODEL,
+    }).catch((err) => {
+      logger.error("suggestExerciseSwaps failed", { uid, err: err instanceof Error ? err.message : String(err) });
+      throw new HttpsError("unavailable", "Couldn't find alternatives right now. Try again.");
+    });
 
-  const options = freshOptions(result.options, dayNames);
-  if (!options.length) throw new HttpsError("unavailable", "Couldn't find alternatives right now. Try again.");
-  return { options };
+    const options = freshOptions(result.options, dayNames);
+    if (!options.length) throw new HttpsError("unavailable", "Couldn't find alternatives right now. Try again.");
+    return options;
+  }
 });
 
 export const applyExerciseSwap = onCall(async (request) => {
@@ -161,6 +178,10 @@ export const applyExerciseSwap = onCall(async (request) => {
   const db = getFirestore();
   const summaryRef = db.doc(`users/${uid}/state/summary`);
   const programRef = db.doc(`users/${uid}/programs/${programId}`);
+  // Past the limit the swap still happens, just without its pain note.
+  const activeNotes = reason === "hurts"
+    ? (await db.collection(`users/${uid}/feedbackNotes`).where("status", "in", ["pending", "open"]).count().get()).data().count
+    : 0;
   return db.runTransaction(async (tx) => {
     const [summary, program] = await tx.getAll(summaryRef, programRef);
     const sessions = swappableProgram(summary, program, { checkUpdating: true });
@@ -168,16 +189,19 @@ export const applyExerciseSwap = onCall(async (request) => {
     if (current.name !== expectedName) throw new HttpsError("failed-precondition", PLAN_REPLACED);
 
     // A swap because it hurts is also a pain note, so the next update works
-    // around it and the check-in asks how it's going.
+    // around it and the check-in asks how it's going. Re-swapping an exercise
+    // already swapped in for pain keeps that swap's note.
+    const swaps = (program.get("swaps") ?? []) as SwapRecord[];
+    const earlier = swapAt(sessions, swaps, { sessionIndex, exerciseIndex });
     let noteId: string | null = null;
-    if (reason === "hurts") {
+    if (reason === "hurts" && !earlier?.noteId && activeNotes < MAX_ACTIVE_NOTES) {
       const noteRef = db.collection(`users/${uid}/feedbackNotes`).doc();
       noteId = noteRef.id;
       tx.set(noteRef, {
         tags: ["pain"],
         text: `Swapped it for ${option.data.name} because it hurt.`,
         exercise: current.name,
-        day: sessions[sessionIndex].day,
+        day: normalizeDay(sessions[sessionIndex].day),
         duration: "ongoing",
         status: "pending",
         source: "swap",
@@ -185,7 +209,7 @@ export const applyExerciseSwap = onCall(async (request) => {
         createdAt: FieldValue.serverTimestamp(),
       });
     }
-    const swapped = applySwap(sessions, (program.get("swaps") ?? []) as SwapRecord[], { sessionIndex, exerciseIndex }, toExercise(option.data), {
+    const swapped = applySwap(sessions, swaps, { sessionIndex, exerciseIndex }, toExercise(option.data), {
       id: db.collection("_").doc().id,
       reason,
       scope,

@@ -189,5 +189,5 @@ function renderUpdateLine(notes) {
   const used = notes.filter((n) => n.status === "pending" || n.status === "open" || (n.status === "resolved" && n.announced === false)).length;
   const el = $("notesForUpdate");
   el.style.display = used ? "" : "none";
-  el.textContent = used === 1 ? "Your note goes into this update." : `Your ${used} notes go into this update.`;
+  el.textContent = used === 1 ? "Your note goes into your next plan update." : `Your ${used} notes go into your next plan update.`;
 }

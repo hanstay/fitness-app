@@ -557,6 +557,13 @@ export async function runGenerateProgram(
   await commitProgramGeneration(uid, opts?.placeholder, async (tx) => {
     // Re-read in the transaction: an overlapping run may have committed since.
     const activeSnap = await tx.get(db.collection(`users/${uid}/programs`).where("status", "==", "active"));
+    // A swap made on the plan while this update ran would be lost with it. The
+    // queued path refuses swaps while it runs; a direct run (an older cached
+    // check-in page) doesn't, so it checks here.
+    const read = activeSnap.docs.find((d) => d.id === activeProgramDoc?.id);
+    if (read && JSON.stringify(read.get("swaps") ?? []) !== JSON.stringify(storedSwaps)) {
+      throw new HttpsError("aborted", "Your plan changed while it was being updated. Please update it again.");
+    }
     await settleNotesInTransaction(db, tx, uid, notes, settlements, newRef.id);
     activeSnap.forEach((d) => tx.update(d.ref, { status: "archived" }));
     tx.set(newRef, {

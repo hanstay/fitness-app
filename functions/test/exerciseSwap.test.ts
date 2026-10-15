@@ -19,6 +19,13 @@ describe("locateExercise", () => {
     expect(locateExercise(week(), "Monday", "Walking Lunge (Dumbbell)", { sessionIndex: 0, exerciseIndex: 0 })).toEqual({ sessionIndex: 0, exerciseIndex: 1 });
     expect(locateExercise(week(), "Wednesday", "Squat (Barbell)")).toBeNull();
   });
+
+  it("matches an older plan's abbreviated day names as weekdays", () => {
+    const old = week().map((s) => ({ ...s, day: s.day.slice(0, 3) })) as unknown as SessionOutput[];
+    expect(locateExercise(old, "Monday", "Walking Lunge (Dumbbell)")).toEqual({ sessionIndex: 0, exerciseIndex: 1 });
+    const a = applySwap(old, [], { sessionIndex: 0, exerciseIndex: 1 }, ex("Box Step-Up (Dumbbell)"), meta());
+    expect(a.record.day).toBe("Monday");
+  });
 });
 
 describe("applySwap and undoSwap", () => {
@@ -86,7 +93,7 @@ describe("freshOptions", () => {
 describe("formatSwapsBlock", () => {
   it("lists swaps for the update, or nothing", () => {
     const a = applySwap(week(), [], { sessionIndex: 0, exerciseIndex: 1 }, ex("Box Step-Up (Dumbbell)"), meta({ reason: "hurts" }));
-    expect(formatSwapsBlock(a.swaps)).toContain("- Monday: Walking Lunge (Dumbbell) → Box Step-Up (Dumbbell) (it hurts)");
+    expect(formatSwapsBlock(a.swaps)).toContain('- Monday: "Walking Lunge (Dumbbell)" → "Box Step-Up (Dumbbell)" (it hurts)');
     expect(formatSwapsBlock([])).toBe("");
   });
 });
