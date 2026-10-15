@@ -22,9 +22,8 @@ const setStatus = (id, msg) => { document.getElementById(id).textContent = msg; 
 // Guards a control that fires a side-effectful / costly API call. The control is
 // clickable ONLY before its first send (idle) or after a failed attempt (retry).
 // While the request is in flight — and after it succeeds — the control stays
-// disabled, so an expensive call (generateProgram, saveHevySessions, credential
-// writes) can't be double-fired or spammed. Reload the page to run it again
-// after a success.
+// disabled, so an expensive call (generateProgram, credential writes) can't
+// be double-fired or spammed. Reload the page to run it again after a success.
 async function withButtonBusy(btn, busyLabel, fn) {
   if (btn.disabled) return; // already in flight, or completed successfully
   const original = btn.innerHTML;
@@ -72,24 +71,34 @@ function renderImportSummary(container, sessionsImported, progression) {
 }
 
 // The CSV is parsed and analyzed here in the browser, so the results show
-// straight away; only the parsed sessions go to the server to be saved.
-document.getElementById("hevyUploadBtn").addEventListener("click", (e) => {
-  const btn = e.currentTarget;
-  const file = document.getElementById("hevyFile").files[0];
-  if (!file) return showError("Choose a Hevy CSV export first.");
+// straight away; only the parsed sessions go to the server to be saved. It
+// starts as soon as a file is picked, and the input is cleared afterwards so
+// picking the same file again imports it again.
+document.getElementById("hevyFile").addEventListener("change", async (e) => {
+  const fileInput = e.currentTarget;
+  const file = fileInput.files[0];
+  if (!file) return;
   clearMessages();
+  // Drop the previous file's summary so it can't sit next to a new error.
+  const results = document.getElementById("hevyResults");
+  results.style.display = "none";
+  results.innerHTML = "";
+  fileInput.disabled = true;
   setStatus("hevyStatus", "Analyzing…");
-  withButtonBusy(btn, "Analyzing…", async () => {
+  try {
     const { sessions, lifts, progression } = analyzeHevyCsv(await file.text());
-    renderImportSummary(document.getElementById("hevyResults"), sessions.length, progression);
+    renderImportSummary(results, sessions.length, progression);
 
     setStatus("hevyStatus", "Saving…");
     await httpsCallable(functions, "saveHevySessions")({ sessions, lifts });
     setStatus("hevyStatus", "Saved. Update your plan below when you're ready.");
-  }).catch((err) => {
+  } catch (err) {
     setStatus("hevyStatus", "");
     showError(`Couldn't import that CSV: ${err.message || err}`);
-  });
+  } finally {
+    fileInput.disabled = false;
+    fileInput.value = "";
+  }
 });
 
 /* ---------- Section 2: intervals.icu ---------- */

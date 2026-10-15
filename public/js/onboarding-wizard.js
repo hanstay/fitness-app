@@ -42,6 +42,10 @@ function strOrNull(id) {
   const v = document.getElementById(id).value.trim();
   return v === "" ? null : v;
 }
+function checkedNumOrNull(name) {
+  const el = document.querySelector(`input[name="${name}"]:checked`);
+  return el ? Number(el.value) : null;
+}
 
 // Repeatable target-events editor (writes athlete.events[]). Starts blank in
 // onboarding; state persists in the DOM across Back/Continue within the wizard.
@@ -96,15 +100,15 @@ document.getElementById("icuConnectBtn").addEventListener("click", async () => {
   }
 });
 
-document.getElementById("hevyUploadBtn").addEventListener("click", async () => {
-  const fileInput = document.getElementById("hevyFile");
+// Imports as soon as a file is picked; there's no separate upload button.
+document.getElementById("hevyFile").addEventListener("change", async (e) => {
+  const fileInput = e.currentTarget;
   const file = fileInput.files[0];
+  if (!file) return;
   const status = document.getElementById("hevyStatus");
-  if (!file) return showError("Choose a CSV file first.");
   clearMessages();
   status.textContent = "Importing…";
-  const btn = document.getElementById("hevyUploadBtn");
-  btn.disabled = true;
+  fileInput.disabled = true;
   try {
     // Parsed in the browser; only the parsed sessions go to the server.
     const { sessions, lifts } = analyzeHevyCsv(await file.text());
@@ -114,21 +118,43 @@ document.getElementById("hevyUploadBtn").addEventListener("click", async () => {
     status.textContent = "";
     showError(`Couldn't process that CSV: ${err.message || err}`);
   } finally {
-    btn.disabled = false;
+    fileInput.disabled = false;
+    fileInput.value = ""; // so picking the same file again imports it again
   }
 });
 
+document.getElementById("equipmentOtherToggle").addEventListener("change", (e) => {
+  const { checked } = e.currentTarget;
+  e.currentTarget.setAttribute("aria-expanded", String(checked));
+  document.getElementById("equipmentOtherField").hidden = !checked;
+  if (checked) document.getElementById("equipment_other").focus();
+});
+
+// The ticked equipment chips plus any extras typed under "+ Other", without
+// case-insensitive repeats: the same string array the old comma-separated
+// field produced.
+function collectEquipment() {
+  const chips = [...document.querySelectorAll('input[name="equipment"]:checked')].map((el) => el.value);
+  const extras = document.getElementById("equipmentOtherToggle").checked ? splitList("equipment_other") : [];
+  const seen = new Set();
+  return [...chips, ...extras].filter((item) => {
+    const key = item.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 // Save training fields with dot-paths so we never clobber nutrition or
-// Hevy-imported current_lifts. Returns whether the program can be generated.
+// Hevy-imported current_lifts, nor years training / preferred split (those
+// live on the profile page only). Returns whether the program can be generated.
 async function saveTrainingFields() {
-  const days = numOrNull("training_days_per_week");
-  const session = numOrNull("session_length_minutes");
+  const days = checkedNumOrNull("training_days_per_week");
+  const session = checkedNumOrNull("session_length_minutes");
   await updateDoc(doc(db, "users", user.uid), {
     "athlete.training_days_per_week": days,
     "athlete.session_length_minutes": session,
-    "athlete.training_experience_years": numOrNull("training_experience_years"),
-    "athlete.preferred_split": strOrNull("preferred_split"),
-    "athlete.equipment": splitList("equipment"),
+    "athlete.equipment": collectEquipment(),
     "athlete.events": collectEvents(document.getElementById("eventsEditor")),
     "athlete.fixed_sessions": collectCommitments(document.getElementById("commitmentsEditor")),
     "athlete.goal": document.getElementById("goal").value.trim().slice(0, 1000) || null,
