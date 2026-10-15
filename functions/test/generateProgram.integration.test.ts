@@ -6,6 +6,7 @@ import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getTestDb, clearFirestoreEmulator } from "./helpers/emulatorFirestore";
 import { defaultFixtureResponse } from "./fixtures/llmFixtures";
 import { runGenerateProgram } from "../src/generate/generateProgram";
+import { REBUILD_CHANGE_NOTE } from "../src/lib/programDecisions";
 
 const mockExtractStructuredJson = vi.hoisted(() => vi.fn());
 vi.mock("../src/lib/claude", () => ({
@@ -198,5 +199,67 @@ describe("phase transitions", () => {
     expect(p.currentPhaseIndex).toBe(0);
     expect(p.blockStartedAt.toMillis()).toBe(created.toMillis()); // recovered from history, then kept
     expect(p.roadmap[0]).toMatchObject({ phase: "Base", startDate: null, endDate: null });
+  });
+});
+
+describe("older plans' day names", () => {
+  const exercise = (name: string) => ({ name, sets: 3, reps: "8", rir: "2", rest_seconds: 90, load_note: null, substitution_note: null });
+  const DAY = 86400000;
+
+  async function seedProgram(uid: string, days: [string, string]) {
+    await db.collection(`users/${uid}/programs`).add({
+      status: "active",
+      createdAt: FieldValue.serverTimestamp(),
+      title: "Existing plan", goalSummary: "x", split: "Upper/Lower", daysPerWeek: 4,
+      events: [], progressionRules: "x", deloadGuidance: "x", warmupNotes: "x",
+      coachNotes: null, sportNotes: null, nutritionNote: null, running: null, currentState: null,
+      roadmap: [{ phase: "Base", dates: "Weeks 1-6", startDate: null, endDate: null, focus: "f", lifting: "l", running: null, nutrition: null }],
+      currentPhaseIndex: 0,
+      blockStartedAt: Timestamp.fromMillis(Date.now() - 10 * DAY),
+      weeklyStructure: [{ day: days[0], focus: "Upper", note: null }, { day: days[1], focus: "Lower", note: null }],
+      sessions: [
+        { day: days[0], label: "Upper (old)", focus_note: null, exercises: [exercise("Old Bench")] },
+        { day: days[1], label: "Lower (old)", focus_note: null, exercises: [exercise("Old Squat")] },
+      ],
+      profileSnapshot: baseAthlete(),
+    });
+  }
+
+  async function activeProgram(uid: string) {
+    const snap = await db.collection(`users/${uid}/programs`).where("status", "==", "active").get();
+    return snap.docs[0].data();
+  }
+
+  it("an abbreviated week is still a weekly update, merged by weekday", async () => {
+    await seedUser("d1");
+    await seedProgram("d1", ["Mon", "tue."]);
+
+    await runGenerateProgram("d1");
+
+    expect(toolNamesCalled()).toEqual(["record_program_update"]);
+    expect(mockExtractStructuredJson.mock.calls[0][0].userText).toContain(`"day":"Tuesday","label":"Lower (old)"`);
+    const sessions = (await activeProgram("d1")).sessions as Array<{ day: string; label: string }>;
+    // Monday replaced by the fixture's update, Tuesday carried forward under its full name.
+    expect(sessions.map((s) => [s.day, s.label])).toEqual([["Monday", "Upper"], ["Tuesday", "Lower (old)"]]);
+  });
+
+  it("a week with days that aren't weekdays is rebuilt for the same phase, keeping its roadmap and block", async () => {
+    await seedUser("d2");
+    await seedProgram("d2", ["Day 1", "Day 2"]);
+    const before = await activeProgram("d2");
+
+    const result = await runGenerateProgram("d2");
+
+    expect(toolNamesCalled()).toEqual(expect.arrayContaining(["record_program_overview", "record_program_schedule"]));
+    expect(toolNamesCalled()).not.toContain("record_program_update");
+    const overviewCall = mockExtractStructuredJson.mock.calls.find((c) => c[0].toolName === "record_program_overview")!;
+    expect(overviewCall[0].userText).toContain("REBUILDING THIS PHASE'S WEEK");
+
+    const p = await activeProgram("d2");
+    expect(p.roadmap).toEqual(before.roadmap); // not the fixture's roadmap
+    expect(p.currentPhaseIndex).toBe(0);
+    expect(p.blockStartedAt.toMillis()).toBe(before.blockStartedAt.toMillis());
+    expect(p.sessions.map((s: { day: string }) => s.day)).toEqual(["Monday", "Tuesday", "Thursday", "Friday"]);
+    expect(result.changeSummary?.[0]).toBe(REBUILD_CHANGE_NOTE);
   });
 });

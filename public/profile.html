@@ -20,7 +20,6 @@
 
 <header class="hero">
   <div class="wrap narrow">
-    <a class="backlink" href="dashboard.html">← Dashboard</a>
     <h1>Your profile</h1>
     <p class="sub">Update your stats, training setup, and diet preferences.</p>
   </div>
@@ -150,10 +149,10 @@
 </div>
 
 <footer class="wrap">
-  <a href="dashboard.html">← Back to dashboard</a> ·
   Personal training plan · personal-trainer toolkit · General fitness coaching, not medical advice.
 </footer>
 
+<script type="module" src="js/tab-bar.js"></script>
 <script src="update.js"></script>
 <script type="module">
   import { doc, getDoc, updateDoc, collection, getDocs, orderBy, query } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
