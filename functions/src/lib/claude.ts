@@ -43,6 +43,31 @@ interface ExtractJsonParams<T> {
 }
 
 /**
+ * The tool input with any string that holds a JSON array or object replaced by
+ * its parsed value, at any depth. The model sometimes sends a nested array as
+ * an encoded string (`"sessionLoads": "[{...}]"`) despite the input schema;
+ * the value is right, only its wrapping isn't. Only used once the raw input has
+ * failed validation, so a genuine string field is never touched otherwise.
+ */
+export function decodeStringifiedJson(value: unknown): unknown {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!/^[[{]/.test(trimmed)) return value;
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      return parsed !== null && typeof parsed === "object" ? decodeStringifiedJson(parsed) : value;
+    } catch {
+      return value;
+    }
+  }
+  if (Array.isArray(value)) return value.map(decodeStringifiedJson);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, decodeStringifiedJson(v)]));
+  }
+  return value;
+}
+
+/**
  * Calls Claude with a single tool and validates the tool call it makes.
  * Retries once if the first attempt fails: a response cut off at max_tokens
  * is retried from scratch with double the token limit (the same limit would
@@ -133,6 +158,19 @@ export async function extractStructuredJson<T>(params: ExtractJsonParams<T>): Pr
     if (toolUse) {
       const parsed = params.validator.safeParse(toolUse.input);
       if (parsed.success) return parsed.data;
+      // A nested array or object sent as an encoded string: decode and
+      // re-check before spending a retry on it.
+      let decodedInput: unknown;
+      try {
+        decodedInput = decodeStringifiedJson(toolUse.input);
+      } catch {
+        decodedInput = toolUse.input; // nested too deep to walk; let the retry handle it
+      }
+      const decoded = params.validator.safeParse(decodedInput);
+      if (decoded.success) {
+        logger.warn("extractStructuredJson decoded stringified tool input", { toolName: params.toolName, attempt });
+        return decoded.data;
+      }
       lastError = parsed.error.message;
     } else {
       lastError = "Model did not return a tool call.";
@@ -159,11 +197,11 @@ export async function extractStructuredJson<T>(params: ExtractJsonParams<T>): Pr
             {
               type: "tool_result",
               tool_use_id: toolUse.id,
-              content: `Your previous response failed validation: ${lastError}. Please call the tool again with corrected values.`,
+              content: `Your previous response failed validation: ${lastError}. Please call the tool again with corrected values, passing arrays and objects as JSON values, not as encoded strings.`,
               is_error: true,
             },
           ]
-        : `Your previous response failed validation: ${lastError}. Please call the tool again with corrected values.`,
+        : `Your previous response failed validation: ${lastError}. Please call the tool again with corrected values, passing arrays and objects as JSON values, not as encoded strings.`,
     });
   }
 

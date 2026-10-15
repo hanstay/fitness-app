@@ -13,7 +13,7 @@ vi.mock("@anthropic-ai/sdk", () => ({
   },
 }));
 
-import { extractStructuredJson } from "../src/lib/claude";
+import { extractStructuredJson, decodeStringifiedJson } from "../src/lib/claude";
 
 const schema = z.object({ value: z.number().min(0) });
 
@@ -171,5 +171,65 @@ describe("extractStructuredJson", () => {
       })
     ).rejects.toThrow(/refusal/);
     expect(mockCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts a nested array sent as a JSON string without a retry", async () => {
+    // Seen in production: a group member layer's sessionLoads came back as
+    // "[{...}]" on both attempts and the whole update failed.
+    const loadsSchema = z.object({
+      note: z.string(),
+      sessionLoads: z.array(z.object({ day: z.string(), exercises: z.array(z.object({ name: z.string() })) })),
+    });
+    const loads = [{ day: "Monday", exercises: [{ name: "Squat" }] }];
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: "tool_use", id: "toolu_str", name: "record_thing", input: { note: "[not json", sessionLoads: JSON.stringify(loads) } }],
+      stop_reason: "tool_use",
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+
+    const result = await extractStructuredJson({
+      system: "sys",
+      userText: "hi",
+      toolName: "record_thing",
+      toolDescription: "desc",
+      inputSchema: { type: "object" },
+      validator: loadsSchema,
+    });
+
+    expect(result).toEqual({ note: "[not json", sessionLoads: loads });
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a genuine string field alone when the input already validates", async () => {
+    const textSchema = z.object({ text: z.string() });
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: "tool_use", id: "toolu_txt", name: "record_thing", input: { text: "[1,2]" } }],
+      stop_reason: "tool_use",
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+
+    const result = await extractStructuredJson({
+      system: "sys",
+      userText: "hi",
+      toolName: "record_thing",
+      toolDescription: "desc",
+      inputSchema: { type: "object" },
+      validator: textSchema,
+    });
+
+    expect(result).toEqual({ text: "[1,2]" });
+  });
+});
+
+describe("decodeStringifiedJson", () => {
+  it("decodes JSON arrays and objects in strings at any depth, leaving other strings as they are", () => {
+    expect(decodeStringifiedJson({
+      a: '[{"b":"{\\"c\\":1}"}]',
+      d: "plain",
+      e: "[not json",
+      f: "42",
+      g: "null",
+      h: [' {"x": true} '],
+    })).toEqual({ a: [{ b: { c: 1 } }], d: "plain", e: "[not json", f: "42", g: "null", h: [{ x: true }] });
   });
 });
