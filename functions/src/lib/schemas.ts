@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { WEEKDAYS } from "./days";
 
 export const bodyScanExtractionSchema = z.object({
   weight_kg: z.number().min(20).max(300).nullable(),
@@ -130,8 +131,14 @@ const roadmapPhaseJsonSchema = {
   required: ["phase", "dates", "startDate", "endDate", "focus", "lifting", "running", "nutrition"],
 };
 
+// Days are full weekday names (see days.ts): the weekly update merges
+// sessions by day, so "Mon" in one week and "Monday" in the next would
+// never match.
+const daySchema = z.enum(WEEKDAYS);
+const dayJsonSchema = { type: "string", enum: WEEKDAYS };
+
 const weeklyDaySchema = z.object({
-  day: z.string(),
+  day: daySchema,
   focus: z.string(),
   note: z.string().nullable(),
 });
@@ -139,7 +146,7 @@ const weeklyDaySchema = z.object({
 const weeklyDayJsonSchema = {
   type: "object",
   properties: {
-    day: { type: "string" },
+    day: dayJsonSchema,
     focus: { type: "string" },
     note: { type: ["string", "null"] },
   },
@@ -147,7 +154,7 @@ const weeklyDayJsonSchema = {
 };
 
 export const sessionSchema = z.object({
-  day: z.string(),
+  day: daySchema,
   label: z.string(),
   focus_note: z.string().nullable(),
   exercises: z.array(exerciseSchema).min(1).max(14),
@@ -157,7 +164,7 @@ export type SessionOutput = z.infer<typeof sessionSchema>;
 const sessionJsonSchema = {
   type: "object",
   properties: {
-    day: { type: "string" },
+    day: dayJsonSchema,
     label: { type: "string" },
     focus_note: { type: ["string", "null"] },
     exercises: { type: "array", items: exerciseJsonSchema },
@@ -349,13 +356,13 @@ export const programUpdateJsonSchema = {
     currentState: currentStateJsonSchema,
     weeklyStructure: {
       type: "array",
-      description: "Day-by-day overview of the adjusted current week, with placement rationale.",
+      description: "Day-by-day overview of the adjusted current week, with placement rationale: all 7 days, rest days included (a rest day's focus is just \"Rest\").",
       items: weeklyDayJsonSchema,
     },
     sessions: {
       type: "array",
       items: sessionJsonSchema,
-      description: "Only include an entry for a day whose session you are actually changing. Omit any day whose session should stay exactly as-is in the existing week — it will be carried forward automatically, so do not restate it. May be empty if nothing should change. A day new to the schedule (not present in the existing week) must be included in full, since there is nothing existing to carry forward for it.",
+      description: "Only include an entry for a day whose session you are actually changing. Omit any day whose session should stay exactly as-is in the existing week — it will be carried forward automatically, so do not restate it. A day is replaced as a whole: if you change any session on a day, include every session scheduled that day, unchanged ones too. May be empty if nothing should change. A day new to the schedule (not present in the existing week) must be included in full, since there is nothing existing to carry forward for it.",
     },
     changeSummary: { type: "array", items: { type: "string" }, description: "Short bullet points of what changed vs the previous block, and why." },
     coachNotes: { type: ["string", "null"] },
@@ -402,7 +409,7 @@ export const PROGRAM_INDIVIDUAL_FIELDS = Object.keys(PROGRAM_INDIVIDUAL_FIELD_MA
 // varies per member; everything else about the exercise (sets/reps/rir/
 // rest/substitution_note) is shared.
 export const sessionLoadsSchema = z.array(z.object({
-  day: z.string(),
+  day: daySchema,
   exercises: z.array(z.object({
     name: z.string(),
     load_note: z.string().nullable(),
@@ -416,7 +423,7 @@ export const sessionLoadsJsonSchema = {
   items: {
     type: "object",
     properties: {
-      day: { type: "string" },
+      day: dayJsonSchema,
       exercises: {
         type: "array",
         items: {

@@ -30,6 +30,11 @@
 
 <div class="wrap page-content wide">
 
+  <section id="todayCard">
+    <h2><span class="dot"></span>Today</h2>
+    <div class="skeleton skeleton-card"></div>
+  </section>
+
   <section id="trainingLoad" style="display:none">
     <h2><span class="dot"></span>Training load</h2>
     <div class="stats" id="loadStats"></div>
@@ -50,11 +55,6 @@
     <div id="planCards">
       <div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div>
     </div>
-    <a class="item-card" href="profile.html">
-      <span class="item-thumb">⚙️</span>
-      <span class="item-info"><span class="item-title">Profile</span><span class="item-meta">Stats, training, diet prefs</span></span>
-      <span class="item-val">→</span>
-    </a>
     <a class="item-card" href="groups.html">
       <span class="item-thumb">👥</span>
       <span class="item-info"><span class="item-title">Training group</span><span class="item-meta">Train with someone, share a plan</span></span>
@@ -76,6 +76,7 @@
   General fitness coaching, not medical advice.
 </footer>
 
+<script type="module" src="js/tab-bar.js"></script>
 <script src="update.js"></script>
 <script type="module">
   import { doc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
@@ -83,6 +84,8 @@
   import { db, functions } from "./js/firebase-init.js";
   import { requireOnboarded, signOut } from "./js/auth-guard.js";
   import { showToast } from "./js/ui-messages.js";
+  import { loadCurrentProgram, sessionsOn } from "./js/current-program.js";
+  import { WEEKDAYS, normalizeDay, todayWeekday } from "./js/days.js";
 
   const session = await requireOnboarded();
   if (!session) throw new Error("redirecting"); // requireOnboarded already redirected
@@ -118,6 +121,61 @@
       <div class="stat"><div class="k">Fatigue (ATL)</div><div class="v">${w.atl}</div></div>
       <div class="stat"><div class="k">Form (TSB)</div><div class="v ${w.tsb < -10 ? "warn" : ""}">${w.tsb}</div></div>`;
     document.getElementById("loadAsOf").textContent = `as of ${w.asOf} · synced from intervals.icu`;
+  }
+
+  const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+  // Today's sessions from the current plan (a day can hold more than one) —
+  // or, on a rest day, the next ones.
+  function todayCardHtml(p) {
+    const today = todayWeekday();
+    const heading = `<h2><span class="dot"></span>Today · ${today}</h2>`;
+    const labels = (sessions) => esc(sessions.map((s) => s.label).join(" + "));
+    // An older plan whose days aren't weekdays ("Day 1") can't say what's
+    // on today; its next check-in lays the week out on weekdays.
+    if ((p.sessions || []).some((s) => !normalizeDay(s.day))) {
+      return `${heading}
+        <p class="item-title">Open your plan</p>
+        <p class="muted small">Your next check-in will put your sessions on weekdays.</p>
+        <div class="btn-row"><a class="btn secondary grow" href="program.html">See your plan</a></div>`;
+    }
+    const sessions = sessionsOn(p, today);
+    if (sessions.length) {
+      const exercises = sessions.flatMap((s) => s.exercises || []);
+      return `${heading}
+        <p class="item-title">${labels(sessions)}</p>
+        ${exercises.slice(0, 3).map((ex) => `<div class="ex"><div class="row">
+          <span class="name">${esc(ex.name)}</span><span class="sets">${ex.sets} × ${esc(ex.reps)}</span>
+        </div></div>`).join("")}
+        ${exercises.length > 3 ? `<p class="muted small">+ ${exercises.length - 3} more</p>` : ""}
+        <div class="btn-row"><a class="btn grow" href="program.html#today">See today's session</a></div>`;
+    }
+    const start = WEEKDAYS.indexOf(today);
+    const nextDay = [1, 2, 3, 4, 5, 6].map((n) => WEEKDAYS[(start + n) % 7]).find((day) => sessionsOn(p, day).length);
+    return `${heading}
+      <p class="item-title">Rest day</p>
+      ${nextDay ? `<p class="muted small">Next: ${nextDay} · ${labels(sessionsOn(p, nextDay))}</p>` : ""}
+      <div class="btn-row"><a class="btn secondary grow" href="program.html#today">See your week</a></div>`;
+  }
+
+  // Re-reads the plan only when which plan is current (or its generation
+  // status) changes — not on every summary write. Hidden with no plan yet:
+  // the plan cards below cover setting one up.
+  let todayKey = null;
+  async function renderToday(summary) {
+    const key = JSON.stringify([summary?.activeProgramSource, summary?.groupId, summary?.currentProgramId, summary?.programGenerationStatus]);
+    if (key === todayKey) return;
+    todayKey = key;
+    const card = document.getElementById("todayCard");
+    try {
+      const p = await loadCurrentProgram(user.uid, summary);
+      if (key !== todayKey) return; // a newer summary arrived while this one loaded
+      card.hidden = !p;
+      if (p) card.innerHTML = todayCardHtml(p);
+    } catch (err) {
+      console.error("[dashboard] couldn't load today's session", err);
+      card.hidden = true;
+    }
   }
 
   let summary = null;
@@ -274,6 +332,7 @@
   function renderLoadFailure() {
     document.getElementById("targetsSub").textContent = "Couldn't load your dashboard.";
     document.getElementById("targetBadges").innerHTML = "";
+    document.getElementById("todayCard").hidden = true;
     document.getElementById("planCards").innerHTML = `
       <div class="state-box">
         <p>Something went wrong loading your plan.</p>
@@ -291,6 +350,7 @@
     summary = snap.exists() ? snap.data() : null;
     renderTargets(summary);
     renderTrainingLoad(summary);
+    renderToday(summary);
     renderPlanCards();
   }, (err) => {
     console.error("[dashboard] summary listener failed", err);
