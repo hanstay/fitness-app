@@ -118,8 +118,8 @@ footer{color:var(--text-secondary); font-size:.8rem; text-align:center; padding:
 .card.narrow{max-width:440px; margin:0 auto}
 
 .field{margin:0 0 16px}
-.field label{display:block; font-size:.72rem; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.4px; margin:0 0 7px}
-.field label .req{color:var(--accent-dark); background:var(--accent-soft); border-radius:5px; padding:1px 6px; margin-left:6px; font-size:.62rem; letter-spacing:.3px}
+.field label, .choice-group legend{display:block; font-size:.72rem; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.4px; margin:0 0 7px}
+.field label .req, .choice-group legend .req{color:var(--accent-dark); background:var(--accent-soft); border-radius:5px; padding:1px 6px; margin-left:6px; font-size:.62rem; letter-spacing:.3px}
 .hint{font-size:.78rem; color:var(--text-secondary); margin:0 0 12px}
 .field .hint{margin:5px 0 0}
 .input, select.input, textarea.input{
@@ -179,6 +179,40 @@ fieldset.field-group legend{padding:0 6px; font-size:.72rem; font-weight:700; co
 .wizard-body.center .lead{margin:0 auto; max-width:340px}
 .btn-row .btn.grow{flex:1}
 
+/* Tap-to-choose fields: radios drawn as a segmented control (.seg) and
+   checkboxes drawn as toggle chips (.chips). The native inputs stay in the
+   DOM, only visually hidden, so labels, Tab, arrow keys and Space all work. */
+.choice-group{border:0; padding:0; margin:0 0 16px; min-width:0}
+.choice-group legend{padding:0}
+.seg{display:flex; gap:6px}
+.seg label{flex:1}
+.chips{display:flex; flex-wrap:wrap; gap:8px}
+.seg label, .chips label{position:relative; cursor:pointer}
+.seg input, .chips input{position:absolute; opacity:0; pointer-events:none}
+.seg input + span{display:block; text-align:center; padding:11px 0; border:1px solid var(--border); border-radius:var(--radius-sm); font-size:.9rem; font-weight:600}
+.seg input:checked + span{background:var(--accent); border-color:var(--accent); color:#ffffff}
+.chips input + span{display:inline-block; padding:8px 14px; border:1px solid var(--border); border-radius:999px; font-size:.86rem; font-weight:600}
+.chips input:checked + span{background:var(--accent-soft); border-color:#f3cfd0; color:var(--accent-dark)}
+.seg input:focus-visible + span, .chips input:focus-visible + span{outline:2px solid var(--accent); outline-offset:2px}
+/* Forced colors (e.g. Windows High Contrast) drop the background that marks
+   a choice as picked, so fill it with the system highlight instead. The
+   focus outline above sits outside the button and stays visible. */
+@media (forced-colors:active){
+  .seg input:checked + span, .chips input:checked + span{forced-color-adjust:none; background:Highlight; border-color:Highlight; color:HighlightText}
+  .seg input:focus-visible + span, .chips input:focus-visible + span{outline-color:CanvasText}
+}
+
+/* Optional rows that open in place (<details>): a title, a one-line hint,
+   and a +/− marker in place of the native disclosure triangle. */
+.disclosure + .disclosure{border-top:1px solid var(--border)}
+.disclosure > summary{display:flex; align-items:center; gap:12px; padding:10px 0; cursor:pointer; list-style:none}
+.disclosure > summary::-webkit-details-marker{display:none}
+.disclosure > summary::after{content:"+"; margin-left:auto; color:var(--accent-dark); font-size:1.25rem; font-weight:700; line-height:1}
+.disclosure[open] > summary::after{content:"−"}
+.disclosure-title{display:block; font-weight:600; font-size:.94rem}
+.disclosure-hint{display:block; font-size:.8rem; color:var(--text-secondary)}
+.disclosure-body{padding:4px 0 14px}
+
 /* Content list card */
 .item-card{display:flex; gap:14px; padding:14px; background:var(--card); border:1px solid var(--border); border-radius:var(--radius); margin:0 0 12px; align-items:center; text-decoration:none}
 .item-card:hover{background:var(--bg-tint)}
@@ -216,7 +250,7 @@ button.item-card{width:100%; text-align:left; cursor:pointer; font-family:inheri
   .item-card{padding:12px; gap:12px}
 }
 @media print{
-  nav.toc,.navtoggle{display:none}
+  nav.toc,.navtoggle,.tabbar{display:none}
   .layout{grid-template-columns:1fr}
   section{break-inside:avoid; border:1px solid #ddd}
   body{background:#fff}
@@ -226,7 +260,7 @@ button.item-card{width:100%; text-align:left; cursor:pointer; font-family:inheri
    the dashboard), so the outcome isn't only visible in a small status line
    that can be scrolled out of view. */
 .toast{
-  position:fixed; left:50%; bottom:calc(24px + env(safe-area-inset-bottom,0px));
+  position:fixed; left:50%; bottom:calc(24px + var(--tabbar-space, env(safe-area-inset-bottom,0px)));
   transform:translateX(-50%) translateY(8px);
   background:var(--text-primary); color:#fff; padding:12px 18px; border-radius:var(--radius-sm);
   font-size:.86rem; font-weight:600; box-shadow:0 4px 16px rgba(0,0,0,.18);
@@ -235,6 +269,28 @@ button.item-card{width:100%; text-align:left; cursor:pointer; font-family:inheri
 }
 .toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
 .toast.error{background:var(--accent-dark)}
+
+/* Bottom tab bar — injected on every signed-in page by js/tab-bar.js, which
+   also adds .has-tabbar to <body>. Fixed to the bottom at every width (the
+   tabs centre at a capped width on desktop); --tabbar-space is the room it
+   takes, which the page reserves below its content and the toast and the
+   update banner (update.js) sit above. */
+.has-tabbar{--tabbar-space:calc(58px + env(safe-area-inset-bottom,0px)); padding-bottom:var(--tabbar-space)}
+.has-tabbar footer{padding-bottom:24px}
+.tabbar{
+  position:fixed; left:0; right:0; bottom:0; z-index:100;
+  display:grid; grid-template-columns:repeat(5, minmax(0, 104px)); justify-content:center;
+  background:var(--card); border-top:1px solid var(--border);
+  padding:0 env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px);
+}
+.tabbar a{
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; height:58px;
+  color:var(--text-secondary); font-size:.68rem; font-weight:600; -webkit-tap-highlight-color:transparent;
+}
+.tabbar a:hover{color:var(--text-primary)}
+.tabbar a[aria-current]{color:var(--accent-dark)}
+.tabbar a:focus-visible{outline:2px solid var(--accent); outline-offset:-4px; border-radius:var(--radius-sm)}
+.tabbar svg{width:24px; height:24px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round}
 
 /* Loading skeletons — placeholder blocks shown in place of async content
    (badges, cards, stats) while the first read/snapshot is in flight, so

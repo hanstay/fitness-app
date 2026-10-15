@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Hybrid Plan">
 <meta name="theme-color" content="#ffffff">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -54,6 +54,7 @@
   .day-cell .f{font-size:.72rem; font-weight:600; color:var(--text-primary); line-height:1.2;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%}
   .day-cell.rest{opacity:.6}
+  .day-cell.today{border-color:var(--accent); scroll-margin-top:64px}
   .day-cell.selected{background:var(--accent); border-color:var(--accent-dark)}
   .day-cell.selected .d, .day-cell.selected .f{color:#ffffff}
 
@@ -101,7 +102,6 @@
 
 <header class="hero">
   <div class="wrap">
-    <a class="backlink" href="dashboard.html">← Dashboard</a>
     <h1 id="pageTitle">Your training program</h1>
     <p class="sub" id="pageSub">Loading…</p>
     <div class="badges" id="headerBadges"></div>
@@ -116,15 +116,17 @@
 </div>
 
 <footer class="wrap">
-  <a href="dashboard.html">← Back to dashboard</a> ·
   Personal training plan · personal-trainer toolkit · General fitness coaching, not medical advice.
 </footer>
 
+<script type="module" src="js/tab-bar.js"></script>
 <script src="update.js"></script>
 <script type="module">
-  import { doc, getDoc, collection, query, where, limit, getDocs } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+  import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
   import { db } from "./js/firebase-init.js";
   import { requireOnboarded } from "./js/auth-guard.js";
+  import { loadCurrentProgram, dayKey, sessionsOn, weeksOut } from "./js/current-program.js";
+  import { normalizeDay, todayWeekday } from "./js/days.js";
   import { groupPlan, markPlanSeen, changesDismissed, dismissChanges } from "./js/plan-updates.js";
 
   const session = await requireOnboarded();
@@ -150,71 +152,16 @@
   const summarySnap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
   const summary = summarySnap.data();
 
-  // A group's shared session skeleton has load_note stripped; overlay this
-  // member's own sessionLoads (from groups/{groupId}/members/{uid}) onto it
-  // by day + exercise name + occurrence order (the Nth "Running" in a session
-  // gets the Nth "Running" load) — mirrors functions/src/lib/sessionLoads.ts.
-  function applySessionLoads(sessions, sessionLoads) {
-    const loadsByDay = new Map();
-    for (const day of sessionLoads || []) {
-      const byName = new Map();
-      for (const ex of day.exercises || []) byName.set(ex.name, [...(byName.get(ex.name) || []), ex.load_note]);
-      loadsByDay.set(day.day, byName);
-    }
-    return (sessions || []).map((session) => {
-      const byName = loadsByDay.get(session.day);
-      if (!byName) return session;
-      const seen = new Map();
-      return {
-        ...session,
-        exercises: (session.exercises || []).map((ex) => {
-          const n = seen.get(ex.name) || 0;
-          seen.set(ex.name, n + 1);
-          const loads = byName.get(ex.name);
-          return loads && n < loads.length ? { ...ex, load_note: loads[n] ?? null } : ex;
-        }),
-      };
-    });
-  }
-
-  let p = null;
-  let planId = null; // see js/plan-updates.js
-  if (summary?.activeProgramSource === "group" && summary?.groupId) {
-    const activeSnap = await getDocs(query(
-      collection(db, "groups", summary.groupId, "programs"),
-      where("status", "==", "active"),
-      limit(1)
-    ));
-    const sharedDoc = activeSnap.docs[0];
-    if (sharedDoc) {
-      const shared = sharedDoc.data();
-      const memberSnap = await getDoc(doc(db, "groups", summary.groupId, "members", user.uid));
-      const member = memberSnap.exists() ? memberSnap.data() : null;
-      const plan = groupPlan(sharedDoc.id, member);
-      planId = plan.planId;
-      p = {
-        ...shared,
-        sessions: applySessionLoads(shared.sessions, member?.sessionLoads),
-        currentState: member?.currentState ?? null,
-        coachNotes: member?.coachNotes ?? null,
-        sportNotes: member?.sportNotes ?? null,
-        nutritionNote: member?.nutritionNote ?? null,
-        changeSummary: plan.changeSummary,
-      };
-    }
-  } else if (summary?.currentProgramId) {
-    const programSnap = await getDoc(doc(db, "users", user.uid, "programs", summary.currentProgramId));
-    planId = programSnap.id;
-    p = programSnap.data();
-  }
+  const p = await loadCurrentProgram(user.uid, summary);
+  const planId = p?.planId ?? null; // see js/plan-updates.js
 
   if (!p) {
     main.innerHTML = `<section><p class="muted">No program generated yet. Go to your <a href="dashboard.html">dashboard</a> and generate one.</p></section>`;
     document.getElementById("pageSub").textContent = "No program yet";
   } else {
     document.getElementById("pageTitle").textContent = p.title || `${p.split} Program`;
-    document.getElementById("pageSub").textContent = `${p.goalSummary || p.split} · ${p.daysPerWeek} days/week · generated ${
-      p.createdAt?.toDate ? p.createdAt.toDate().toLocaleDateString() : "recently"
+    document.getElementById("pageSub").textContent = `${p.goalSummary || p.split} · ${p.daysPerWeek} days/week · updated ${
+      p.updatedAt?.toDate ? p.updatedAt.toDate().toLocaleDateString() : "recently"
     }`;
     const eventBadges = (p.events || []).map((e) => `<span class="badge">📅 <b>${esc(e.name)}</b>${e.date ? ` · ${esc(e.date)}` : ""}</span>`).join("");
     document.getElementById("headerBadges").innerHTML =
@@ -269,7 +216,8 @@
     // ---- Target events ----
     if ((p.events || []).length) {
       const cards = p.events.map((e) => {
-        const meta = [e.date, e.weeksOut ? `${e.weeksOut} out` : null].filter(Boolean).join(" · ");
+        const out = weeksOut(e.date) ?? e.weeksOut;
+        const meta = [e.date, out ? `${out} out` : null].filter(Boolean).join(" · ");
         return `<div class="event-card">
           <div class="event-head">
             <span class="event-name">${esc(e.name)}</span>
@@ -296,11 +244,11 @@
     }
 
     // ---- This week: day strip + selected day's exercises ----
-    const bySessionDay = {};
-    (p.sessions || []).forEach((s) => { (bySessionDay[s.day] = bySessionDay[s.day] || []).push(s); });
     const days = (p.weeklyStructure || []).length
       ? p.weeklyStructure
-      : (p.sessions || []).map((s) => ({ day: s.day, focus: s.label }));
+      : (p.sessions || [])
+        .filter((s, i, all) => all.findIndex((o) => dayKey(o.day) === dayKey(s.day)) === i) // one cell per day
+        .map((s) => ({ day: s.day, focus: s.label }));
 
     if (days.length) {
       main.insertAdjacentHTML("beforeend", section("week", "This week", `
@@ -309,14 +257,16 @@
 
       const weekStrip = document.getElementById("weekStrip");
       const dayDetail = document.getElementById("dayDetail");
-      const isRestDay = (d) => /rest|recovery/i.test(d.focus || "");
+      const isRestDay = (d) => sessionsOn(p, d.day).length === 0;
+      const todayIndex = days.findIndex((d) => normalizeDay(d.day) === todayWeekday());
 
-      let selected = days.findIndex((d) => !isRestDay(d));
+      // Opens on today when the week lists it, else on the first training day.
+      let selected = todayIndex !== -1 ? todayIndex : days.findIndex((d) => !isRestDay(d));
       if (selected === -1) selected = 0;
 
       const renderStrip = () => {
         weekStrip.innerHTML = days.map((d, i) => `
-          <div class="day-cell${isRestDay(d) ? " rest" : ""}${i === selected ? " selected" : ""}" data-i="${i}">
+          <div class="day-cell${isRestDay(d) ? " rest" : ""}${i === todayIndex ? " today" : ""}${i === selected ? " selected" : ""}" data-i="${i}"${i === todayIndex ? ' id="today"' : ""}>
             <span class="d">${esc((d.day || "").slice(0, 3).toUpperCase())}</span>
             <span class="f">${esc(d.focus)}</span>
           </div>`).join("");
@@ -329,9 +279,9 @@
 
       const renderDetail = () => {
         const d = days[selected];
-        const exs = (bySessionDay[d.day] || []).flatMap((s) => s.exercises || []);
+        const exs = sessionsOn(p, d.day).flatMap((s) => s.exercises || []);
         dayDetail.innerHTML = `
-          <h3 style="margin:0 0 4px">${esc(d.day)} <span class="muted">— ${esc(d.focus)}</span></h3>
+          <h3 style="margin:0 0 4px">${esc(d.day)} <span class="muted">— ${esc(d.focus)}</span>${selected === todayIndex ? ' <span class="phase-badge">Today</span>' : ""}</h3>
           ${exs.length
             ? `<div class="ex-grid">${exs.map(exHtml).join("")}</div>`
             : `<p class="muted small" style="margin-top:8px">Rest day — no exercises scheduled.</p>`}`;
@@ -342,6 +292,10 @@
     }
 
     document.getElementById("loading").remove();
+    // The dashboard's Today card links to program.html#today, but the day
+    // strip only exists once the plan has loaded — after the browser's own
+    // jump to the anchor — so jump to it here.
+    if (location.hash === "#today") document.getElementById("today")?.scrollIntoView();
   }
   } catch (err) {
     console.error("[program] failed to load", err);

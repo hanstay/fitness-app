@@ -92,10 +92,10 @@ describe("blockPhaseIndex", () => {
 
 describe("decideRegen", () => {
   const decide = (state: Parameters<typeof decideRegen>[0]["state"], now: string, extra: Partial<Parameters<typeof decideRegen>[0]> = {}) =>
-    decideRegen({ hasActiveProgram: true, structuralChange: false, state, force: false, now: at(now), ...extra });
+    decideRegen({ hasActiveProgram: true, structuralChange: false, state, force: false, weekReadable: true, now: at(now), ...extra });
 
   it("designs a new plan when there is none", () => {
-    expect(decideRegen({ hasActiveProgram: false, structuralChange: false, state: {}, force: false }).mode).toBe("full");
+    expect(decideRegen({ hasActiveProgram: false, structuralChange: false, state: {}, force: false, weekReadable: false }).mode).toBe("full");
   });
 
   it("redesigns — continuing from the current phase — when something structural changed", () => {
@@ -149,6 +149,24 @@ describe("decideRegen", () => {
     expect(decide({ roadmap: [], blockStartedAtMs: ms("2026-09-01") }, "2026-09-10").mode).toBe("incremental");
     expect(decide({ roadmap: [], blockStartedAtMs: ms("2026-09-01") }, "2026-09-10", { force: true }).mode).toBe("full");
     expect(decide({ roadmap: [], blockStartedAtMs: ms("2026-07-01") }, "2026-09-10").mode).toBe("full");
+  });
+
+  describe("when the stored week's days aren't all weekdays", () => {
+    const unreadable = { weekReadable: false };
+
+    it("rebuilds the week for the same phase instead of a weekly update", () => {
+      expect(decide({ roadmap: dated, currentPhaseIndex: 1, blockStartedAtMs: ms("2026-09-29") }, "2026-10-05", unreadable))
+        .toMatchObject({ mode: "rebuild", fromPhaseIndex: 1, targetPhaseIndex: 1 });
+      expect(decide({ roadmap: [], blockStartedAtMs: ms("2026-09-01") }, "2026-09-10", unreadable))
+        .toMatchObject({ mode: "rebuild", fromPhaseIndex: 0, targetPhaseIndex: 0 });
+    });
+
+    it("still advances or redesigns when that's due anyway — both write a new week", () => {
+      expect(decide({ roadmap: dated, currentPhaseIndex: 0, blockStartedAtMs: ms("2026-09-01") }, "2026-10-01", unreadable))
+        .toMatchObject({ mode: "advance", targetPhaseIndex: 1 });
+      expect(decide({ roadmap: dated, currentPhaseIndex: 1, blockStartedAtMs: ms("2026-09-29") }, "2026-10-05", { ...unreadable, structuralChange: true }).mode)
+        .toBe("full");
+    });
   });
 });
 
@@ -204,6 +222,14 @@ describe("buildContinuationText", () => {
     expect(text).toContain("(← PROGRAM THIS BLOCK NOW)");
     expect(text).toContain(`Phase to program now: "Build"`);
     expect(text).toContain("  Lifting: Upper/Lower");
+  });
+
+  it("rebuild: fixes the roadmap and details the current phase", () => {
+    const text = buildContinuationText({ mode: "rebuild", roadmap, targetIndex: 1, reason: "this week's days aren't all weekdays" });
+    expect(text).toContain("REBUILDING THIS PHASE'S WEEK (this week's days aren't all weekdays)");
+    expect(text).not.toContain("NEXT PHASE");
+    expect(text).toContain("The roadmap below is FIXED");
+    expect(text).toContain(`Phase to program now: "Build"`);
   });
 
   it("redesign: continues from the current phase", () => {
