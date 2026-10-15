@@ -6,6 +6,10 @@ import { parseHevyCsvToSessions } from "../lib/hevyAnalyzer";
 import { parseHevyCsvToCurrentLifts } from "../lib/hevyParser";
 import { buildProgressionSummary } from "../lib/hevyCheckinSummary";
 
+// The check-in's "Update my plan" counts a schedule or goal change as new
+// information, decided as a personal plan's generation decides it.
+export { structuralChanged } from "../lib/programDecisions";
+
 /**
  * Parse a Hevy CSV export entirely in the browser. Returns the sessions and
  * current lifts to send to the saveHevySessions function, plus the progression

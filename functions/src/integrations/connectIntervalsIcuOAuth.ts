@@ -64,8 +64,8 @@ export const connectIntervalsIcuOAuth = onCall<Input>(async (request) => {
   // Auto-sync immediately on connect — the initial data pull is part of
   // "connecting," not a separate step the user has to trigger.
   try {
-    const { activitiesSynced, wellness } = await syncIntervalsActivitiesForUser(uid, token.access_token);
-    return { connected: true, activitiesSynced, wellness };
+    const { activitiesSynced, newActivities, wellness } = await syncIntervalsActivitiesForUser(uid, token.access_token);
+    return { connected: true, activitiesSynced, newActivities, wellness };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await db.doc(`users/${uid}/state/summary`).update({
@@ -73,6 +73,6 @@ export const connectIntervalsIcuOAuth = onCall<Input>(async (request) => {
     }).catch(() => {});
     // Credential is valid and saved even if the first sync failed — the user
     // can retry sync later without reconnecting.
-    return { connected: true, activitiesSynced: 0, wellness: null, syncError: message };
+    return { connected: true, activitiesSynced: 0, newActivities: 0, wellness: null, syncError: message };
   }
 });

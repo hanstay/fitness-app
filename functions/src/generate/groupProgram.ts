@@ -333,6 +333,9 @@ export async function runGenerateGroupProgram(
 
   // Stage B: this member's own layer, grounded in their own data, against
   // the (possibly just-regenerated) shared skeleton.
+  // Data stored after this wasn't read, so it's still new to the check-in
+  // even though the layer commits later (see public/js/plan-update-readiness.js).
+  const inputsReadAt = Timestamp.now();
   const { wellness, currentTargets, freshnessBlock, activitySummary, trainingLogBlock, prescriptionBlock, exerciseVocabulary, hasHevyLog } =
     await gatherGroundingData(db, uid, await followedPrescription(db, groupId, uid, activeGroupProgram, sharedProgram));
 
@@ -416,6 +419,7 @@ export async function runGenerateGroupProgram(
       ...(changeSummary ? { changeSummary } : {}),
       groupProgramId: groupProgramRef!.id,
       profileSnapshot: athlete,
+      inputsReadAt,
       updatedAt: FieldValue.serverTimestamp(),
     });
     return {};
