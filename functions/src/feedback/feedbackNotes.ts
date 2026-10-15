@@ -74,7 +74,7 @@ export const followUpFeedbackNote = onCall(async (request) => {
     if (!snap.exists || snap.get("status") !== "open") {
       throw new HttpsError("failed-precondition", "That note isn't waiting for a follow-up.");
     }
-    tx.update(ref, { ...followUpChange(outcome), followedUpAt: FieldValue.serverTimestamp() });
+    tx.update(ref, { ...followUpChange(outcome), lastFollowUp: outcome, followedUpAt: FieldValue.serverTimestamp() });
   });
   return { ok: true };
 });

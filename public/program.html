@@ -75,6 +75,26 @@
   .ex-card .sub .pill{display:block; background:var(--accent-soft); color:var(--accent-dark); border:1px solid #f3cfd0;
     border-radius:7px; padding:2px 8px; font-size:.72rem; font-weight:600; width:100%}
 
+  /* "Not right?" on an exercise, and the swap sheet (js/exercise-swap.js). */
+  .ex-card .swapped .pill{display:flex; align-items:center; justify-content:space-between; gap:8px}
+  .ex-card .undo{background:none; border:0; padding:4px 0; color:var(--accent-dark); font:inherit; font-weight:700; text-decoration:underline; cursor:pointer}
+  .ex-actions{margin-top:6px; margin-left:28px}
+  .link-btn{background:none; border:0; padding:6px 0; color:var(--text-secondary); font:inherit; font-size:.8rem; font-weight:600; cursor:pointer}
+  .ex-menu{display:flex; gap:8px; flex-wrap:wrap; margin-top:4px}
+  .ex-menu[hidden]{display:none}
+  .ex-menu .btn{padding:8px 12px; font-size:.82rem}
+  dialog.sheet{border:0; padding:18px 16px calc(18px + env(safe-area-inset-bottom)); margin:auto auto 0; width:100%; max-width:560px;
+    max-height:88vh; overflow:auto; border-radius:var(--radius) var(--radius) 0 0; background:var(--card); color:var(--text-primary)}
+  dialog.sheet::backdrop{background:rgba(23,24,26,.45)}
+  .sheet-head{display:flex; align-items:flex-start; justify-content:space-between; gap:12px}
+  .sheet-head h3{margin:0; font-size:1.05rem}
+  .sheet-close{width:44px; height:44px; margin:-10px -8px 0 0; background:none; border:0; font-size:.95rem; color:var(--text-secondary); cursor:pointer}
+  .swap-option{display:flex; gap:10px; align-items:flex-start; border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin:0 0 8px; cursor:pointer}
+  .swap-option > span{display:flex; flex-direction:column; gap:2px; min-width:0}
+  .swap-option input{margin-top:4px; accent-color:var(--accent)}
+  .swap-option:has(input:checked){border-color:var(--accent); background:var(--accent-soft)}
+  #swapScopeField[hidden], #swapApply[hidden], #swapPain[hidden]{display:none}
+
   @media (max-width:640px){
     .ex-grid{grid-template-columns:minmax(0, 1fr)}
     .roadmap{grid-template-columns:minmax(0, 1fr)}
@@ -123,6 +143,8 @@
 <script src="update.js"></script>
 <script type="module">
   import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+  import { exerciseActionsHtml, bindExerciseActions } from "./js/exercise-swap.js";
+  import { showToast } from "./js/ui-messages.js";
   import { db } from "./js/firebase-init.js";
   import { requireOnboarded } from "./js/auth-guard.js";
   import { loadCurrentProgram, dayKey, sessionsOn, weeksOut } from "./js/current-program.js";
@@ -184,7 +206,10 @@
       if (ex.load_note) bits.push(esc(ex.load_note));
       return bits.length ? `<div class="load">${bits.join(" · ")}</div>` : "";
     };
-    const exHtml = (ex, i) => `<div class="ex-card">
+    // Swaps and notes are for the athlete's own current plan (a group plan is
+    // written for the whole group).
+    const canSwap = !(summary?.activeProgramSource === "group" && summary?.groupId) && planId === summary?.currentProgramId;
+    const exHtml = ({ ex, si, ei, day }, i) => `<div class="ex-card">
       <div class="row">
         <span class="order">${i + 1}</span>
         <span class="name">${esc(ex.name)}</span>
@@ -192,14 +217,20 @@
       <div class="sets">${ex.sets} × ${esc(ex.reps)}</div>
       ${loadLine(ex)}
       ${ex.substitution_note ? `<div class="sub"><span class="pill">Sub: ${esc(ex.substitution_note)}</span></div>` : ""}
+      ${canSwap ? exerciseActionsHtml(p, si, ei, day) : ""}
     </div>`;
 
     // ---- What changed in the latest update, until closed ----
-    if ((p.changeSummary || []).length && !changesDismissed(user.uid, planId)) {
+    // The update's answer to each check-in note it was given.
+    const feedbackHtml = (p.feedbackResponses || []).length ? `
+      <h3 style="margin:14px 0 6px; font-size:.95rem">Your feedback</h3>
+      <ul class="small">${p.feedbackResponses.map((r) => `<li><b>${esc(r.exercise || (r.text.length > 50 ? `${r.text.slice(0, 47)}…` : r.text))}:</b> ${esc(r.response)}</li>`).join("")}</ul>` : "";
+    if (((p.changeSummary || []).length || feedbackHtml) && !changesDismissed(user.uid, planId)) {
       main.insertAdjacentHTML("beforeend", `
         <section id="changes">
           <h2><span class="dot"></span>What changed</h2>
-          <ul class="small">${p.changeSummary.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
+          <ul class="small">${(p.changeSummary || []).map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
+          ${feedbackHtml}
           <button class="dismiss" id="dismissChanges" type="button" aria-label="Dismiss what changed">✕</button>
         </section>`);
       document.getElementById("dismissChanges").addEventListener("click", () => {
@@ -279,12 +310,31 @@
 
       const renderDetail = () => {
         const d = days[selected];
-        const exs = sessionsOn(p, d.day).flatMap((s) => s.exercises || []);
+        // Each exercise with where it is in p.sessions, which a swap needs.
+        const exs = sessionsOn(p, d.day).flatMap((s) => {
+          const si = p.sessions.indexOf(s);
+          return (s.exercises || []).map((ex, ei) => ({ ex, si, ei, day: s.day }));
+        });
         dayDetail.innerHTML = `
           <h3 style="margin:0 0 4px">${esc(d.day)} <span class="muted">— ${esc(d.focus)}</span>${selected === todayIndex ? ' <span class="phase-badge">Today</span>' : ""}</h3>
           ${exs.length
             ? `<div class="ex-grid">${exs.map(exHtml).join("")}</div>`
             : `<p class="muted small" style="margin-top:8px">Rest day — no exercises scheduled.</p>`}`;
+        if (canSwap) {
+          bindExerciseActions(dayDetail, {
+            programId: planId,
+            program: p,
+            report: (message, isError) => showToast(message, { type: isError ? "error" : "info" }),
+            // A swap edits the current program in place: re-read its week.
+            onChanged: async () => {
+              const fresh = (await getDoc(doc(db, "users", user.uid, "programs", planId))).data();
+              p.sessions = fresh?.sessions ?? p.sessions;
+              p.swaps = fresh?.swaps ?? [];
+              renderStrip();
+              renderDetail();
+            },
+          });
+        }
       };
 
       renderStrip();

@@ -1,4 +1,5 @@
-// Weekly check-in view: import Hevy → sync intervals.icu → regenerate program.
+// Weekly check-in view: import Hevy → sync intervals.icu → notes on the plan
+// (checkin-notes.js) → regenerate program.
 // One-shot reads (plus one listener for the plan update's background status),
 // per-page message boxes, dot-path writes — matching the conventions in
 // dashboard.html / onboarding-wizard.js.
@@ -10,6 +11,7 @@ import { requireOnboarded } from "./auth-guard.js";
 import { connectIntervalsIcuViaOAuth } from "./intervals-oauth.js";
 import { bindMessages } from "./ui-messages.js";
 import { isStale } from "./plan-updates.js";
+import { initCheckinNotes } from "./checkin-notes.js";
 
 const session = await requireOnboarded();
 if (!session) throw new Error("redirecting"); // requireOnboarded already redirected
@@ -256,6 +258,8 @@ try {
   console.error("[checkin] failed to load summary", err);
   showError("Couldn't load your intervals.icu status — Hevy import and program updates below still work.");
 }
+
+initCheckinNotes(user.uid, summary).catch((err) => console.error("[checkin] notes section failed to load", err));
 
 // Fire-and-forget: runs in parallel with the user's own Hevy CSV export/
 // upload instead of adding latency later, at "Update my plan" time.

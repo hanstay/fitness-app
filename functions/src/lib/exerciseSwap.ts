@@ -1,7 +1,7 @@
 // Swapping one exercise in the current plan from the Program page, and what
 // the weekly update does with the swaps made since the last one. No Firebase
 // imports, so it's unit-tested directly; the reasons and scopes are
-// duplicated by hand in public/js/plan-feedback.js — keep the two identical.
+// duplicated by hand in public/js/plan-feedback.js — keep the two in step.
 import { z } from "zod";
 import { exerciseSchema, SessionOutput } from "./schemas";
 import { WEEKDAYS } from "./days";
