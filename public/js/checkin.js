@@ -198,6 +198,7 @@ let latestSummary = null;
 let hevyImporting = false; // this page's Hevy import is being read or saved
 let icuSyncing = false; // this page's intervals.icu sync is in flight
 let plan = { key: null, loaded: false, updatedAt: null }; // the current plan's last update
+let statusUnavailable = false; // the summary listener failed, so its state is unknown
 
 forceRegenCheck.addEventListener("change", () => renderGenerationStatus());
 
@@ -228,9 +229,11 @@ regenBtn.addEventListener("click", async () => {
 // earlier attempt isn't shown again on every visit.
 function renderGenerationStatus() {
   const s = latestSummary;
-  const inFlight = s?.programGenerationStatus === "generating" && !isStale(s.programGenerationStartedAt);
+  // Without a live status, don't hold the button back on state this page
+  // can no longer see; it just can't report how the update went.
+  const inFlight = !statusUnavailable && s?.programGenerationStatus === "generating" && !isStale(s.programGenerationStartedAt);
   const busy = queuing || inFlight;
-  const { ready, hint } = plan.loaded
+  const { ready, hint } = statusUnavailable ? { ready: true, hint: "" } : plan.loaded
     ? planUpdateReadiness({ summary: s, planUpdatedAt: plan.updatedAt, hevyImporting, icuSyncing, startNextPhase: forceRegenCheck.checked })
     : { ready: false, hint: "" };
   regenBtn.disabled = busy || !ready;
@@ -239,7 +242,7 @@ function renderGenerationStatus() {
   const busyLabel = queuing ? "Starting…" : "Updating your plan…";
   regenBtn.innerHTML = busy ? `<span class="spinner"></span> ${busyLabel}` : regenLabel;
   regenHint.textContent = busy ? "" : hint;
-  lockDataInputs(inFlight);
+  lockDataInputs(busy);
   const statusEl = document.getElementById("regenStatus");
   // A live region: only touch it when the text changes, so it isn't
   // re-announced on every snapshot.
@@ -312,9 +315,7 @@ onSnapshot(doc(db, "users", user.uid, "state", "summary"), (snap) => {
   refreshPlan(latestSummary);
 }, (err) => {
   console.error("[checkin] plan update status listener failed", err);
-  // With no live status, don't hold the button back: the server still
-  // refuses a second update while one is running.
-  plan = { key: null, loaded: true, updatedAt: null };
+  statusUnavailable = true;
   renderGenerationStatus();
 });
 
