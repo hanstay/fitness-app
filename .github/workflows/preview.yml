@@ -1,0 +1,27 @@
+name: Hosting preview
+
+# Deploys public/ to a Firebase Hosting preview channel so the combined UX
+# changes can be tried on a phone before anything reaches the live site.
+# Hosting only: the preview pages talk to the live Firestore and the live
+# Cloud Functions, so server-side changes on this branch are not active there.
+# Needs the FIREBASE_SERVICE_ACCOUNT repository secret (a service account key
+# with the Firebase Hosting Admin role on fitness-app-47a06).
+on:
+  push:
+    branches: [claude/ux-preview]
+  workflow_dispatch:
+
+jobs:
+  preview:
+    name: deploy hosting preview
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: fitness-app-47a06
+          channelId: ux-preview
+          expires: 30d
