@@ -160,7 +160,13 @@ export async function extractStructuredJson<T>(params: ExtractJsonParams<T>): Pr
       if (parsed.success) return parsed.data;
       // A nested array or object sent as an encoded string: decode and
       // re-check before spending a retry on it.
-      const decoded = params.validator.safeParse(decodeStringifiedJson(toolUse.input));
+      let decodedInput: unknown;
+      try {
+        decodedInput = decodeStringifiedJson(toolUse.input);
+      } catch {
+        decodedInput = toolUse.input; // nested too deep to walk; let the retry handle it
+      }
+      const decoded = params.validator.safeParse(decodedInput);
       if (decoded.success) {
         logger.warn("extractStructuredJson decoded stringified tool input", { toolName: params.toolName, attempt });
         return decoded.data;
@@ -191,11 +197,11 @@ export async function extractStructuredJson<T>(params: ExtractJsonParams<T>): Pr
             {
               type: "tool_result",
               tool_use_id: toolUse.id,
-              content: `Your previous response failed validation: ${lastError}. Please call the tool again with corrected values.`,
+              content: `Your previous response failed validation: ${lastError}. Please call the tool again with corrected values, passing arrays and objects as JSON values, not as encoded strings.`,
               is_error: true,
             },
           ]
-        : `Your previous response failed validation: ${lastError}. Please call the tool again with corrected values.`,
+        : `Your previous response failed validation: ${lastError}. Please call the tool again with corrected values, passing arrays and objects as JSON values, not as encoded strings.`,
     });
   }
 
