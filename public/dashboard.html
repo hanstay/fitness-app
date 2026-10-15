@@ -30,6 +30,9 @@
 
 <div class="wrap page-content wide">
 
+  <div class="callout" id="planNotice" style="display:none; margin:0 0 18px">
+    <b>Your plan is updated.</b> <a href="program.html">See what changed →</a>
+  </div>
   <section id="todayCard">
     <h2><span class="dot"></span>Today</h2>
     <div class="skeleton skeleton-card"></div>
@@ -79,13 +82,14 @@
 <script type="module" src="js/tab-bar.js"></script>
 <script src="update.js"></script>
 <script type="module">
-  import { doc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+  import { doc, getDoc, collection, query, where, limit, getDocs, onSnapshot } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
   import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
   import { db, functions } from "./js/firebase-init.js";
   import { requireOnboarded, signOut } from "./js/auth-guard.js";
   import { showToast } from "./js/ui-messages.js";
   import { loadCurrentProgram, sessionsOn } from "./js/current-program.js";
   import { WEEKDAYS, normalizeDay, todayWeekday } from "./js/days.js";
+  import { isStale, groupPlan, isUnseenUpdate } from "./js/plan-updates.js";
 
   const session = await requireOnboarded();
   if (!session) throw new Error("redirecting"); // requireOnboarded already redirected
@@ -226,18 +230,6 @@
     }));
   }
 
-  // Kept in sync by hand with functions/src/lib/staleGeneration.ts — comfortably
-  // above the background function's own 300s timeout, and the server-side
-  // sweep (sweepStaleGenerations.ts) uses the same threshold to eventually
-  // mark these "error" even if nobody has the dashboard open to see this.
-  const GENERATION_STALE_AFTER_MS = 6 * 60 * 1000;
-
-  function isStale(startedAt) {
-    const ms = startedAt?.toDate ? startedAt.toDate().getTime() : null;
-    if (!ms) return false;
-    return Date.now() - ms > GENERATION_STALE_AFTER_MS;
-  }
-
   function featureCard(cfg) {
     const wrap = document.createElement("div");
     if (cfg.genStatus === "generating" && !isStale(cfg.genStartedAt)) {
@@ -329,6 +321,45 @@
     }
   }
 
+  // The current plan's id and change summary, from the same source
+  // program.html shows.
+  async function currentPlanChanges() {
+    if (summary?.activeProgramSource === "group" && summary?.groupId) {
+      const [activeSnap, memberSnap] = await Promise.all([
+        getDocs(query(collection(db, "groups", summary.groupId, "programs"), where("status", "==", "active"), limit(1))),
+        getDoc(doc(db, "groups", summary.groupId, "members", user.uid)),
+      ]);
+      return activeSnap.docs[0] ? groupPlan(activeSnap.docs[0].id, memberSnap.data()) : {};
+    }
+    if (!summary?.currentProgramId) return {};
+    const programSnap = await getDoc(doc(db, "users", user.uid, "programs", summary.currentProgramId));
+    return { planId: programSnap.id, changeSummary: programSnap.data()?.changeSummary };
+  }
+
+  // "Your plan is updated": shown once an update has finished, until that
+  // plan is opened on this device (program.html marks it seen). Only plans
+  // with a change summary qualify, which leaves out a first plan from
+  // onboarding and a full rebuild — there's no earlier plan to compare.
+  // Re-read only when the plan or its generation status changes, not on
+  // every summary write (e.g. an intervals.icu sync).
+  let planNoticeKey = null;
+  async function renderPlanNotice() {
+    const key = [summary?.activeProgramSource, summary?.groupId, summary?.currentProgramId, summary?.programGenerationStatus].join("|");
+    if (key === planNoticeKey) return;
+    planNoticeKey = key;
+    const notice = document.getElementById("planNotice");
+    notice.style.display = "none";
+    if (summary?.programGenerationStatus === "generating") return;
+    try {
+      const { planId, changeSummary } = await currentPlanChanges();
+      if (key !== planNoticeKey) return; // a newer snapshot has taken over
+      // isUnseenUpdate first: it records the first plan this device sees.
+      notice.style.display = planId && isUnseenUpdate(user.uid, planId) && changeSummary?.length ? "block" : "none";
+    } catch (err) {
+      console.error("[dashboard] couldn't check for an updated plan", err);
+    }
+  }
+
   function renderLoadFailure() {
     document.getElementById("targetsSub").textContent = "Couldn't load your dashboard.";
     document.getElementById("targetBadges").innerHTML = "";
@@ -352,6 +383,7 @@
     renderTrainingLoad(summary);
     renderToday(summary);
     renderPlanCards();
+    renderPlanNotice();
   }, (err) => {
     console.error("[dashboard] summary listener failed", err);
     renderLoadFailure();

@@ -6,6 +6,7 @@
 import { doc, getDoc, collection, query, where, limit, getDocs } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
 import { db } from "./firebase-init.js";
 import { normalizeDay } from "./days.js";
+import { groupPlan } from "./plan-updates.js";
 
 // Compares stored day names as weekdays ("Mon" and "Monday" are one day),
 // falling back to the exact text for one that names no weekday ("Day 1").
@@ -64,8 +65,8 @@ function applySessionLoads(sessions, sessionLoads) {
 
 /**
  * The current program for `uid` given their users/{uid}/state/summary data,
- * or null if there's none yet. Its `updatedAt` Timestamp is when the athlete's
- * plan last changed.
+ * or null if there's none yet. `planId` identifies it for js/plan-updates.js;
+ * its `updatedAt` Timestamp is when the athlete's plan last changed.
  */
 export async function loadCurrentProgram(uid, summary) {
   if (summary?.activeProgramSource === "group" && summary?.groupId) {
@@ -79,6 +80,7 @@ export async function loadCurrentProgram(uid, summary) {
     const shared = sharedDoc.data();
     const memberSnap = await getDoc(doc(db, "groups", summary.groupId, "members", uid));
     const member = memberSnap.exists() ? memberSnap.data() : null;
+    const plan = groupPlan(sharedDoc.id, member);
     return {
       ...shared,
       sessions: applySessionLoads(shared.sessions, member?.sessionLoads),
@@ -86,6 +88,8 @@ export async function loadCurrentProgram(uid, summary) {
       coachNotes: member?.coachNotes ?? null,
       sportNotes: member?.sportNotes ?? null,
       nutritionNote: member?.nutritionNote ?? null,
+      changeSummary: plan.changeSummary,
+      planId: plan.planId,
       // A weekly update rewrites only the member layer, so the shared
       // program's createdAt is when the cycle began, not when it last changed.
       updatedAt: member?.updatedAt ?? shared.createdAt ?? null,
@@ -93,9 +97,10 @@ export async function loadCurrentProgram(uid, summary) {
   }
   if (summary?.currentProgramId) {
     const programSnap = await getDoc(doc(db, "users", uid, "programs", summary.currentProgramId));
+    if (!programSnap.exists()) return null;
     const program = programSnap.data();
     // Every personal update writes a new program doc.
-    return program ? { ...program, updatedAt: program.createdAt ?? null } : null;
+    return { ...program, planId: programSnap.id, updatedAt: program.createdAt ?? null };
   }
   return null;
 }

@@ -16,6 +16,10 @@
 <link rel="stylesheet" href="styles/theme.css">
 <style>
   .adviceLink{display:none; margin-top:10px}
+  #changes{position:relative}
+  #changes ul{margin:0; padding-left:20px}
+  #changes .dismiss{position:absolute; top:8px; right:8px; width:44px; height:44px; background:none; border:0;
+    border-radius:var(--radius-sm); cursor:pointer; font-size:.95rem; color:var(--text-secondary)}
 
   /* Target events: a card per event instead of a table — a table's columns
      (esp. "Goal", which is a full sentence) don't have a width they can
@@ -123,6 +127,7 @@
   import { requireOnboarded } from "./js/auth-guard.js";
   import { loadCurrentProgram, dayKey, sessionsOn, weeksOut } from "./js/current-program.js";
   import { normalizeDay, todayWeekday } from "./js/days.js";
+  import { groupPlan, markPlanSeen, changesDismissed, dismissChanges } from "./js/plan-updates.js";
 
   const session = await requireOnboarded();
   if (!session) throw new Error("redirecting");
@@ -148,6 +153,7 @@
   const summary = summarySnap.data();
 
   const p = await loadCurrentProgram(user.uid, summary);
+  const planId = p?.planId ?? null; // see js/plan-updates.js
 
   if (!p) {
     main.innerHTML = `<section><p class="muted">No program generated yet. Go to your <a href="dashboard.html">dashboard</a> and generate one.</p></section>`;
@@ -161,6 +167,7 @@
     document.getElementById("headerBadges").innerHTML =
       `<span class="badge">🏋️ <b>${esc(p.split)}</b></span><span class="badge"><b>${p.daysPerWeek}</b> days/week</span>${eventBadges}`;
     document.getElementById("adviceLink").style.display = "inline-flex";
+    markPlanSeen(user.uid, planId); // clears the dashboard's "Your plan is updated" notice
 
     const section = (id, label, innerHtml) => `
       <section id="${id}">
@@ -186,6 +193,25 @@
       ${loadLine(ex)}
       ${ex.substitution_note ? `<div class="sub"><span class="pill">Sub: ${esc(ex.substitution_note)}</span></div>` : ""}
     </div>`;
+
+    // ---- What changed in the latest update, until closed ----
+    if ((p.changeSummary || []).length && !changesDismissed(user.uid, planId)) {
+      main.insertAdjacentHTML("beforeend", `
+        <section id="changes">
+          <h2><span class="dot"></span>What changed</h2>
+          <ul class="small">${p.changeSummary.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
+          <button class="dismiss" id="dismissChanges" type="button" aria-label="Dismiss what changed">✕</button>
+        </section>`);
+      document.getElementById("dismissChanges").addEventListener("click", () => {
+        dismissChanges(user.uid, planId);
+        // Keep keyboard focus on the page rather than losing it with the button.
+        const changes = document.getElementById("changes");
+        const next = changes.nextElementSibling ?? main;
+        changes.remove();
+        next.tabIndex = -1;
+        next.focus();
+      });
+    }
 
     // ---- Target events ----
     if ((p.events || []).length) {

@@ -21,6 +21,8 @@ import type { PrescriptionProgram } from "../lib/trainingLog";
 import { applySessionLoads } from "../lib/sessionLoads";
 import { reconcileEvents } from "../lib/eventReconciliation";
 import { normalizeWeek } from "../lib/programMerge";
+import { commitProgramGeneration } from "./settleGeneration";
+import type { GenerateProgramOptions } from "./generateProgram";
 
 const GROUP_PREAMBLE = `You are an expert strength & conditioning coach writing ONE periodized, data-grounded
 training program shared by a small group of athletes who train together. They will do the same
@@ -225,7 +227,7 @@ export async function runGenerateGroupProgram(
   uid: string,
   groupId: string,
   athlete: AthleteProfileSnapshotFull,
-  opts?: { force?: boolean }
+  opts?: GenerateProgramOptions
 ): Promise<{ programId: string } & ProgramOutput & { changeSummary?: string[] }> {
   const db = getFirestore();
   const group = await loadGroup(db, groupId);
@@ -395,10 +397,28 @@ export async function runGenerateGroupProgram(
     maxTokens: 4000,
   });
 
-  await db.doc(`groups/${groupId}/members/${uid}`).set({
-    ...memberLayer,
-    profileSnapshot: athlete,
-    updatedAt: FieldValue.serverTimestamp(),
+  const changeSummary = decision.mode === "advance"
+    ? [
+        `Moved to the next phase of the group plan: ${activeGroupProgram?.roadmap?.[decision.fromPhaseIndex!]?.phase ?? "previous phase"} → ${sharedProgram.roadmap[currentPhaseIndex]?.phase ?? "next phase"}.`,
+        ...(memberLayer.currentState?.highlights ?? []),
+      ]
+    : decision.mode === "rebuild"
+      ? [REBUILD_CHANGE_NOTE, ...(memberLayer.currentState?.highlights ?? [])]
+      : undefined;
+
+  // Stored on the member doc (program.html's "What changed" box reads it
+  // there); set() replaces the whole doc, so a later run without one clears it.
+  // groupProgramId: the shared program this layer was written against, so the
+  // summary isn't shown once another member's run has replaced that program.
+  await commitProgramGeneration(uid, opts?.placeholder, async (tx) => {
+    tx.set(db.doc(`groups/${groupId}/members/${uid}`), {
+      ...memberLayer,
+      ...(changeSummary ? { changeSummary } : {}),
+      groupProgramId: groupProgramRef!.id,
+      profileSnapshot: athlete,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return {};
   });
 
   const sessions = applySessionLoads(sharedProgram.sessions, memberLayer.sessionLoads);
@@ -411,15 +431,6 @@ export async function runGenerateGroupProgram(
     coachNotes: memberLayer.coachNotes,
     sportNotes: memberLayer.sportNotes,
     nutritionNote: memberLayer.nutritionNote,
-    ...(decision.mode === "advance"
-      ? {
-          changeSummary: [
-            `Moved to the next phase of the group plan: ${activeGroupProgram?.roadmap?.[decision.fromPhaseIndex!]?.phase ?? "previous phase"} → ${sharedProgram.roadmap[currentPhaseIndex]?.phase ?? "next phase"}.`,
-            ...(memberLayer.currentState?.highlights ?? []),
-          ],
-        }
-      : decision.mode === "rebuild"
-        ? { changeSummary: [REBUILD_CHANGE_NOTE, ...(memberLayer.currentState?.highlights ?? [])] }
-        : {}),
+    ...(changeSummary ? { changeSummary } : {}),
   };
 }
