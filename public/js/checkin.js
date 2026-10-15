@@ -88,14 +88,14 @@ document.getElementById("hevyFile").addEventListener("change", async (e) => {
   results.style.display = "none";
   results.innerHTML = "";
   fileInput.disabled = true;
+  hevyImporting = true;
+  renderGenerationStatus();
   setStatus("hevyStatus", "Analyzing…");
   try {
     const { sessions, lifts, progression } = analyzeHevyCsv(await file.text());
     renderImportSummary(results, sessions.length, progression);
 
     setStatus("hevyStatus", "Saving…");
-    hevySaving = true;
-    renderGenerationStatus();
     await httpsCallable(functions, "saveHevySessions")({ sessions, lifts });
     setStatus("hevyStatus", "Saved. Update your plan below when you're ready.");
   } catch (err) {
@@ -104,7 +104,7 @@ document.getElementById("hevyFile").addEventListener("change", async (e) => {
   } finally {
     fileInput.disabled = false;
     fileInput.value = "";
-    hevySaving = false;
+    hevyImporting = false;
     renderGenerationStatus();
   }
 });
@@ -195,7 +195,7 @@ const STALLED_MSG = "This update seems to have stalled. Please try again.";
 let queuing = false;    // the queue call itself is in flight
 let followingId = null; // the generation whose outcome this page reports
 let latestSummary = null;
-let hevySaving = false; // this page's Hevy import is being saved
+let hevyImporting = false; // this page's Hevy import is being read or saved
 let icuSyncing = false; // this page's intervals.icu sync is in flight
 let plan = { key: null, loaded: false, updatedAt: null }; // the current plan's last update
 
@@ -231,7 +231,7 @@ function renderGenerationStatus() {
   const inFlight = s?.programGenerationStatus === "generating" && !isStale(s.programGenerationStartedAt);
   const busy = queuing || inFlight;
   const { ready, hint } = plan.loaded
-    ? planUpdateReadiness({ summary: s, planUpdatedAt: plan.updatedAt, hevySaving, icuSyncing, startNextPhase: forceRegenCheck.checked })
+    ? planUpdateReadiness({ summary: s, planUpdatedAt: plan.updatedAt, hevyImporting, icuSyncing, startNextPhase: forceRegenCheck.checked })
     : { ready: false, hint: "" };
   regenBtn.disabled = busy || !ready;
   regenBtn.classList.toggle("busy", busy);
@@ -239,6 +239,7 @@ function renderGenerationStatus() {
   const busyLabel = queuing ? "Starting…" : "Updating your plan…";
   regenBtn.innerHTML = busy ? `<span class="spinner"></span> ${busyLabel}` : regenLabel;
   regenHint.textContent = busy ? "" : hint;
+  lockDataInputs(inFlight);
   const statusEl = document.getElementById("regenStatus");
   // A live region: only touch it when the text changes, so it isn't
   // re-announced on every snapshot.
@@ -264,6 +265,23 @@ function renderGenerationStatus() {
   }
 }
 
+// New data can't land while an update runs: the update has already read its
+// inputs, so an import then would be measured against a plan that never saw
+// it. Only controls this disabled are re-enabled, so a sync button left
+// disabled by its own success stays that way.
+const dataInputs = [document.getElementById("hevyFile"), document.getElementById("icuSyncBtn")];
+function lockDataInputs(locked) {
+  for (const el of dataInputs) {
+    if (locked && !el.disabled) {
+      el.disabled = true;
+      el.dataset.lockedForUpdate = "true";
+    } else if (!locked && el.dataset.lockedForUpdate) {
+      el.disabled = false;
+      delete el.dataset.lockedForUpdate;
+    }
+  }
+}
+
 /* ---------- init ---------- */
 
 // The plan's last update is what new data is measured against, so it's
@@ -272,7 +290,10 @@ function renderGenerationStatus() {
 async function refreshPlan(s) {
   const key = [s?.activeProgramSource, s?.groupId, s?.currentProgramId, s?.programGenerationId, s?.programGenerationStatus].join("|");
   if (key === plan.key) return;
-  plan.key = key;
+  // Until it's loaded, the last plan's time would let the data this update
+  // just used count as new.
+  plan = { key, loaded: false, updatedAt: null };
+  renderGenerationStatus();
   let updatedAt = null;
   try {
     updatedAt = (await loadCurrentProgram(user.uid, s))?.updatedAt ?? null;
@@ -289,7 +310,13 @@ onSnapshot(doc(db, "users", user.uid, "state", "summary"), (snap) => {
   latestSummary = snap.data();
   renderGenerationStatus();
   refreshPlan(latestSummary);
-}, (err) => console.error("[checkin] plan update status listener failed", err));
+}, (err) => {
+  console.error("[checkin] plan update status listener failed", err);
+  // With no live status, don't hold the button back: the server still
+  // refuses a second update while one is running.
+  plan = { key: null, loaded: true, updatedAt: null };
+  renderGenerationStatus();
+});
 
 async function loadSummary() {
   const snap = await getDoc(doc(db, "users", user.uid, "state", "summary"));

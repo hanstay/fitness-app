@@ -17,17 +17,18 @@ function isNewSincePlan(ts, planUpdatedAt) {
 /**
  * summary: users/{uid}/state/summary data. planUpdatedAt: the current plan's
  * `updatedAt` Timestamp from loadCurrentProgram, or null if there's no plan.
- * hevySaving / icuSyncing: an import or sync this page started is in flight.
+ * hevyImporting / icuSyncing: an import or sync this page started is in
+ * flight; the update waits for it, so it runs on the newest data.
  * Returns { ready, hint }: hint says what's missing when it isn't ready.
  */
-export function planUpdateReadiness({ summary, planUpdatedAt, hevySaving, icuSyncing, startNextPhase }) {
-  if (hevySaving) return { ready: false, hint: "Saving your Hevy workouts…" };
+export function planUpdateReadiness({ summary, planUpdatedAt, hevyImporting, icuSyncing, startNextPhase }) {
+  if (hevyImporting) return { ready: false, hint: "Importing your Hevy workouts…" };
   const hevy = summary?.integrationsStatus?.hevy;
   const icu = summary?.integrationsStatus?.intervalsIcu;
+  if (icu?.connected && icuSyncing) return { ready: false, hint: "Syncing intervals.icu…" };
   const newHevy = isNewSincePlan(hevy?.parsedAt, planUpdatedAt);
   const newIcu = Boolean(icu?.connected) && isNewSincePlan(icu?.lastSyncedAt, planUpdatedAt);
   if (newHevy || newIcu || startNextPhase) return { ready: true, hint: "" };
-  if (icu?.connected && icuSyncing) return { ready: false, hint: "Syncing intervals.icu…" };
   return {
     ready: false,
     hint: icu?.connected
