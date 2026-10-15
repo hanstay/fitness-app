@@ -52,6 +52,9 @@ describe("personal program generation", () => {
     const activeSnap = await db.collection("users/u1/programs").where("status", "==", "active").get();
     expect(activeSnap.size).toBe(1);
     expect(result.programId).toBe(activeSnap.docs[0].id);
+    // When it read its data, before it was saved (the check-in measures new data from it).
+    const program = activeSnap.docs[0].data();
+    expect(program.inputsReadAt.toMillis()).toBeLessThanOrEqual(program.createdAt.toMillis());
 
     const summary = await db.doc("users/u1/state/summary").get();
     expect(summary.data()?.currentProgramId).toBe(activeSnap.docs[0].id);

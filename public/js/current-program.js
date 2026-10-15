@@ -93,6 +93,9 @@ export async function loadCurrentProgram(uid, summary) {
       // A weekly update rewrites only the member layer, so the shared
       // program's createdAt is when the cycle began, not when it last changed.
       updatedAt: member?.updatedAt ?? shared.createdAt ?? null,
+      // What this member's layer was written from (see plan-update-readiness.js).
+      profileSnapshot: member?.profileSnapshot ?? shared.profileSnapshots?.[uid] ?? null,
+      inputsReadAt: member?.inputsReadAt ?? null,
     };
   }
   if (summary?.currentProgramId) {

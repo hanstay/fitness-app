@@ -58,7 +58,7 @@ describe("saveHevySessions", () => {
     expect(afterReimport.lastNewDataAt.toMillis()).toBe(firstNewAt);
 
     expect(await call({ sessions, lifts })).toMatchObject({ newSessions: 1 });
-    expect((await hevyStatus()).lastNewDataAt.toMillis()).toBeGreaterThanOrEqual(firstNewAt);
+    expect((await hevyStatus()).lastNewDataAt.toMillis()).toBeGreaterThan(firstNewAt);
     expect((await hevyStatus()).newSessions).toBe(1);
   });
 

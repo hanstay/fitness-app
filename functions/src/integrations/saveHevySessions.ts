@@ -69,6 +69,12 @@ export const saveHevySessions = onCall(async (request) => {
     const newSessions = await countNewDocs(db, refs);
     for (let i = 0; i < sessions.length; i += SESSIONS_PER_BATCH) {
       const batch = db.batch();
+      // With the first new sessions, not the closing status write: if a later
+      // batch fails, a retry finds them stored and counts nothing new, so
+      // the stamp has to be in place already.
+      if (i === 0 && newSessions > 0) {
+        batch.update(db.doc(`users/${uid}/state/summary`), { "integrationsStatus.hevy.lastNewDataAt": FieldValue.serverTimestamp() });
+      }
       for (const [j, session] of sessions.slice(i, i + SESSIONS_PER_BATCH).entries()) {
         batch.set(refs[i + j], {
           ...session,
@@ -92,9 +98,6 @@ export const saveHevySessions = onCall(async (request) => {
       "integrationsStatus.hevy.liftsImported": lifts.length,
       "integrationsStatus.hevy.lastSessionDate": lastSessionDate,
       "integrationsStatus.hevy.lastError": null,
-      // When the athlete last brought in workouts not stored before; the
-      // check-in only offers a plan update for data newer than the plan.
-      ...(newSessions > 0 ? { "integrationsStatus.hevy.lastNewDataAt": FieldValue.serverTimestamp() } : {}),
     });
     await batch.commit();
 

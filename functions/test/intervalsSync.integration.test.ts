@@ -38,7 +38,9 @@ describe("syncIntervalsActivitiesForUser", () => {
 
     activities = [activity(1), activity(2), activity(3)];
     expect(await syncIntervalsActivitiesForUser(UID, "token")).toMatchObject({ newActivities: 1 });
-    expect((await icuStatus()).newActivities).toBe(1);
+    const afterNew = await icuStatus();
+    expect(afterNew.newActivities).toBe(1);
+    expect(afterNew.lastNewDataAt.toMillis()).toBeGreaterThan(firstNewAt);
   });
 
   it("an empty sync writes no lastNewDataAt", async () => {

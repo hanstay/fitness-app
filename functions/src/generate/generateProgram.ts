@@ -339,6 +339,9 @@ export async function runGenerateProgram(
     weekReadable: existingWeek != null,
   });
 
+  // Data stored after this wasn't read, so it's still new to the check-in
+  // even though the program commits later (see public/js/plan-update-readiness.js).
+  const inputsReadAt = Timestamp.now();
   const { wellness, currentTargets, freshnessBlock, activitySummary, trainingLogBlock, prescriptionBlock, exerciseVocabulary, hasHevyLog } =
     await gatherGroundingData(db, uid, activeProgram
       ? { ...activeProgram, createdAtDate: createdAtMs != null ? new Date(createdAtMs).toISOString().slice(0, 10) : null }
@@ -519,6 +522,7 @@ export async function runGenerateProgram(
       ...mergedProgram,
       ...(changeSummary ? { changeSummary } : {}),
       profileSnapshot: athlete,
+      inputsReadAt,
       // Where this program is in its periodization. A weekly update or rebuilt
       // week carries both forward unchanged (so the block's age isn't reset
       // every week); moving to a new phase or a redesign starts a new block today.

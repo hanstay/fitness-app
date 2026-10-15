@@ -5,7 +5,7 @@
 import { doc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
 import { db, functions } from "./firebase-init.js";
-import { analyzeHevyCsv } from "./generated/hevy-checkin.js";
+import { analyzeHevyCsv, structuralChanged } from "./generated/hevy-checkin.js";
 import { requireOnboarded } from "./auth-guard.js";
 import { connectIntervalsIcuViaOAuth } from "./intervals-oauth.js";
 import { bindMessages } from "./ui-messages.js";
@@ -168,7 +168,8 @@ document.getElementById("icuSyncBtn").addEventListener("click", (e) => {
   renderGenerationStatus();
   withButtonBusy(e.currentTarget, "Syncing…", async () => {
     const result = await httpsCallable(functions, "syncIntervalsActivities")();
-    setStatus("icuStatus", `Synced ${result.data.activitiesSynced ?? 0} activities, ${result.data.newActivities ?? 0} new.`);
+    const newCount = result.data.newActivities ?? 0;
+    setStatus("icuStatus", newCount > 0 ? `Synced ${newCount} new ${newCount === 1 ? "activity" : "activities"}.` : "Synced. No new activities.");
     summary = await loadSummary();
     renderIcuState(summary);
   }).catch((err) => {
@@ -200,7 +201,7 @@ let followingId = null; // the generation whose outcome this page reports
 let latestSummary = null;
 let hevyImporting = false; // this page's Hevy import is being read or saved
 let icuSyncing = false; // this page's intervals.icu sync is in flight
-let plan = { key: null, loaded: false, updatedAt: null }; // the current plan's last update
+let plan = { key: null, loaded: false, current: null }; // the current plan, once loaded
 let statusUnavailable = false; // the summary listener failed, so its state is unknown
 
 forceRegenCheck.addEventListener("change", () => renderGenerationStatus());
@@ -237,7 +238,14 @@ function renderGenerationStatus() {
   const inFlight = !statusUnavailable && s?.programGenerationStatus === "generating" && !isStale(s.programGenerationStartedAt);
   const busy = queuing || inFlight;
   const { ready, hint } = statusUnavailable ? { ready: true, hint: "" } : plan.loaded
-    ? planUpdateReadiness({ summary: s, planUpdatedAt: plan.updatedAt, hevyImporting, icuSyncing, startNextPhase: forceRegenCheck.checked })
+    ? planUpdateReadiness({
+      summary: s,
+      plan: plan.current,
+      profileChanged: plan.current != null && structuralChanged(session.profile?.athlete ?? {}, plan.current.profileSnapshot),
+      hevyImporting,
+      icuSyncing,
+      startNextPhase: forceRegenCheck.checked,
+    })
     : { ready: false, hint: "" };
   regenBtn.disabled = busy || !ready;
   regenBtn.classList.toggle("busy", busy);
@@ -290,25 +298,25 @@ function lockDataInputs(locked) {
 
 /* ---------- init ---------- */
 
-// The plan's last update is what new data is measured against, so it's
-// reloaded whenever the summary points at a different plan or a generation
-// starts or ends.
+// The current plan is what new data and profile changes are measured
+// against, so it's reloaded whenever the summary points at a different plan
+// or a generation starts or ends.
 async function refreshPlan(s) {
   const key = [s?.activeProgramSource, s?.groupId, s?.currentProgramId, s?.programGenerationId, s?.programGenerationStatus].join("|");
   if (key === plan.key) return;
-  // Until it's loaded, the last plan's time would let the data this update
-  // just used count as new.
-  plan = { key, loaded: false, updatedAt: null };
+  // Until it's loaded, the last plan would let the data this update just
+  // used count as new.
+  plan = { key, loaded: false, current: null };
   renderGenerationStatus();
-  let updatedAt = null;
+  let current = null;
   try {
-    updatedAt = (await loadCurrentProgram(user.uid, s))?.updatedAt ?? null;
+    current = await loadCurrentProgram(user.uid, s);
   } catch (err) {
-    // Without it, any imported data counts as new: better than a stuck button.
+    // Treated as no plan, so the button is usable: better than a stuck one.
     console.error("[checkin] couldn't load the current plan", err);
   }
   if (plan.key !== key) return; // a newer snapshot has already moved on
-  plan = { key, loaded: true, updatedAt };
+  plan = { key, loaded: true, current };
   renderGenerationStatus();
 }
 
