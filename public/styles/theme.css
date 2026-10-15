@@ -139,6 +139,10 @@ fieldset.field-group legend{padding:0 6px; font-size:.72rem; font-weight:700; co
 }
 .btn:hover{background:var(--accent-dark)}
 .btn:disabled{opacity:.5; cursor:not-allowed}
+/* A disabled button that's waiting on the user (nothing to act on yet) is
+   neutral grey; one that's busy on their request keeps its colour. */
+.btn.waiting:disabled{opacity:1; background:var(--bg-tint); color:var(--text-secondary); border:1px solid var(--border)}
+.btn.busy:disabled{opacity:1; background:var(--accent-dark); cursor:progress}
 .btn.secondary{background:var(--card); color:var(--text-primary); border:1px solid var(--border)}
 .btn.secondary:hover{background:var(--bg-tint)}
 .btn.google{background:var(--card); color:var(--text-primary); border:1px solid var(--border)}

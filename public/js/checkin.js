@@ -10,6 +10,8 @@ import { requireOnboarded } from "./auth-guard.js";
 import { connectIntervalsIcuViaOAuth } from "./intervals-oauth.js";
 import { bindMessages } from "./ui-messages.js";
 import { isStale } from "./plan-updates.js";
+import { loadCurrentProgram } from "./current-program.js";
+import { planUpdateReadiness } from "./plan-update-readiness.js";
 
 const session = await requireOnboarded();
 if (!session) throw new Error("redirecting"); // requireOnboarded already redirected
@@ -92,6 +94,8 @@ document.getElementById("hevyFile").addEventListener("change", async (e) => {
     renderImportSummary(results, sessions.length, progression);
 
     setStatus("hevyStatus", "Saving…");
+    hevySaving = true;
+    renderGenerationStatus();
     await httpsCallable(functions, "saveHevySessions")({ sessions, lifts });
     setStatus("hevyStatus", "Saved. Update your plan below when you're ready.");
   } catch (err) {
@@ -100,6 +104,8 @@ document.getElementById("hevyFile").addEventListener("change", async (e) => {
   } finally {
     fileInput.disabled = false;
     fileInput.value = "";
+    hevySaving = false;
+    renderGenerationStatus();
   }
 });
 
@@ -155,6 +161,8 @@ document.getElementById("icuConnectBtn").addEventListener("click", (e) => {
 document.getElementById("icuSyncBtn").addEventListener("click", (e) => {
   clearMessages();
   setStatus("icuStatus", "Syncing…");
+  icuSyncing = true;
+  renderGenerationStatus();
   withButtonBusy(e.currentTarget, "Syncing…", async () => {
     const result = await httpsCallable(functions, "syncIntervalsActivities")();
     setStatus("icuStatus", `Synced ${result.data.activitiesSynced ?? 0} activities.`);
@@ -163,6 +171,9 @@ document.getElementById("icuSyncBtn").addEventListener("click", (e) => {
   }).catch((err) => {
     setStatus("icuStatus", "");
     showError(`Sync failed: ${err.message || err}`);
+  }).finally(() => {
+    icuSyncing = false;
+    renderGenerationStatus();
   });
 });
 
@@ -170,16 +181,25 @@ document.getElementById("icuSyncBtn").addEventListener("click", (e) => {
 
 // The update runs in the background (see queueProgramGeneration.ts), so a
 // click only queues it. The summary listener owns the button and status line:
-// disabled while a generation is in flight, wherever it was started, then how
-// it ended; the new plan itself is on the program page.
+// busy while a generation is in flight, wherever it was started, then how it
+// ended; the new plan itself is on the program page. Between updates the
+// button waits for new data (see plan-update-readiness.js), styled apart from
+// busy so "nothing new yet" doesn't read as "still working".
 const regenBtn = document.getElementById("regenBtn");
 const regenLabel = regenBtn.innerHTML;
+const regenHint = document.getElementById("regenHint");
+const forceRegenCheck = document.getElementById("forceRegenCheck");
 const UPDATING_MSG = "Updating your plan. You can leave this page; it'll be ready on your dashboard in a few minutes.";
 const STALLED_MSG = "This update seems to have stalled. Please try again.";
 
 let queuing = false;    // the queue call itself is in flight
 let followingId = null; // the generation whose outcome this page reports
 let latestSummary = null;
+let hevySaving = false; // this page's Hevy import is being saved
+let icuSyncing = false; // this page's intervals.icu sync is in flight
+let plan = { key: null, loaded: false, updatedAt: null }; // the current plan's last update
+
+forceRegenCheck.addEventListener("change", () => renderGenerationStatus());
 
 regenBtn.addEventListener("click", async () => {
   if (regenBtn.disabled) return;
@@ -187,7 +207,7 @@ regenBtn.addEventListener("click", async () => {
   queuing = true;
   renderGenerationStatus();
   try {
-    const force = document.getElementById("forceRegenCheck")?.checked === true;
+    const force = forceRegenCheck.checked;
     const result = await httpsCallable(functions, "queueProgramGeneration")({ force });
     followingId = result.data.programId;
   } catch (err) {
@@ -209,8 +229,16 @@ regenBtn.addEventListener("click", async () => {
 function renderGenerationStatus() {
   const s = latestSummary;
   const inFlight = s?.programGenerationStatus === "generating" && !isStale(s.programGenerationStartedAt);
-  regenBtn.disabled = queuing || inFlight;
-  regenBtn.innerHTML = queuing ? `<span class="spinner"></span> Starting…` : regenLabel;
+  const busy = queuing || inFlight;
+  const { ready, hint } = plan.loaded
+    ? planUpdateReadiness({ summary: s, planUpdatedAt: plan.updatedAt, hevySaving, icuSyncing, startNextPhase: forceRegenCheck.checked })
+    : { ready: false, hint: "" };
+  regenBtn.disabled = busy || !ready;
+  regenBtn.classList.toggle("busy", busy);
+  regenBtn.classList.toggle("waiting", !busy && !ready);
+  const busyLabel = queuing ? "Starting…" : "Updating your plan…";
+  regenBtn.innerHTML = busy ? `<span class="spinner"></span> ${busyLabel}` : regenLabel;
+  regenHint.textContent = busy ? "" : hint;
   const statusEl = document.getElementById("regenStatus");
   // A live region: only touch it when the text changes, so it isn't
   // re-announced on every snapshot.
@@ -238,9 +266,29 @@ function renderGenerationStatus() {
 
 /* ---------- init ---------- */
 
+// The plan's last update is what new data is measured against, so it's
+// reloaded whenever the summary points at a different plan or a generation
+// starts or ends.
+async function refreshPlan(s) {
+  const key = [s?.activeProgramSource, s?.groupId, s?.currentProgramId, s?.programGenerationId, s?.programGenerationStatus].join("|");
+  if (key === plan.key) return;
+  plan.key = key;
+  let updatedAt = null;
+  try {
+    updatedAt = (await loadCurrentProgram(user.uid, s))?.updatedAt ?? null;
+  } catch (err) {
+    // Without it, any imported data counts as new: better than a stuck button.
+    console.error("[checkin] couldn't load the current plan", err);
+  }
+  if (plan.key !== key) return; // a newer snapshot has already moved on
+  plan = { key, loaded: true, updatedAt };
+  renderGenerationStatus();
+}
+
 onSnapshot(doc(db, "users", user.uid, "state", "summary"), (snap) => {
   latestSummary = snap.data();
   renderGenerationStatus();
+  refreshPlan(latestSummary);
 }, (err) => console.error("[checkin] plan update status listener failed", err));
 
 async function loadSummary() {
@@ -260,6 +308,8 @@ try {
 // Fire-and-forget: runs in parallel with the user's own Hevy CSV export/
 // upload instead of adding latency later, at "Update my plan" time.
 if (summary?.integrationsStatus?.intervalsIcu?.connected) {
+  icuSyncing = true;
+  renderGenerationStatus();
   httpsCallable(functions, "syncIntervalsActivities")()
     .then(async () => {
       summary = await loadSummary();
@@ -274,5 +324,9 @@ if (summary?.integrationsStatus?.intervalsIcu?.connected) {
         // Re-render attempt failed too — the original console.error above
         // already logged the underlying sync failure; nothing more to do.
       }
+    })
+    .finally(() => {
+      icuSyncing = false;
+      renderGenerationStatus();
     });
 }
