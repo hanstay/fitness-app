@@ -33,14 +33,19 @@
 
   /* "Something not right?" notes and their follow-ups. */
   .fb-card{border:1px solid var(--border); border-radius:10px; padding:12px 14px; background:var(--card); margin:0 0 10px}
-  .fb-card .fb-title{font-weight:600; font-size:.92rem}
-  .fb-card .fb-meta{font-size:.78rem; color:var(--text-secondary); margin-top:2px}
+  .fb-title{font-weight:600; font-size:.92rem}
+  .fb-meta{font-size:.78rem; color:var(--text-secondary); margin-top:2px}
   .fb-card .fb-text{font-size:.86rem; margin:6px 0 0}
   .fb-card .btn-row{margin:10px 0 0}
   .fb-card .btn{padding:9px 14px; font-size:.86rem}
   .fb-row{display:flex; align-items:flex-start; gap:10px}
   .fb-row > div{flex:1; min-width:0}
   .link-btn{background:none; border:0; padding:6px 0; color:var(--accent-dark); font:inherit; font-size:.84rem; font-weight:600; cursor:pointer}
+  .fb-followups{border:1px solid var(--border); border-radius:10px; padding:0 14px; margin:0 0 14px}
+  .fb-compact{flex-direction:column; gap:6px; padding:10px 0; border-top:1px solid var(--border)}
+  .fb-compact:first-child{border-top:0; padding-top:0}
+  .fb-answers{display:flex; align-items:center; gap:6px; flex-wrap:wrap}
+  .fb-answers .btn{padding:7px 12px; font-size:.82rem}
   .fb-list-head{font-size:.8rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--text-secondary); margin:18px 0 8px}
 </style>
 </head>

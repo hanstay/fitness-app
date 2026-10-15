@@ -6,6 +6,7 @@
 import { collection, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
 import { db, functions } from "./firebase-init.js";
+import { showToast } from "./ui-messages.js";
 import { loadCurrentProgram } from "./current-program.js";
 import {
   FEEDBACK_TAGS, tagLabel, isQuestionOnly, PAIN_SAFETY, noteTitle, followUpChoices, followUpDone, errorText,
@@ -153,29 +154,43 @@ function renderPending(notes) {
 const answered = (n) => n.status === "resolved" ||
   (n.lastFollowUp && (n.followedUpAt?.toMillis?.() ?? 0) > (n.handledAt?.toMillis?.() ?? 0));
 
+let followUpNotes = new Map();
+
 function renderFollowUps(notes) {
   const el = $("followUps");
   if (!notes.length) { el.innerHTML = ""; return; }
-  el.innerHTML = `<p class="fb-list-head" style="margin-top:4px">Still bothering you?</p>` + notes.map((n) => {
-    const pain = (n.tags || []).includes("pain");
-    const lastResponse = n.response?.text ? `<p class="fb-text muted">Last update: ${esc(n.response.text)}</p>` : "";
-    const body = answered(n)
-      ? `<p class="fb-text">${esc(followUpDone(n, n.status === "resolved" ? "better" : n.lastFollowUp))}</p>`
-      : `<div class="btn-row">${followUpChoices(n).map(([outcome, label]) =>
-          `<button class="btn secondary" type="button" data-note="${esc(n.id)}" data-outcome="${outcome}">${esc(label)}</button>`).join("")}</div>
-         ${pain ? `<button class="link-btn" type="button" data-note="${esc(n.id)}" data-outcome="worse">Worse than before?</button>` : ""}`;
-    return `<div class="fb-card">
-      <div class="fb-title">${esc(noteTitle(n))}</div>
-      <div class="fb-meta">${esc((n.tags || []).map(tagLabel).join(", "))}</div>
-      ${lastResponse}
-      ${body}
-    </div>`;
-  }).join("");
+  // One collapsed line, so a few long-running notes don't crowd the page;
+  // answered ones drop out of the list until the next update asks again.
+  const toCheck = notes.filter((n) => !answered(n));
+  followUpNotes = new Map(notes.map((n) => [n.id, n]));
+  const wasOpen = el.querySelector("details")?.open ?? false;
+  const things = notes.length === 1 ? "1 thing" : `${notes.length} things`;
+  const summary = toCheck.length
+    ? `${toCheck.length === 1 ? "1 to check" : `${toCheck.length} to check`}`
+    : "all checked for this week";
+  el.innerHTML = `<details class="disclosure fb-followups"${wasOpen ? " open" : ""}>
+    <summary><span><span class="disclosure-title">Your plan is working around ${things}</span>
+      <span class="disclosure-hint">${esc(summary)}</span></span></summary>
+    <div class="disclosure-body">${toCheck.map((n) => {
+      const pain = (n.tags || []).includes("pain");
+      return `<div class="fb-row fb-compact">
+        <div>
+          <div class="fb-title">${esc(noteTitle(n))}</div>
+          <div class="fb-meta">${esc((n.tags || []).map(tagLabel).join(", "))}</div>
+        </div>
+        <div class="fb-answers">${followUpChoices(n).map(([outcome, label]) =>
+          `<button class="btn secondary" type="button" data-note="${esc(n.id)}" data-outcome="${outcome}">${esc(label)}</button>`).join("")}
+          ${pain ? `<button class="link-btn" type="button" data-note="${esc(n.id)}" data-outcome="worse">Worse?</button>` : ""}</div>
+      </div>`;
+    }).join("") || `<p class="muted small" style="margin:0">Thanks. Your next update will use your answers.</p>`}</div>
+  </details>`;
   el.querySelectorAll("[data-outcome]").forEach((btn) => btn.addEventListener("click", async () => {
-    const card = btn.closest(".fb-card");
+    const card = btn.closest(".fb-row");
     card.querySelectorAll("button").forEach((b) => { b.disabled = true; });
     try {
       await httpsCallable(functions, "followUpFeedbackNote")({ noteId: btn.dataset.note, outcome: btn.dataset.outcome });
+      const note = followUpNotes.get(btn.dataset.note);
+      if (note) showToast(followUpDone(note, btn.dataset.outcome), { durationMs: 6000 });
     } catch (err) {
       card.querySelectorAll("button").forEach((b) => { b.disabled = false; });
       setNoteStatus(errorText(err));
