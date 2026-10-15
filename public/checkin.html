@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Hybrid Plan">
 <meta name="theme-color" content="#ffffff">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -51,13 +51,12 @@
   <section id="hevySection" class="collapsible">
     <h2 class="sec-head"><span class="lead-in"><span class="dot"></span>Import Hevy training</span><span class="caret">▾</span></h2>
     <div class="sec-body">
-      <p class="muted small">Export your recent workouts from Hevy (Settings → Export Data) and upload the CSV here.</p>
+      <p class="muted small">Export your recent workouts from Hevy (Settings → Export Data) and choose the CSV here. It imports as soon as you pick it.</p>
       <div class="field">
         <label for="hevyFile">Hevy CSV export</label>
         <input class="input" type="file" id="hevyFile" accept=".csv">
       </div>
-      <button class="btn" id="hevyUploadBtn" type="button">Upload &amp; analyze</button>
-      <p class="status-line" id="hevyStatus"></p>
+      <p class="status-line" id="hevyStatus" role="status"></p>
       <div id="hevyResults" style="display:none; margin-top:16px"></div>
     </div>
   </section>

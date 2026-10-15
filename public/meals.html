@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Hybrid Plan">
 <meta name="theme-color" content="#ffffff">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -57,6 +57,7 @@
 
   const main = document.getElementById("mainContent");
   const tocLinks = document.getElementById("tocLinks");
+  const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 
   try {
   const summarySnap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
@@ -84,7 +85,7 @@
       sections.push({ id: sectionId, label: day.label });
       const rows = day.meals.map((m) => `
         <tr>
-          <td><b>${m.name}</b><br><span class="muted small">${m.items}</span>${m.notes ? `<br><span class="note">${m.notes}</span>` : ""}</td>
+          <td><b>${esc(m.name)}</b><br><span class="muted small">${esc(m.items)}</span>${m.notes ? `<br><span class="note">${esc(m.notes)}</span>` : ""}</td>
           <td class="n">${m.kcal}</td>
           <td class="n">${m.protein_g}g</td>
           <td class="n">${m.carbs_g}g</td>
@@ -92,7 +93,7 @@
         </tr>`).join("");
       main.insertAdjacentHTML("beforeend", `
         <section id="${sectionId}">
-          <h2><span class="dot"></span>${day.label}</h2>
+          <h2><span class="dot"></span>${esc(day.label)}</h2>
           <div class="tablescroll"><table>
             <thead><tr><th>Meal</th><th class="n">Kcal</th><th class="n">P</th><th class="n">C</th><th class="n">F</th></tr></thead>
             <tbody>${rows}
@@ -106,18 +107,18 @@
       sections.push({ id: "grocery", label: "Grocery list" });
       main.insertAdjacentHTML("beforeend", `
         <section id="grocery"><h2><span class="dot"></span>Grocery list</h2>
-          <ul>${plan.groceryList.map((g) => `<li>${g}</li>`).join("")}</ul>
+          <ul>${plan.groceryList.map((g) => `<li>${esc(g)}</li>`).join("")}</ul>
         </section>`);
     }
 
     if (plan.notes) {
       sections.push({ id: "notes", label: "Notes" });
       main.insertAdjacentHTML("beforeend", `
-        <section id="notes"><h2><span class="dot"></span>Notes</h2><div class="callout">${plan.notes}</div></section>`);
+        <section id="notes"><h2><span class="dot"></span>Notes</h2><div class="callout">${esc(plan.notes)}</div></section>`);
     }
 
     document.getElementById("loading").remove();
-    tocLinks.insertAdjacentHTML("beforeend", sections.map((s) => `<a href="#${s.id}">${s.label}</a>`).join(""));
+    tocLinks.insertAdjacentHTML("beforeend", sections.map((s) => `<a href="#${s.id}">${esc(s.label)}</a>`).join(""));
 
     const toc = document.getElementById("toc"), tgl = document.getElementById("navtoggle");
     tgl.addEventListener("click", () => toc.classList.toggle("open"));

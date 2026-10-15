@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Hybrid Plan">
 <meta name="theme-color" content="#ffffff">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -39,7 +39,8 @@
   .day-note .day-h{margin:0 0 4px; font-family:var(--font-head); font-size:.95rem; font-weight:600}
 </style>
 </head>
-<body>
+<body data-auth="pending">
+<div id="authVeil"><div class="veil-spinner"></div></div>
 
 <header class="hero">
   <div class="wrap">
@@ -74,22 +75,28 @@
 <script type="module">
   import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
   import { db } from "./js/firebase-init.js";
-  import { requireOnboarded } from "./js/auth-guard.js";
+  import { requireOnboarded, revealPage } from "./js/auth-guard.js";
   import { loadCurrentProgram, dayKey, sessionsOn } from "./js/current-program.js";
-
-  const session = await requireOnboarded();
-  if (!session) throw new Error("redirecting");
-  const { user } = session;
-
-  const summarySnap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
-  const summary = summarySnap.data();
-
-  // Same plan as program.html: a group member's is the group's active
-  // program with their own member layer on top.
-  const p = await loadCurrentProgram(user.uid, summary);
 
   const main = document.getElementById("mainContent");
   const tocLinks = document.getElementById("tocLinks");
+
+  // Also used when the auth/profile check itself fails, which leaves the
+  // veil up, so lift it first.
+  const showLoadError = (err) => {
+    console.error("[advice] failed to load", err);
+    revealPage();
+    document.getElementById("pageSub").textContent = "Couldn't load your advice.";
+    main.innerHTML = `
+      <section><div class="state-box">
+        <p>Something went wrong loading your advice.</p>
+        <button class="btn secondary" type="button" onclick="location.reload()">Retry</button>
+      </div></section>`;
+  };
+
+  const session = await requireOnboarded().catch((err) => { showLoadError(err); return null; });
+  if (!session) throw new Error("redirecting");
+  const { user } = session;
 
   const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
   // Which roadmap phase the plan is programming: the phase stored on the
@@ -104,6 +111,14 @@
     if (idx !== -1) return idx;
     return today > roadmap[roadmap.length - 1].endDate ? roadmap.length - 1 : 0;
   };
+
+  try {
+  const summarySnap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
+  const summary = summarySnap.data();
+
+  // Same plan as program.html: a group member's is the group's active
+  // program with their own member layer on top.
+  const p = await loadCurrentProgram(user.uid, summary);
 
   if (!p) {
     main.innerHTML = `<section><p class="muted">No program generated yet. Go to your <a href="dashboard.html">dashboard</a> and generate one.</p></section>`;
@@ -196,7 +211,7 @@
     if (notes.length) group("notes", "Notes & tips", notes.join(""), { open: true });
 
     document.getElementById("loading").remove();
-    tocLinks.insertAdjacentHTML("beforeend", groups.map((g) => `<a href="#${g.id}">${g.label}</a>`).join(""));
+    tocLinks.insertAdjacentHTML("beforeend", groups.map((g) => `<a href="#${g.id}">${esc(g.label)}</a>`).join(""));
 
     // Top-level groups toggle independently.
     main.querySelectorAll("section.grp > .grp-head").forEach((h) => h.addEventListener("click", () => h.parentElement.classList.toggle("open")));
@@ -238,6 +253,9 @@
       });
     }, { rootMargin: "-20% 0px -70% 0px" });
     document.querySelectorAll("main section").forEach((s) => obs.observe(s));
+  }
+  } catch (err) {
+    showLoadError(err);
   }
 </script>
 </body>
