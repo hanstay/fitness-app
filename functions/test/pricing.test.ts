@@ -18,6 +18,10 @@ describe("estimateCostUsd", () => {
     expect(estimateCostUsd("claude-sonnet-5-5", 1000, 2000)).toBeCloseTo((1000 * 2 + 2000 * 10) / 1_000_000, 10);
   });
 
+  it("prices the fast model used for swap suggestions", () => {
+    expect(estimateCostUsd("claude-haiku-5-5", 1000, 2000)).toBeCloseTo((1000 * 0.1 + 2000 * 0.5) / 1_000_000, 10);
+  });
+
   it("returns null for an unrecognized model", () => {
     expect(estimateCostUsd("claude-opus-9000", 1000, 1000)).toBeNull();
   });

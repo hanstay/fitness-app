@@ -263,3 +263,106 @@ describe("older plans' day names", () => {
     expect(result.changeSummary?.[0]).toBe(REBUILD_CHANGE_NOTE);
   });
 });
+
+describe("feedback notes and exercise swaps in a weekly update", () => {
+  const ex = (name: string) => ({ name, sets: 3, reps: "8", rir: "2", rest_seconds: 90, load_note: null, substitution_note: null });
+  const swap = (scope: "this_week" | "rest_of_block", noteId: string | null = null) => ({
+    id: "s1", day: "Tuesday", sessionIndex: 1, exerciseIndex: 0, from: ex("Old Squat"), to: ex("Box Step-Up (Dumbbell)"),
+    reason: noteId ? "hurts" : "dislike", scope, noteId, createdAt: "2026-10-14T10:00:00.000Z",
+  });
+
+  async function seedSwappedProgram(uid: string, swaps: unknown[]) {
+    await db.collection(`users/${uid}/programs`).add({
+      status: "active",
+      createdAt: FieldValue.serverTimestamp(),
+      title: "Existing plan", goalSummary: "x", split: "Upper/Lower", daysPerWeek: 4,
+      events: [], roadmap: [], progressionRules: "x", deloadGuidance: "x", warmupNotes: "x",
+      coachNotes: null, sportNotes: null, nutritionNote: null, running: null,
+      currentState: null,
+      weeklyStructure: [{ day: "Monday", focus: "Upper", note: null }, { day: "Tuesday", focus: "Lower", note: null }],
+      sessions: [
+        { day: "Monday", label: "Upper (old)", focus_note: null, exercises: [ex("Old Bench")] },
+        { day: "Tuesday", label: "Lower (old)", focus_note: null, exercises: [ex("Box Step-Up (Dumbbell)")] },
+      ],
+      swaps,
+      profileSnapshot: baseAthlete(),
+    });
+  }
+
+  const addNote = (uid: string, id: string, fields: Record<string, unknown>, ageMs: number) =>
+    db.doc(`users/${uid}/feedbackNotes/${id}`).set({
+      tags: ["pain"], text: "", exercise: null, day: null, duration: "week", worse: false, source: "checkin",
+      createdAt: Timestamp.fromMillis(Date.now() - ageMs), ...fields,
+    });
+
+  it("gives the update every active note, answers them, moves them on, and puts back a finished swap", async () => {
+    await seedUser("f1");
+    await seedSwappedProgram("f1", [swap("this_week")]);
+    await addNote("f1", "pend", { tags: ["question"], text: "Why only 3 sets?", status: "pending" }, 1000);
+    await addNote("f1", "open", { exercise: "Old Bench", text: "Shoulder twinge", duration: "ongoing", status: "open", worse: true }, 3000);
+    await addNote("f1", "res", { exercise: "Lunge", duration: "ongoing", text: "Knee", status: "resolved", announced: false }, 2000);
+    await addNote("f1", "old", { text: "Handled long ago", status: "done" }, 4000);
+    mockExtractStructuredJson.mockImplementation(async (params: { toolName: string }) => ({
+      ...(await defaultFixtureResponse(params) as object),
+      feedbackResponses: [
+        { id: "n1", status: "changed", response: "Swapped bench for landmine press." },
+        { id: "n3", status: "answered", response: "Three sets fit your 60 minutes." },
+      ],
+    }));
+
+    const result = await runGenerateProgram("f1");
+
+    const call = mockExtractStructuredJson.mock.calls[0][0] as { system: string; userText: string; inputSchema: { required: string[] } };
+    expect(call.system).toContain("ATHLETE FEEDBACK");
+    expect(call.inputSchema.required).toContain("feedbackResponses");
+    // Oldest first: the open note, then the resolved one, then the new question.
+    expect(call.userText).toContain('[n1] ONGOING (reported worse) · Pain / discomfort · about "Old Bench"');
+    expect(call.userText).toContain("[n2] RESOLVED");
+    expect(call.userText).toContain('[n3] NEW · Question: "Why only 3 sets?"');
+    expect(call.userText).not.toContain("Handled long ago");
+    // The this-week swap was put back before the update saw the week.
+    const weekLine = call.userText.split("\n").find((l) => l.startsWith("sessions: "));
+    expect(weekLine).toContain("Old Squat");
+    expect(weekLine).not.toContain("Box Step-Up");
+
+    const program = (await db.doc(`users/f1/programs/${result.programId}`).get()).data()!;
+    expect(program.swaps).toEqual([]);
+    expect(program.sessions.find((s: { day: string }) => s.day === "Tuesday").exercises[0].name).toBe("Old Squat");
+    expect(program.feedbackResponses.map((r: { noteId: string; status: string }) => [r.noteId, r.status]))
+      .toEqual([["open", "changed"], ["res", "no_change"], ["pend", "answered"]]);
+
+    const note = async (id: string) => (await db.doc(`users/f1/feedbackNotes/${id}`).get()).data()!;
+    expect(await note("open")).toMatchObject({ status: "open", worse: false, handledProgramId: result.programId });
+    expect(await note("res")).toMatchObject({ status: "resolved", announced: true });
+    expect(await note("pend")).toMatchObject({ status: "done", response: { status: "answered", text: "Three sets fit your 60 minutes." } });
+    expect((await note("old")).handledProgramId).toBeUndefined();
+  });
+
+  it("keeps a rest-of-block swap, and leaves the prompt alone when there are no notes", async () => {
+    await seedUser("f2");
+    await seedSwappedProgram("f2", [swap("rest_of_block")]);
+
+    const result = await runGenerateProgram("f2");
+
+    const call = mockExtractStructuredJson.mock.calls[0][0] as { system: string; userText: string; inputSchema: { properties: object } };
+    expect(call.system).not.toContain("ATHLETE FEEDBACK");
+    expect(call.inputSchema.properties).not.toHaveProperty("feedbackResponses");
+    expect(call.userText).toContain("- Tuesday: Old Squat → Box Step-Up (Dumbbell) (doesn't like it)");
+    const program = (await db.doc(`users/f2/programs/${result.programId}`).get()).data()!;
+    expect(program.swaps).toHaveLength(1);
+    expect(program.sessions.find((s: { day: string }) => s.day === "Tuesday").exercises[0].name).toBe("Box Step-Up (Dumbbell)");
+    expect(program.feedbackResponses).toBeUndefined();
+  });
+
+  it("keeps a this-week swap made for pain while that pain note is still open", async () => {
+    await seedUser("f3");
+    await seedSwappedProgram("f3", [swap("this_week", "p1")]);
+    await addNote("f3", "p1", { exercise: "Old Squat", day: "Tuesday", duration: "ongoing", status: "open" }, 1000);
+
+    const result = await runGenerateProgram("f3");
+
+    const program = (await db.doc(`users/f3/programs/${result.programId}`).get()).data()!;
+    expect(program.swaps).toHaveLength(1);
+    expect(program.feedbackResponses).toHaveLength(1);
+  });
+});

@@ -15,6 +15,17 @@ import { mergeUpdatedWeek, normalizeWeek } from "../lib/programMerge";
 import { gatherGroundingData } from "./groundingData";
 import { runGenerateGroupProgram } from "./groupProgram";
 import { commitProgramGeneration } from "./settleGeneration";
+import {
+  FEEDBACK_INSTRUCTIONS, feedbackResponsesJsonSchema, feedbackResponsesSchema, formatFeedbackBlock, settleNotes,
+  FeedbackResponses,
+} from "../lib/planFeedback";
+import { SwapRecord, formatSwapsBlock, settleSwapsForUpdate, swapsStillInWeek } from "../lib/exerciseSwap";
+import { loadActiveNotes, settleNotesInTransaction } from "../feedback/notesForUpdate";
+
+// The week-writing calls' output, plus the answers to any feedback notes
+// (asked for only when there are notes; see withFeedback below).
+const scheduleWithFeedbackSchema = programScheduleSchema.extend({ feedbackResponses: feedbackResponsesSchema.optional() });
+const updateWithFeedbackSchema = programUpdateSchema.extend({ feedbackResponses: feedbackResponsesSchema.optional() });
 
 // Shared framing every path needs: goal-driven training style and how to
 // ground the program in the athlete's actual data.
@@ -416,8 +427,38 @@ export async function runGenerateProgram(
     ...(continuationText ? [``, continuationText] : []),
   ].join("\n");
 
+  // What the athlete told us since (check-in notes, and swaps made on the
+  // Program page). Both go to the call that writes the week. A weekly update
+  // first puts back the swaps that have run their course (see
+  // settleSwapsForUpdate); a rebuilt week is asked to keep the rest; a new
+  // phase or a redesign starts a fresh week, so its swaps end there.
+  const notes = await loadActiveNotes(db, uid);
+  const workingAround = new Set(notes.filter((n) => n.status !== "resolved").map((n) => n.id));
+  const resolvedNotes = new Set(notes.filter((n) => n.status === "resolved").map((n) => n.id));
+  const storedSwaps: SwapRecord[] = Array.isArray(activeProgram?.swaps) ? activeProgram.swaps : [];
+  const settledSwaps = existingWeek && (decision.mode === "incremental" || decision.mode === "rebuild")
+    ? settleSwapsForUpdate(existingWeek.sessions, storedSwaps, workingAround)
+    : { sessions: existingWeek?.sessions ?? [], kept: [] as SwapRecord[] };
+  // A swap made for pain that's now better isn't one to insist on.
+  const feedbackText = [
+    formatFeedbackBlock(notes),
+    formatSwapsBlock(settledSwaps.kept.filter((s) => !(s.noteId && resolvedNotes.has(s.noteId)))),
+  ].filter(Boolean).join("\n\n");
+  // With notes, the call that writes the week also answers each one.
+  const withFeedback = (system: string, jsonSchema: Record<string, unknown>) => notes.length
+    ? {
+        system: `${system}\n\n${FEEDBACK_INSTRUCTIONS}`,
+        inputSchema: {
+          ...jsonSchema,
+          properties: { ...(jsonSchema.properties as object), feedbackResponses: feedbackResponsesJsonSchema },
+          required: [...(jsonSchema.required as string[]), "feedbackResponses"],
+        },
+      }
+    : { system, inputSchema: jsonSchema };
+
   let mergedProgram: ProgramOutput;
   let changeSummary: string[] | undefined;
+  let feedbackResponses: FeedbackResponses | undefined;
 
   if (decision.mode !== "incremental") {
     const [overview, schedule] = await Promise.all([
@@ -431,17 +472,18 @@ export async function runGenerateProgram(
         maxTokens: 3000,
       }),
       extractStructuredJson({
-        system: SCHEDULE_SYSTEM_PROMPT,
-        userText: `Athlete profile:\n${profileText}\n\nGenerate the concrete current-week half of their program.`,
+        ...withFeedback(SCHEDULE_SYSTEM_PROMPT, programScheduleJsonSchema),
+        userText: `Athlete profile:\n${profileText}${feedbackText ? `\n\n${feedbackText}` : ""}\n\nGenerate the concrete current-week half of their program.`,
         toolName: "record_program_schedule",
         toolDescription: "Record the concrete current-week half of the generated training program.",
-        inputSchema: programScheduleJsonSchema,
-        validator: programScheduleSchema,
+        validator: scheduleWithFeedbackSchema,
         maxTokens: 7000,
       }),
     ]);
 
-    const candidate = { ...overview, ...schedule };
+    const { feedbackResponses: answered, ...week } = schedule;
+    feedbackResponses = answered;
+    const candidate = { ...overview, ...week };
     if (decision.mode === "advance") {
       // Moving to the next phase keeps the athlete's periodization: the
       // roadmap is carried over (only re-dated if they moved on early), not
@@ -464,24 +506,25 @@ export async function runGenerateProgram(
     mergedProgram = parsed.data;
   } else {
     const update = await extractStructuredJson({
-      system: INCREMENTAL_SYSTEM_PROMPT,
+      ...withFeedback(INCREMENTAL_SYSTEM_PROMPT, programUpdateJsonSchema),
       userText: [
         `Athlete profile:\n${profileText}`,
         ``,
         `Existing current week (adjust this, don't replace the surrounding plan):`,
         `weeklyStructure: ${JSON.stringify(existingWeek!.weeklyStructure)}`,
-        `sessions: ${JSON.stringify(existingWeek!.sessions)}`,
+        `sessions: ${JSON.stringify(settledSwaps.sessions)}`,
+        ...(feedbackText ? [``, feedbackText] : []),
         ``,
         `Generate the adjusted current week + changelog.`,
       ].join("\n"),
       toolName: "record_program_update",
       toolDescription: "Record the adjusted current week of the athlete's program.",
-      inputSchema: programUpdateJsonSchema,
-      validator: programUpdateSchema,
+      validator: updateWithFeedbackSchema,
       maxTokens: 7000,
     });
 
     changeSummary = update.changeSummary;
+    feedbackResponses = update.feedbackResponses;
     const candidate = {
       title: activeProgram!.title,
       goalSummary: activeProgram!.goalSummary,
@@ -495,7 +538,7 @@ export async function runGenerateProgram(
       sportNotes: activeProgram!.sportNotes,
       currentState: update.currentState,
       weeklyStructure: update.weeklyStructure,
-      sessions: mergeUpdatedWeek(existingWeek!.sessions, update),
+      sessions: mergeUpdatedWeek(settledSwaps.sessions, update),
       coachNotes: update.coachNotes,
       nutritionNote: update.nutritionNote,
       running: update.running,
@@ -507,10 +550,14 @@ export async function runGenerateProgram(
     mergedProgram = parsed.data;
   }
 
+  const swaps = swapsStillInWeek(mergedProgram.sessions, settledSwaps.kept);
+  const { settlements, stored: answeredFeedback } = settleNotes(notes, feedbackResponses);
+
   const newRef = db.collection(`users/${uid}/programs`).doc();
   await commitProgramGeneration(uid, opts?.placeholder, async (tx) => {
     // Re-read in the transaction: an overlapping run may have committed since.
     const activeSnap = await tx.get(db.collection(`users/${uid}/programs`).where("status", "==", "active"));
+    await settleNotesInTransaction(db, tx, uid, notes, settlements, newRef.id);
     activeSnap.forEach((d) => tx.update(d.ref, { status: "archived" }));
     tx.set(newRef, {
       createdAt: FieldValue.serverTimestamp(),
@@ -518,6 +565,8 @@ export async function runGenerateProgram(
       model: MODEL,
       ...mergedProgram,
       ...(changeSummary ? { changeSummary } : {}),
+      ...(answeredFeedback.length ? { feedbackResponses: answeredFeedback } : {}),
+      swaps,
       profileSnapshot: athlete,
       // Where this program is in its periodization. A weekly update or rebuilt
       // week carries both forward unchanged (so the block's age isn't reset
