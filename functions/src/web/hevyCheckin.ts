@@ -7,7 +7,7 @@ import { parseHevyCsvToCurrentLifts } from "../lib/hevyParser";
 import { buildProgressionSummary } from "../lib/hevyCheckinSummary";
 
 // The check-in's "Update my plan" counts a schedule or goal change as new
-// information, decided exactly as generation decides it.
+// information, decided as a personal plan's generation decides it.
 export { structuralChanged } from "../lib/programDecisions";
 
 /**

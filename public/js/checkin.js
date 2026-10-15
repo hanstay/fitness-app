@@ -201,7 +201,7 @@ let followingId = null; // the generation whose outcome this page reports
 let latestSummary = null;
 let hevyImporting = false; // this page's Hevy import is being read or saved
 let icuSyncing = false; // this page's intervals.icu sync is in flight
-let plan = { key: null, loaded: false, current: null }; // the current plan, once loaded
+let plan = { key: null, loaded: false, current: null, athlete: null }; // the current plan and profile, once loaded
 let statusUnavailable = false; // the summary listener failed, so its state is unknown
 
 forceRegenCheck.addEventListener("change", () => renderGenerationStatus());
@@ -241,7 +241,7 @@ function renderGenerationStatus() {
     ? planUpdateReadiness({
       summary: s,
       plan: plan.current,
-      profileChanged: plan.current != null && structuralChanged(session.profile?.athlete ?? {}, plan.current.profileSnapshot),
+      profileChanged: plan.current != null && structuralChanged(plan.athlete ?? {}, plan.current.profileSnapshot),
       hevyImporting,
       icuSyncing,
       startNextPhase: forceRegenCheck.checked,
@@ -306,17 +306,22 @@ async function refreshPlan(s) {
   if (key === plan.key) return;
   // Until it's loaded, the last plan would let the data this update just
   // used count as new.
-  plan = { key, loaded: false, current: null };
+  plan = { key, loaded: false, current: null, athlete: null };
   renderGenerationStatus();
   let current = null;
+  // Re-read with the plan, so a profile edited since the page opened is
+  // compared with the plan that used it.
+  let athlete = session.profile?.athlete ?? null;
   try {
-    current = await loadCurrentProgram(user.uid, s);
+    const [loaded, userSnap] = await Promise.all([loadCurrentProgram(user.uid, s), getDoc(doc(db, "users", user.uid))]);
+    current = loaded;
+    athlete = userSnap.data()?.athlete ?? athlete;
   } catch (err) {
     // Treated as no plan, so the button is usable: better than a stuck one.
     console.error("[checkin] couldn't load the current plan", err);
   }
   if (plan.key !== key) return; // a newer snapshot has already moved on
-  plan = { key, loaded: true, current };
+  plan = { key, loaded: true, current, athlete };
   renderGenerationStatus();
 }
 
