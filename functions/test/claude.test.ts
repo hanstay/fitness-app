@@ -110,6 +110,28 @@ describe("extractStructuredJson", () => {
     expect(req.system).toContain("record_thing");
   });
 
+  it("turns thinking off with \"disabled\" on Haiku, which doesn't take \"between_tools\"", async () => {
+    mockCreate.mockResolvedValueOnce({
+      content: [{ type: "tool_use", id: "toolu_h", name: "record_thing", input: { value: 1 } }],
+      stop_reason: "tool_use",
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+
+    await extractStructuredJson({
+      system: "sys",
+      userText: "hi",
+      toolName: "record_thing",
+      toolDescription: "desc",
+      inputSchema: { type: "object", properties: { value: { type: "number" } } },
+      validator: schema,
+      model: "claude-haiku-5-5",
+    });
+
+    const req = mockCreate.mock.calls[0][0];
+    expect(req.model).toBe("claude-haiku-5-5");
+    expect(req.thinking).toEqual({ type: "disabled" });
+  });
+
   it("retries a response cut off at max_tokens from scratch with double the limit", async () => {
     mockCreate
       .mockResolvedValueOnce({

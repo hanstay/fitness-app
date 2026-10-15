@@ -30,6 +30,23 @@
   .trend-flat{color:var(--text-secondary); font-weight:700}
   .trend-down{color:var(--accent-dark); font-weight:700}
   .conn-badge{display:inline-flex; align-items:center; gap:6px; font-weight:600; color:#1c7a3e; font-size:.9rem}
+
+  /* "Something not right?" notes and their follow-ups. */
+  .fb-card{border:1px solid var(--border); border-radius:10px; padding:12px 14px; background:var(--card); margin:0 0 10px}
+  .fb-title{font-weight:600; font-size:.92rem}
+  .fb-meta{font-size:.78rem; color:var(--text-secondary); margin-top:2px}
+  .fb-card .fb-text{font-size:.86rem; margin:6px 0 0}
+  .fb-card .btn-row{margin:10px 0 0}
+  .fb-card .btn{padding:9px 14px; font-size:.86rem}
+  .fb-row{display:flex; align-items:flex-start; gap:10px}
+  .fb-row > div{flex:1; min-width:0}
+  .link-btn{background:none; border:0; padding:6px 0; color:var(--accent-dark); font:inherit; font-size:.84rem; font-weight:600; cursor:pointer}
+  .fb-followups{border:1px solid var(--border); border-radius:10px; padding:0 14px; margin:0 0 14px}
+  .fb-compact{flex-direction:column; gap:6px; padding:10px 0; border-top:1px solid var(--border)}
+  .fb-compact:first-child{border-top:0; padding-top:0}
+  .fb-answers{display:flex; align-items:center; gap:6px; flex-wrap:wrap}
+  .fb-answers .btn{padding:7px 12px; font-size:.82rem}
+  .fb-list-head{font-size:.8rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--text-secondary); margin:18px 0 8px}
 </style>
 </head>
 <body data-auth="pending">
@@ -84,7 +101,43 @@
     </div>
   </section>
 
-  <!-- Section 3: Regenerate plan -->
+  <!-- Section 3: notes for the next update (personal plans only; shown by checkin.js) -->
+  <section id="feedbackSection" style="display:none">
+    <h2><span class="dot"></span>Something not right?</h2>
+    <p class="muted small">Tell us about pain, missing kit, or anything you'd change. Your next plan update works around it and
+      says what it changed.</p>
+
+    <div id="followUps"></div>
+
+    <form id="noteForm" novalidate>
+      <div class="field">
+        <label id="noteTagsLabel">What's it about?</label>
+        <div class="chips" id="noteTags" role="group" aria-labelledby="noteTagsLabel"></div>
+      </div>
+      <div class="callout warn small" id="painCallout" style="display:none"></div>
+      <div class="field">
+        <label for="noteExercise">Which exercise? <span class="muted">(optional)</span></label>
+        <select class="input" id="noteExercise"><option value="">Not about one exercise</option></select>
+      </div>
+      <div class="field">
+        <label for="noteText">Tell us more</label>
+        <textarea class="input" id="noteText" maxlength="1000" placeholder="e.g. My left knee aches on the lunges, mostly going down."></textarea>
+      </div>
+      <div class="field" id="noteDurationField">
+        <label id="noteDurationLabel">How long should your plan work around it?</label>
+        <div class="seg" role="radiogroup" aria-labelledby="noteDurationLabel">
+          <label><input type="radio" name="noteDuration" value="week" checked><span>Just this week</span></label>
+          <label><input type="radio" name="noteDuration" value="ongoing"><span>Until I say it's better</span></label>
+        </div>
+      </div>
+      <button class="btn secondary full" id="noteSaveBtn" type="submit">Save note</button>
+      <p class="status-line" id="noteStatus" role="status"></p>
+    </form>
+
+    <div id="pendingNotes"></div>
+  </section>
+
+  <!-- Section 4: Regenerate plan -->
   <section id="regenSection">
     <h2><span class="dot"></span>Update your plan</h2>
     <p class="muted small">Adjusts this week's sessions from your latest Hevy log and training load. Your roadmap stays as it
@@ -94,6 +147,7 @@
       <span><b>Start my next phase now</b><br>Ready to move on early? Switches your plan to the next phase of your
         roadmap (e.g. Base → Build) and builds its first week. Your roadmap and event dates don't change.</span>
     </label>
+    <p class="muted small" id="notesForUpdate" style="display:none"></p>
     <button class="btn full" id="regenBtn" type="button">Update my plan</button>
     <p class="status-line" id="regenStatus" aria-live="polite"></p>
   </section>
