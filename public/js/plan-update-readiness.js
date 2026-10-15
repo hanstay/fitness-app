@@ -1,8 +1,10 @@
 // Whether the check-in's "Update my plan" has anything new to work from.
-// An update with nothing new since the current plan would only spend a
-// generation re-reading the same log, so the button waits for a Hevy import
-// or an intervals.icu sync that landed after the plan was last updated.
-// Starting the next phase early needs no new data.
+// An update shouldn't act on data a plan already used, so the button waits
+// until a Hevy import or intervals.icu sync has brought in workouts or
+// activities not stored before (their lastNewDataAt, written by the server)
+// since the plan was last updated. Re-importing the same export, or a sync
+// that finds nothing new, doesn't count. Starting the next phase early needs
+// no new data.
 
 const millis = (ts) => (ts?.toMillis ? ts.toMillis() : null);
 
@@ -26,13 +28,13 @@ export function planUpdateReadiness({ summary, planUpdatedAt, hevyImporting, icu
   const hevy = summary?.integrationsStatus?.hevy;
   const icu = summary?.integrationsStatus?.intervalsIcu;
   if (icu?.connected && icuSyncing) return { ready: false, hint: "Syncing intervals.icu…" };
-  const newHevy = isNewSincePlan(hevy?.parsedAt, planUpdatedAt);
-  const newIcu = Boolean(icu?.connected) && isNewSincePlan(icu?.lastSyncedAt, planUpdatedAt);
+  const newHevy = isNewSincePlan(hevy?.lastNewDataAt, planUpdatedAt);
+  const newIcu = Boolean(icu?.connected) && isNewSincePlan(icu?.lastNewDataAt, planUpdatedAt);
   if (newHevy || newIcu || startNextPhase) return { ready: true, hint: "" };
   return {
     ready: false,
     hint: icu?.connected
-      ? "Upload your latest Hevy export or sync intervals.icu to update your plan."
-      : "Upload your latest Hevy export, or connect intervals.icu, to update your plan.",
+      ? "No new workouts or activities since your plan was last updated. Upload a newer Hevy export or sync intervals.icu after your next session."
+      : "No new workouts since your plan was last updated. Upload a newer Hevy export, or connect intervals.icu.",
   };
 }

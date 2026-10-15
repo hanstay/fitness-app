@@ -3,6 +3,7 @@
 // "the athlete who authorized this token" (see connectIntervalsIcuOAuth.ts),
 // so callers never need to pass or store a numeric athlete id to make calls.
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { countNewDocs } from "./newDocs";
 
 const BASE = "https://intervals.icu/api/v1";
 const SELF = "0";
@@ -52,7 +53,7 @@ export async function syncIntervalsActivitiesForUser(
   uid: string,
   accessToken: string,
   days = 42
-): Promise<{ activitiesSynced: number; wellness: { ctl: number; atl: number; tsb: number; asOf: string } | null }> {
+): Promise<{ activitiesSynced: number; newActivities: number; wellness: { ctl: number; atl: number; tsb: number; asOf: string } | null }> {
   const db = getFirestore();
   const newest = new Date().toISOString().slice(0, 10);
   const oldest = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
@@ -80,14 +81,16 @@ export async function syncIntervalsActivitiesForUser(
     wellness = { ctl, atl, tsb: Math.round((ctl - atl) * 10) / 10, asOf: latestWellness.id };
   }
 
+  const refs = activities.map((a) => db.doc(`users/${uid}/activities/${a.id}`));
+  const newActivities = await countNewDocs(db, refs);
+
   const batch = db.batch();
-  for (const a of activities) {
+  for (const [i, a] of activities.entries()) {
     // intervals.icu doesn't guarantee every field is present despite the
     // IntervalsActivity type — an activity missing "type" would otherwise
     // write `undefined` into Firestore, which it rejects outright.
     const type = a.type ?? "Other";
-    const ref = db.doc(`users/${uid}/activities/${a.id}`);
-    batch.set(ref, {
+    batch.set(refs[i], {
       date: a.start_date_local?.slice(0, 10) ?? null,
       type,
       name: a.name ?? null,
@@ -110,9 +113,13 @@ export async function syncIntervalsActivitiesForUser(
     wellness,
     "integrationsStatus.intervalsIcu.lastSyncedAt": FieldValue.serverTimestamp(),
     "integrationsStatus.intervalsIcu.activitiesSynced": activities.length,
+    "integrationsStatus.intervalsIcu.newActivities": newActivities,
     "integrationsStatus.intervalsIcu.lastError": null,
+    // When a sync last brought in activities not stored before; the check-in
+    // only offers a plan update for data newer than the plan.
+    ...(newActivities > 0 ? { "integrationsStatus.intervalsIcu.lastNewDataAt": FieldValue.serverTimestamp() } : {}),
   });
 
   await batch.commit();
-  return { activitiesSynced: activities.length, wellness };
+  return { activitiesSynced: activities.length, newActivities, wellness };
 }

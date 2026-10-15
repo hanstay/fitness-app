@@ -253,5 +253,7 @@ describe("duplicate and concurrent runs", () => {
 
     expect(await programDocs("r3", "active")).toBe(1);
     expect(await programDocs("r3", "archived")).toBe(2);
-  });
+    // Both runs' transactions contend on the same docs, and the emulator's
+    // lock waits and retries can take over vitest's 5s default.
+  }, 20_000);
 });

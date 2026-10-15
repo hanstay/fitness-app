@@ -96,8 +96,11 @@ document.getElementById("hevyFile").addEventListener("change", async (e) => {
     renderImportSummary(results, sessions.length, progression);
 
     setStatus("hevyStatus", "Saving…");
-    await httpsCallable(functions, "saveHevySessions")({ sessions, lifts });
-    setStatus("hevyStatus", "Saved. Update your plan below when you're ready.");
+    const { data } = await httpsCallable(functions, "saveHevySessions")({ sessions, lifts });
+    const plural = data.newSessions === 1 ? "" : "s";
+    setStatus("hevyStatus", data.newSessions > 0
+      ? `Saved ${data.newSessions} new workout${plural}. Update your plan below when you're ready.`
+      : "Saved. There are no workouts in it that weren't already imported.");
   } catch (err) {
     setStatus("hevyStatus", "");
     showError(`Couldn't import that CSV: ${err.message || err}`);
@@ -165,7 +168,7 @@ document.getElementById("icuSyncBtn").addEventListener("click", (e) => {
   renderGenerationStatus();
   withButtonBusy(e.currentTarget, "Syncing…", async () => {
     const result = await httpsCallable(functions, "syncIntervalsActivities")();
-    setStatus("icuStatus", `Synced ${result.data.activitiesSynced ?? 0} activities.`);
+    setStatus("icuStatus", `Synced ${result.data.activitiesSynced ?? 0} activities, ${result.data.newActivities ?? 0} new.`);
     summary = await loadSummary();
     renderIcuState(summary);
   }).catch((err) => {

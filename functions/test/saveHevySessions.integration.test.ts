@@ -24,7 +24,7 @@ beforeEach(async () => {
 describe("saveHevySessions", () => {
   it("stores every session under its deterministic id, plus lifts and import status", async () => {
     const result = await call({ sessions, lifts });
-    expect(result).toEqual({ sessionsImported: sessions.length, liftsImported: 1 });
+    expect(result).toEqual({ sessionsImported: sessions.length, newSessions: sessions.length, liftsImported: 1 });
 
     const stored = await db.collection(`users/${UID}/strengthSessions`).get();
     expect(stored.size).toBe(sessions.length);
@@ -37,13 +37,29 @@ describe("saveHevySessions", () => {
     expect(user?.athlete.current_lifts).toEqual(lifts);
     const status = (await db.doc(`users/${UID}/state/summary`).get()).data()?.integrationsStatus.hevy;
     const latest = sessions.map((s) => s.date).sort().at(-1);
-    expect(status).toMatchObject({ csvUploaded: true, sessionsImported: sessions.length, liftsImported: 1, lastSessionDate: latest, lastError: null });
+    expect(status).toMatchObject({ csvUploaded: true, sessionsImported: sessions.length, newSessions: sessions.length, liftsImported: 1, lastSessionDate: latest, lastError: null });
+    expect(status?.lastNewDataAt).toBeDefined();
   });
 
   it("re-importing the same export overwrites instead of duplicating", async () => {
     await call({ sessions, lifts });
     await call({ sessions, lifts });
     expect((await db.collection(`users/${UID}/strengthSessions`).get()).size).toBe(sessions.length);
+  });
+
+  it("only moves lastNewDataAt when an import brings sessions not stored before", async () => {
+    const hevyStatus = async () => (await db.doc(`users/${UID}/state/summary`).get()).data()?.integrationsStatus.hevy;
+    await call({ sessions: sessions.slice(1), lifts });
+    const firstNewAt = (await hevyStatus()).lastNewDataAt.toMillis();
+
+    expect(await call({ sessions: sessions.slice(1), lifts })).toMatchObject({ newSessions: 0 });
+    const afterReimport = await hevyStatus();
+    expect(afterReimport.newSessions).toBe(0);
+    expect(afterReimport.lastNewDataAt.toMillis()).toBe(firstNewAt);
+
+    expect(await call({ sessions, lifts })).toMatchObject({ newSessions: 1 });
+    expect((await hevyStatus()).lastNewDataAt.toMillis()).toBeGreaterThanOrEqual(firstNewAt);
+    expect((await hevyStatus()).newSessions).toBe(1);
   });
 
   it("rejects malformed sessions and unauthenticated calls without writing", async () => {

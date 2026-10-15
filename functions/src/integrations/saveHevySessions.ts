@@ -2,6 +2,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import * as crypto from "crypto";
 import { z } from "zod";
+import { countNewDocs } from "../lib/newDocs";
 
 // The browser parses the Hevy CSV (src/web/hevyCheckin.ts) and sends the
 // parsed sessions and current lifts here. strengthSessions is Functions-only in
@@ -64,11 +65,12 @@ export const saveHevySessions = onCall(async (request) => {
 
   const db = getFirestore();
   try {
+    const refs = sessions.map((s) => db.doc(`users/${uid}/strengthSessions/${generateSessionId(uid, s.start_time, s.title)}`));
+    const newSessions = await countNewDocs(db, refs);
     for (let i = 0; i < sessions.length; i += SESSIONS_PER_BATCH) {
       const batch = db.batch();
-      for (const session of sessions.slice(i, i + SESSIONS_PER_BATCH)) {
-        const id = generateSessionId(uid, session.start_time, session.title);
-        batch.set(db.doc(`users/${uid}/strengthSessions/${id}`), {
+      for (const [j, session] of sessions.slice(i, i + SESSIONS_PER_BATCH).entries()) {
+        batch.set(refs[i + j], {
           ...session,
           createdAt: FieldValue.serverTimestamp(),
         }, { merge: false });
@@ -83,18 +85,20 @@ export const saveHevySessions = onCall(async (request) => {
     // Update current_lifts (overwrites, backward compat)
     batch.update(db.doc(`users/${uid}`), { "athlete.current_lifts": lifts });
     batch.update(db.doc(`users/${uid}/state/summary`), {
-      "integrationsStatus.hevy": {
-        csvUploaded: true,
-        parsedAt: FieldValue.serverTimestamp(),
-        sessionsImported: sessions.length,
-        liftsImported: lifts.length,
-        lastSessionDate,
-        lastError: null,
-      },
+      "integrationsStatus.hevy.csvUploaded": true,
+      "integrationsStatus.hevy.parsedAt": FieldValue.serverTimestamp(),
+      "integrationsStatus.hevy.sessionsImported": sessions.length,
+      "integrationsStatus.hevy.newSessions": newSessions,
+      "integrationsStatus.hevy.liftsImported": lifts.length,
+      "integrationsStatus.hevy.lastSessionDate": lastSessionDate,
+      "integrationsStatus.hevy.lastError": null,
+      // When the athlete last brought in workouts not stored before; the
+      // check-in only offers a plan update for data newer than the plan.
+      ...(newSessions > 0 ? { "integrationsStatus.hevy.lastNewDataAt": FieldValue.serverTimestamp() } : {}),
     });
     await batch.commit();
 
-    return { sessionsImported: sessions.length, liftsImported: lifts.length };
+    return { sessionsImported: sessions.length, newSessions, liftsImported: lifts.length };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await db.doc(`users/${uid}/state/summary`).update({
