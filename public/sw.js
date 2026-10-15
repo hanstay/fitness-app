@@ -5,7 +5,7 @@ const ASSETS = [
   './', 'login.html', 'onboarding.html', 'dashboard.html', 'program.html', 'meals.html', 'profile.html',
   'styles/theme.css',
   'js/firebase-init.js', 'js/auth-guard.js', 'js/onboarding-wizard.js',
-  'js/tab-bar.js', 'js/current-program.js', 'js/days.js',
+  'js/tab-bar.js', 'js/current-program.js', 'js/days.js', 'js/plan-updates.js',
   'update.js',
   'manifest.webmanifest', 'icon-180.png', 'icon-512.png', 'icon-meals-180.png', 'icon-meals-512.png'
 ];

@@ -217,4 +217,28 @@ describe("group generation", () => {
     expect(after.data().sessions[0].day).toBe("Monday");
     expect(result.changeSummary?.[0]).toBe(REBUILD_CHANGE_NOTE);
   });
+
+  it("scenario 9: moving to the next phase stores the change summary on the member's doc until their next update", async () => {
+    await seedGroup("g9", ["a", "b"]);
+    await seedMember("a", "a", "g9");
+    await seedMember("b", "b", "g9");
+    const fixture = FIXTURES.record_group_program as { roadmap: Array<Record<string, unknown>> };
+    const twoPhases = {
+      ...fixture,
+      roadmap: [fixture.roadmap[0], { ...fixture.roadmap[0], phase: "Build", dates: "Weeks 9-14", startDate: "2026-10-06", endDate: "2026-11-28" }],
+    };
+    mockExtractStructuredJson.mockImplementation(async (params: { toolName: string }) =>
+      params.toolName === "record_group_program" ? twoPhases : defaultFixtureResponse(params));
+    await runGenerateProgram("a");
+
+    await runGenerateProgram("a", { force: true });
+    const advanced = await db.doc("groups/g9/members/a").get();
+    expect(advanced.data()?.changeSummary?.[0]).toContain("Base → Build");
+    const active = await db.collection("groups/g9/programs").where("status", "==", "active").get();
+    expect(advanced.data()?.groupProgramId).toBe(active.docs[0].id);
+
+    await runGenerateProgram("a");
+    const updated = await db.doc("groups/g9/members/a").get();
+    expect(updated.data()).not.toHaveProperty("changeSummary");
+  });
 });

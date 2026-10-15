@@ -1,5 +1,5 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
+import { getFirestore, FieldValue, Timestamp, DocumentReference } from "firebase-admin/firestore";
 import { extractStructuredJson, MODEL } from "../lib/claude";
 import {
   programSchema, ProgramOutput,
@@ -14,6 +14,7 @@ import {
 import { mergeUpdatedWeek, normalizeWeek } from "../lib/programMerge";
 import { gatherGroundingData } from "./groundingData";
 import { runGenerateGroupProgram } from "./groupProgram";
+import { commitProgramGeneration } from "./settleGeneration";
 
 // Shared framing every path needs: goal-driven training style and how to
 // ground the program in the athlete's actual data.
@@ -255,6 +256,7 @@ function computePhaseSignal(
   return `Nearest event: ${eventPart}. Current form: ${loadPart}.`;
 }
 
+// Kept for groups.html and for older cached check-in pages; the check-in now queues (queueProgramGeneration.ts).
 export const generateProgram = onCall({ secrets: ["ANTHROPIC_API_KEY"], timeoutSeconds: 300 }, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
   try {
@@ -270,16 +272,23 @@ export const generateProgram = onCall({ secrets: ["ANTHROPIC_API_KEY"], timeoutS
   }
 });
 
+export interface GenerateProgramOptions {
+  force?: boolean;
+  // The queued run's "generating" placeholder, settled in the same commit as
+  // the new program (see settleGeneration.ts).
+  placeholder?: DocumentReference;
+}
+
 /**
  * Does the actual grounding-data fetch + generation + Firestore write for one
  * athlete. Called synchronously from the `generateProgram` onCall above
- * (dashboard "Regenerate", check-in update) and, separately, from the
- * background trigger that runs queued onboarding generations
+ * (groups.html) and, separately, from the background trigger that runs
+ * queued generations — onboarding, dashboard, check-in update
  * (onProgramGenerationRequested.ts) — same logic either way.
  */
 export async function runGenerateProgram(
   uid: string,
-  opts?: { force?: boolean }
+  opts?: GenerateProgramOptions
 ): Promise<{ programId: string } & ProgramOutput & { changeSummary?: string[] }> {
   const db = getFirestore();
   const userSnap = await db.doc(`users/${uid}`).get();
@@ -498,31 +507,28 @@ export async function runGenerateProgram(
     mergedProgram = parsed.data;
   }
 
-  const batch = db.batch();
-  existingActiveSnap.forEach((d) => batch.update(d.ref, { status: "archived" }));
-
   const newRef = db.collection(`users/${uid}/programs`).doc();
-  batch.set(newRef, {
-    createdAt: FieldValue.serverTimestamp(),
-    status: "active",
-    model: MODEL,
-    ...mergedProgram,
-    ...(changeSummary ? { changeSummary } : {}),
-    profileSnapshot: athlete,
-    // Where this program is in its periodization. A weekly update or rebuilt
-    // week carries both forward unchanged (so the block's age isn't reset
-    // every week); moving to a new phase or a redesign starts a new block today.
-    currentPhaseIndex: decision.mode === "full" ? 0 : decision.targetPhaseIndex ?? 0,
-    blockStartedAt: (decision.mode === "incremental" || decision.mode === "rebuild") && blockStartedAtMs != null
-      ? Timestamp.fromMillis(blockStartedAtMs)
-      : FieldValue.serverTimestamp(),
+  await commitProgramGeneration(uid, opts?.placeholder, async (tx) => {
+    // Re-read in the transaction: an overlapping run may have committed since.
+    const activeSnap = await tx.get(db.collection(`users/${uid}/programs`).where("status", "==", "active"));
+    activeSnap.forEach((d) => tx.update(d.ref, { status: "archived" }));
+    tx.set(newRef, {
+      createdAt: FieldValue.serverTimestamp(),
+      status: "active",
+      model: MODEL,
+      ...mergedProgram,
+      ...(changeSummary ? { changeSummary } : {}),
+      profileSnapshot: athlete,
+      // Where this program is in its periodization. A weekly update or rebuilt
+      // week carries both forward unchanged (so the block's age isn't reset
+      // every week); moving to a new phase or a redesign starts a new block today.
+      currentPhaseIndex: decision.mode === "full" ? 0 : decision.targetPhaseIndex ?? 0,
+      blockStartedAt: (decision.mode === "incremental" || decision.mode === "rebuild") && blockStartedAtMs != null
+        ? Timestamp.fromMillis(blockStartedAtMs)
+        : FieldValue.serverTimestamp(),
+    });
+    return { currentProgramId: newRef.id };
   });
-  batch.update(db.doc(`users/${uid}/state/summary`), {
-    currentProgramId: newRef.id,
-    programGenerationStatus: FieldValue.delete(),
-    programGenerationStartedAt: FieldValue.delete(),
-  });
-  await batch.commit();
 
   return { programId: newRef.id, ...mergedProgram, ...(changeSummary ? { changeSummary } : {}) };
 }

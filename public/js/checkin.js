@@ -1,13 +1,15 @@
 // Weekly check-in view: import Hevy → sync intervals.icu → regenerate program.
-// One-shot reads only (no listeners), per-page message boxes, dot-path writes —
-// matching the conventions in dashboard.html / onboarding-wizard.js.
-import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+// One-shot reads (plus one listener for the plan update's background status),
+// per-page message boxes, dot-path writes — matching the conventions in
+// dashboard.html / onboarding-wizard.js.
+import { doc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
 import { db, functions } from "./firebase-init.js";
 import { analyzeHevyCsv } from "./generated/hevy-checkin.js";
 import { requireOnboarded } from "./auth-guard.js";
 import { connectIntervalsIcuViaOAuth } from "./intervals-oauth.js";
 import { bindMessages } from "./ui-messages.js";
+import { isStale } from "./plan-updates.js";
 
 const session = await requireOnboarded();
 if (!session) throw new Error("redirecting"); // requireOnboarded already redirected
@@ -22,8 +24,8 @@ const setStatus = (id, msg) => { document.getElementById(id).textContent = msg; 
 // Guards a control that fires a side-effectful / costly API call. The control is
 // clickable ONLY before its first send (idle) or after a failed attempt (retry).
 // While the request is in flight — and after it succeeds — the control stays
-// disabled, so an expensive call (generateProgram, credential writes) can't
-// be double-fired or spammed. Reload the page to run it again after a success.
+// disabled, so an expensive call (saveHevySessions, credential writes) can't be
+// double-fired or spammed. Reload the page to run it again after a success.
 async function withButtonBusy(btn, busyLabel, fn) {
   if (btn.disabled) return; // already in flight, or completed successfully
   const original = btn.innerHTML;
@@ -54,9 +56,9 @@ function expandSection(sectionId) {
 const TREND_CLASS = { "↑": "trend-up", "→": "trend-flat", "↓": "trend-down" };
 const fmtDate = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 
-// Kept deliberately short: the plan update further down the page is where the
-// athlete reads coaching, so this only confirms what was imported. Plan
-// adherence isn't shown; generation compares the log with the plan itself.
+// Kept deliberately short: the program page is where the athlete reads
+// coaching after the plan update, so this only confirms what was imported.
+// Plan adherence isn't shown; generation compares the log with the plan itself.
 function renderImportSummary(container, sessionsImported, progression) {
   const plural = sessionsImported === 1 ? "" : "s";
   const range = progression?.dateRange ? ` from ${esc(fmtDate(progression.dateRange.first))} to ${esc(fmtDate(progression.dateRange.last))}` : "";
@@ -166,56 +168,80 @@ document.getElementById("icuSyncBtn").addEventListener("click", (e) => {
 
 /* ---------- Section 3: regenerate program ---------- */
 
-function renderPlanUpdated(program) {
-  const container = document.getElementById("planUpdatedContainer");
-  const cs = program.currentState;
-  const weekly = (program.weeklyStructure || []).map((d) =>
-    `<div class="ex"><div class="row"><span class="name">${esc(d.day)}</span><span class="sets">${esc(d.focus)}</span></div>${d.note ? `<div class="note">${esc(d.note)}</div>` : ""}</div>`
-  ).join("");
-  const changeItems = (program.changeSummary || []).length ? program.changeSummary : (cs?.highlights || []);
-  const highlights = changeItems.length
-    ? `<h3>What changed</h3><ul>${changeItems.map((h) => `<li>${esc(h)}</li>`).join("")}</ul>`
-    : "";
-  const summaryLine = cs?.summary ? `<p>${esc(cs.summary)}</p>` : "";
-  const coach = program.coachNotes ? `<div class="callout warn">${esc(program.coachNotes)}</div>` : "";
+// The update runs in the background (see queueProgramGeneration.ts), so a
+// click only queues it. The summary listener owns the button and status line:
+// disabled while a generation is in flight, wherever it was started, then how
+// it ended; the new plan itself is on the program page.
+const regenBtn = document.getElementById("regenBtn");
+const regenLabel = regenBtn.innerHTML;
+const UPDATING_MSG = "Updating your plan. You can leave this page; it'll be ready on your dashboard in a few minutes.";
+const STALLED_MSG = "This update seems to have stalled. Please try again.";
 
-  container.innerHTML = `
-    <section id="planUpdated">
-      <h2><span class="dot"></span>Your program is updated ✓</h2>
-      <div class="badges" style="margin-bottom:12px">
-        <span class="badge">🏋️ <b>${esc(program.split || "Program")}</b></span>
-        <span class="badge"><b>${esc(program.daysPerWeek ?? "?")}</b> days/week</span>
-      </div>
-      <p><b>${esc(program.title || "Updated program")}</b>${program.goalSummary ? ` — ${esc(program.goalSummary)}` : ""}</p>
-      ${summaryLine}${highlights}
-      ${weekly ? `<h3>Weekly structure</h3>${weekly}` : ""}
-      ${coach}
-      <a class="btn full" href="program.html" style="margin-top:6px">View full plan →</a>
-    </section>`;
-  container.querySelector("#planUpdated").scrollIntoView({ behavior: "smooth", block: "start" });
-}
+let queuing = false;    // the queue call itself is in flight
+let followingId = null; // the generation whose outcome this page reports
+let latestSummary = null;
 
-document.getElementById("regenBtn").addEventListener("click", (e) => {
+regenBtn.addEventListener("click", async () => {
+  if (regenBtn.disabled) return;
   clearMessages();
-  document.getElementById("planUpdatedContainer").innerHTML = "";
-  setStatus("regenStatus", "Updating your program — this can take a couple of minutes…");
-  withButtonBusy(e.currentTarget, "Updating…", async () => {
+  queuing = true;
+  renderGenerationStatus();
+  try {
     const force = document.getElementById("forceRegenCheck")?.checked === true;
-    const result = await httpsCallable(functions, "generateProgram", { timeout: 300000 })({ force });
-    setStatus("regenStatus", "");
-    showSuccess("Your program is ready.");
-    renderPlanUpdated(result.data);
-  }).catch((err) => {
+    const result = await httpsCallable(functions, "queueProgramGeneration")({ force });
+    followingId = result.data.programId;
+  } catch (err) {
     const msg = String(err?.message || err);
     const isPrecondition = /first|required|Complete/i.test(msg);
-    setStatus("regenStatus", "");
     showError(isPrecondition
       ? "Add your training details (days/week, session length) in your profile first."
       : `Couldn't update your program: ${msg}`);
-  });
+  } finally {
+    queuing = false;
+    renderGenerationStatus();
+  }
 });
 
+// Outcomes are matched to the generation by the summary's
+// programGenerationId, so a snapshot from before the queue's write isn't
+// taken for the end of the new generation, and an error left over from an
+// earlier attempt isn't shown again on every visit.
+function renderGenerationStatus() {
+  const s = latestSummary;
+  const inFlight = s?.programGenerationStatus === "generating" && !isStale(s.programGenerationStartedAt);
+  regenBtn.disabled = queuing || inFlight;
+  regenBtn.innerHTML = queuing ? `<span class="spinner"></span> Starting…` : regenLabel;
+  const statusEl = document.getElementById("regenStatus");
+  // A live region: only touch it when the text changes, so it isn't
+  // re-announced on every snapshot.
+  const setStatusText = (text) => { if (statusEl.textContent !== text) statusEl.textContent = text; };
+  if (inFlight) {
+    // A newer generation (e.g. from another tab) replaces a stalled one.
+    followingId = s.programGenerationId ?? followingId;
+    setStatusText(UPDATING_MSG);
+  } else if (followingId && s?.programGenerationId === followingId) {
+    if (s.programGenerationStatus === "generating") {
+      // Stalled: keep following it, so the stale sweep's error still shows.
+      setStatusText(STALLED_MSG);
+    } else if (s.programGenerationStatus === "error") {
+      followingId = null;
+      setStatusText("");
+      showError(`Couldn't update your program: ${s.programGenerationError || "unknown error"}`);
+    } else {
+      followingId = null;
+      statusEl.innerHTML = `Your plan is updated. <a href="program.html">See your updated plan →</a>`;
+    }
+  } else if (statusEl.textContent === UPDATING_MSG) {
+    setStatusText(""); // one whose outcome isn't ours to report (no id, or stalled)
+  }
+}
+
 /* ---------- init ---------- */
+
+onSnapshot(doc(db, "users", user.uid, "state", "summary"), (snap) => {
+  latestSummary = snap.data();
+  renderGenerationStatus();
+}, (err) => console.error("[checkin] plan update status listener failed", err));
 
 async function loadSummary() {
   const snap = await getDoc(doc(db, "users", user.uid, "state", "summary"));

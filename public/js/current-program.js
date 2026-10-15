@@ -6,6 +6,7 @@
 import { doc, getDoc, collection, query, where, limit, getDocs } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
 import { db } from "./firebase-init.js";
 import { normalizeDay } from "./days.js";
+import { groupPlan } from "./plan-updates.js";
 
 // Compares stored day names as weekdays ("Mon" and "Monday" are one day),
 // falling back to the exact text for one that names no weekday ("Day 1").
@@ -48,7 +49,10 @@ function applySessionLoads(sessions, sessionLoads) {
   });
 }
 
-/** The current program for `uid` given their users/{uid}/state/summary data, or null if there's none yet. */
+/**
+ * The current program for `uid` given their users/{uid}/state/summary data, or
+ * null if there's none yet. `planId` identifies it for js/plan-updates.js.
+ */
 export async function loadCurrentProgram(uid, summary) {
   if (summary?.activeProgramSource === "group" && summary?.groupId) {
     const activeSnap = await getDocs(query(
@@ -61,6 +65,7 @@ export async function loadCurrentProgram(uid, summary) {
     const shared = sharedDoc.data();
     const memberSnap = await getDoc(doc(db, "groups", summary.groupId, "members", uid));
     const member = memberSnap.exists() ? memberSnap.data() : null;
+    const plan = groupPlan(sharedDoc.id, member);
     return {
       ...shared,
       sessions: applySessionLoads(shared.sessions, member?.sessionLoads),
@@ -68,11 +73,13 @@ export async function loadCurrentProgram(uid, summary) {
       coachNotes: member?.coachNotes ?? null,
       sportNotes: member?.sportNotes ?? null,
       nutritionNote: member?.nutritionNote ?? null,
+      changeSummary: plan.changeSummary,
+      planId: plan.planId,
     };
   }
   if (summary?.currentProgramId) {
     const programSnap = await getDoc(doc(db, "users", uid, "programs", summary.currentProgramId));
-    return programSnap.data() ?? null;
+    return programSnap.exists() ? { ...programSnap.data(), planId: programSnap.id } : null;
   }
   return null;
 }
