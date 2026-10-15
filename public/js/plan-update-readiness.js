@@ -6,7 +6,9 @@
 //   server) after the plan read its data. Re-importing the same export, or a
 //   sync that finds nothing new, doesn't count.
 // - a goal, schedule, equipment or event change since the plan, decided as
-//   generation decides it (structuralChanged).
+//   a personal plan's generation decides it (structuralChanged).
+// - a group plan whose shared program was replaced (by another member's
+//   update) after this member's layer was written for it.
 // - starting the next phase early, or there being no plan yet.
 
 const millis = (ts) => (ts?.toMillis ? ts.toMillis() : null);
@@ -24,12 +26,17 @@ export function planUpdateReadiness({ summary, plan, profileChanged, hevyImporti
   const hevy = summary?.integrationsStatus?.hevy;
   const icu = summary?.integrationsStatus?.intervalsIcu;
   if (icu?.connected && icuSyncing) return { ready: false, hint: "Syncing intervals.icu…" };
-  if (!plan || startNextPhase || profileChanged) return { ready: true, hint: "" };
+  if (!plan || startNextPhase || profileChanged || plan.layerOutdated) return { ready: true, hint: "" };
 
   // Older plans have no inputsReadAt; when they were saved is the nearest.
   const readAt = millis(plan.inputsReadAt) ?? millis(plan.updatedAt);
   const isNew = (ts) => millis(ts) !== null && (readAt === null || millis(ts) > readAt);
-  if (isNew(hevy?.lastNewDataAt) || (icu?.connected && isNew(icu?.lastNewDataAt))) return { ready: true, hint: "" };
+  // A status written before new data was tracked (no newSessions/newActivities
+  // count) can't tell new from re-imported, so its import or sync time
+  // stands in until the next one replaces it.
+  const hevyNewAt = hevy?.newSessions === undefined ? hevy?.parsedAt : hevy.lastNewDataAt;
+  const icuNewAt = icu?.newActivities === undefined ? icu?.lastSyncedAt : icu.lastNewDataAt;
+  if (isNew(hevyNewAt) || (icu?.connected && isNew(icuNewAt))) return { ready: true, hint: "" };
   return {
     ready: false,
     hint: icu?.connected

@@ -253,7 +253,6 @@ function renderGenerationStatus() {
   const busyLabel = queuing ? "Starting…" : "Updating your plan…";
   regenBtn.innerHTML = busy ? `<span class="spinner"></span> ${busyLabel}` : regenLabel;
   regenHint.textContent = busy ? "" : hint;
-  lockDataInputs(busy);
   const statusEl = document.getElementById("regenStatus");
   // A live region: only touch it when the text changes, so it isn't
   // re-announced on every snapshot.
@@ -276,23 +275,6 @@ function renderGenerationStatus() {
     }
   } else if (statusEl.textContent === UPDATING_MSG) {
     setStatusText(""); // one whose outcome isn't ours to report (no id, or stalled)
-  }
-}
-
-// New data can't land while an update runs: the update has already read its
-// inputs, so an import then would be measured against a plan that never saw
-// it. Only controls this disabled are re-enabled, so a sync button left
-// disabled by its own success stays that way.
-const dataInputs = [document.getElementById("hevyFile"), document.getElementById("icuSyncBtn")];
-function lockDataInputs(locked) {
-  for (const el of dataInputs) {
-    if (locked && !el.disabled) {
-      el.disabled = true;
-      el.dataset.lockedForUpdate = "true";
-    } else if (!locked && el.dataset.lockedForUpdate) {
-      el.disabled = false;
-      delete el.dataset.lockedForUpdate;
-    }
   }
 }
 

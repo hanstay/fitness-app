@@ -62,6 +62,10 @@ describe("saveHevySessions", () => {
     expect((await hevyStatus()).newSessions).toBe(1);
   });
 
+  it("counts a session named twice in one import once", async () => {
+    expect(await call({ sessions: [sessions[0], sessions[0]], lifts })).toMatchObject({ newSessions: 1 });
+  });
+
   it("rejects malformed sessions and unauthenticated calls without writing", async () => {
     await expect(call({ sessions: [{ ...sessions[0], date: "not a date" }], lifts })).rejects.toMatchObject({ code: "invalid-argument" });
     await expect(call({ sessions: [], lifts })).rejects.toMatchObject({ code: "invalid-argument" });

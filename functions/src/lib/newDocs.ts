@@ -9,9 +9,11 @@ const REFS_PER_READ = 400;
  * isn't reported as new.
  */
 export async function countNewDocs(db: Firestore, refs: DocumentReference[]): Promise<number> {
+  // An import can name the same doc twice; it's one new doc, not two.
+  const unique = [...new Map(refs.map((ref) => [ref.path, ref])).values()];
   let count = 0;
-  for (let i = 0; i < refs.length; i += REFS_PER_READ) {
-    const snaps = await db.getAll(...refs.slice(i, i + REFS_PER_READ));
+  for (let i = 0; i < unique.length; i += REFS_PER_READ) {
+    const snaps = await db.getAll(...unique.slice(i, i + REFS_PER_READ));
     count += snaps.filter((snap) => !snap.exists).length;
   }
   return count;

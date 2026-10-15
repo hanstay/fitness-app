@@ -97,6 +97,7 @@ export async function loadCurrentProgram(uid, summary) {
       // none until their first update writes one.
       profileSnapshot: member?.profileSnapshot ?? null,
       inputsReadAt: member?.inputsReadAt ?? null,
+      layerOutdated: member?.groupProgramId !== sharedDoc.id,
     };
   }
   if (summary?.currentProgramId) {

@@ -8,8 +8,8 @@ const ts = (ms: number) => ({ toMillis: () => ms });
 const plan = { updatedAt: ts(1000) };
 const summary = (hevyNewAt: number | null, icuNewAt: number | null, connected = true) => ({
   integrationsStatus: {
-    hevy: hevyNewAt != null ? { lastNewDataAt: ts(hevyNewAt) } : { parsedAt: ts(9000) },
-    intervalsIcu: { connected, lastSyncedAt: ts(9000), ...(icuNewAt != null ? { lastNewDataAt: ts(icuNewAt) } : {}) },
+    hevy: { parsedAt: ts(9000), newSessions: hevyNewAt != null ? 1 : 0, ...(hevyNewAt != null ? { lastNewDataAt: ts(hevyNewAt) } : {}) },
+    intervalsIcu: { connected, lastSyncedAt: ts(9000), newActivities: icuNewAt != null ? 1 : 0, ...(icuNewAt != null ? { lastNewDataAt: ts(icuNewAt) } : {}) },
   },
 });
 
@@ -35,6 +35,20 @@ describe("planUpdateReadiness", () => {
     const midRun = { inputsReadAt: ts(1000), updatedAt: ts(3000) };
     expect(readiness({ summary: summary(2000, null), plan: midRun }).ready).toBe(true);
     expect(readiness({ summary: summary(900, null), plan: midRun }).ready).toBe(false);
+  });
+
+  it("uses the import or sync time for a status written before new data was tracked", () => {
+    const legacy = (hevyAt: number, icuAt: number) => ({
+      integrationsStatus: { hevy: { parsedAt: ts(hevyAt) }, intervalsIcu: { connected: true, lastSyncedAt: ts(icuAt) } },
+    });
+    expect(readiness({ summary: legacy(2000, 500), plan }).ready).toBe(true);
+    expect(readiness({ summary: legacy(500, 2000), plan }).ready).toBe(true);
+    expect(readiness({ summary: legacy(500, 500), plan }).ready).toBe(false);
+  });
+
+  it("is ready when another member's update replaced the group's shared program", () => {
+    expect(readiness({ summary: summary(null, null), plan: { ...plan, layerOutdated: true } }).ready).toBe(true);
+    expect(readiness({ summary: summary(null, null), plan: { ...plan, layerOutdated: false } }).ready).toBe(false);
   });
 
   it("is ready for a profile change, an early next phase, or no plan yet", () => {
