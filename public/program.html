@@ -125,7 +125,7 @@
   import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
   import { db } from "./js/firebase-init.js";
   import { requireOnboarded } from "./js/auth-guard.js";
-  import { loadCurrentProgram, dayKey, sessionsOn } from "./js/current-program.js";
+  import { loadCurrentProgram, dayKey, sessionsOn, weeksOut } from "./js/current-program.js";
   import { normalizeDay, todayWeekday } from "./js/days.js";
   import { groupPlan, markPlanSeen, changesDismissed, dismissChanges } from "./js/plan-updates.js";
 
@@ -160,8 +160,8 @@
     document.getElementById("pageSub").textContent = "No program yet";
   } else {
     document.getElementById("pageTitle").textContent = p.title || `${p.split} Program`;
-    document.getElementById("pageSub").textContent = `${p.goalSummary || p.split} · ${p.daysPerWeek} days/week · generated ${
-      p.createdAt?.toDate ? p.createdAt.toDate().toLocaleDateString() : "recently"
+    document.getElementById("pageSub").textContent = `${p.goalSummary || p.split} · ${p.daysPerWeek} days/week · updated ${
+      p.updatedAt?.toDate ? p.updatedAt.toDate().toLocaleDateString() : "recently"
     }`;
     const eventBadges = (p.events || []).map((e) => `<span class="badge">📅 <b>${esc(e.name)}</b>${e.date ? ` · ${esc(e.date)}` : ""}</span>`).join("");
     document.getElementById("headerBadges").innerHTML =
@@ -216,7 +216,8 @@
     // ---- Target events ----
     if ((p.events || []).length) {
       const cards = p.events.map((e) => {
-        const meta = [e.date, e.weeksOut ? `${e.weeksOut} out` : null].filter(Boolean).join(" · ");
+        const out = weeksOut(e.date) ?? e.weeksOut;
+        const meta = [e.date, out ? `${out} out` : null].filter(Boolean).join(" · ");
         return `<div class="event-card">
           <div class="event-head">
             <span class="event-name">${esc(e.name)}</span>

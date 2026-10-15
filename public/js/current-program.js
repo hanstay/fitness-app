@@ -18,6 +18,20 @@ export const dayKey = (day) => normalizeDay(day) ?? day;
 // must be a word of its own ("Rest day", not "Rest-pause Bench").
 export const isRestSession = (session) => (session.exercises || []).every((ex) => /^rest(\s|$)/i.test(ex.name || ""));
 
+/**
+ * "~N weeks" from today to an event's ISO `date`, or null if it has none or
+ * it doesn't parse. Mirrors computeWeeksOut in
+ * functions/src/lib/eventReconciliation.ts, whose stored `weeksOut` is only
+ * right on the day the plan was generated.
+ */
+export function weeksOut(date, today = new Date()) {
+  if (!date) return null;
+  const eventMs = new Date(date).getTime();
+  if (!Number.isFinite(eventMs)) return null;
+  const days = Math.round((eventMs - today.getTime()) / 86_400_000);
+  return `~${Math.max(0, Math.round(days / 7))} weeks`;
+}
+
 /** Every session `program` schedules on `day` (a day can hold more than one), without rest placeholders. */
 export const sessionsOn = (program, day) =>
   (program.sessions || []).filter((s) => dayKey(s.day) === dayKey(day) && !isRestSession(s));
@@ -50,8 +64,9 @@ function applySessionLoads(sessions, sessionLoads) {
 }
 
 /**
- * The current program for `uid` given their users/{uid}/state/summary data, or
- * null if there's none yet. `planId` identifies it for js/plan-updates.js.
+ * The current program for `uid` given their users/{uid}/state/summary data,
+ * or null if there's none yet. `planId` identifies it for js/plan-updates.js;
+ * its `updatedAt` Timestamp is when the athlete's plan last changed.
  */
 export async function loadCurrentProgram(uid, summary) {
   if (summary?.activeProgramSource === "group" && summary?.groupId) {
@@ -75,11 +90,17 @@ export async function loadCurrentProgram(uid, summary) {
       nutritionNote: member?.nutritionNote ?? null,
       changeSummary: plan.changeSummary,
       planId: plan.planId,
+      // A weekly update rewrites only the member layer, so the shared
+      // program's createdAt is when the cycle began, not when it last changed.
+      updatedAt: member?.updatedAt ?? shared.createdAt ?? null,
     };
   }
   if (summary?.currentProgramId) {
     const programSnap = await getDoc(doc(db, "users", uid, "programs", summary.currentProgramId));
-    return programSnap.exists() ? { ...programSnap.data(), planId: programSnap.id } : null;
+    if (!programSnap.exists()) return null;
+    const program = programSnap.data();
+    // Every personal update writes a new program doc.
+    return { ...program, planId: programSnap.id, updatedAt: program.createdAt ?? null };
   }
   return null;
 }
