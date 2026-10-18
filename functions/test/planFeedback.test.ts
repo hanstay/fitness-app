@@ -1,12 +1,37 @@
 import { describe, it, expect } from "vitest";
 import {
-  normalizeNoteInput, primaryTag, isQuestionOnly, formatFeedbackBlock, settleNotes, readActiveNote, followUpChange,
+  normalizeNoteInput, normalizeNoteGroupInput, MAX_NOTE_EXERCISES, primaryTag, isQuestionOnly, formatFeedbackBlock, settleNotes, readActiveNote, followUpChange,
   ActiveNote,
 } from "../src/lib/planFeedback";
 
 const note = (over: Partial<ActiveNote> = {}): ActiveNote => ({
   id: "abc", status: "pending", tags: ["pain"], text: "Knee hurts on lunges", exercise: "Walking Lunge (Dumbbell)",
   day: "Tuesday", duration: "ongoing", worse: false, ...over,
+});
+
+describe("normalizeNoteGroupInput", () => {
+  it("saves one note per exercise with the card's tags, text and duration", () => {
+    const r = normalizeNoteGroupInput({ tags: ["pain"], text: " knee ", duration: "ongoing",
+      exercises: [{ exercise: "Squat", day: "mon" }, { exercise: "Lunge", day: "Monday" }, { exercise: "Squat", day: "Monday" }] });
+    expect(r).toEqual({ notes: [
+      { tags: ["pain"], text: "knee", exercise: "Squat", day: "Monday", duration: "ongoing" },
+      { tags: ["pain"], text: "knee", exercise: "Lunge", day: "Monday", duration: "ongoing" },
+    ] });
+  });
+
+  it("reads a card with no list as one note", () => {
+    expect(normalizeNoteGroupInput({ tags: ["dislike"], text: "boring", exercises: [] }))
+      .toEqual({ notes: [{ tags: ["dislike"], text: "boring", exercise: null, day: null, duration: "week" }] });
+    expect(normalizeNoteGroupInput({ tags: ["dislike"], exercise: "Squat", day: "tue" }))
+      .toMatchObject({ notes: [{ exercise: "Squat", day: "Tuesday" }] });
+  });
+
+  it("rejects a bad card or too many exercises", () => {
+    expect(normalizeNoteGroupInput({ tags: ["question"], exercises: [{ exercise: "Squat" }] })).toHaveProperty("error");
+    expect(normalizeNoteGroupInput({ tags: ["pain"], exercises: "Squat" })).toHaveProperty("error");
+    const many = Array.from({ length: MAX_NOTE_EXERCISES + 1 }, (_, i) => ({ exercise: `Ex ${i}` }));
+    expect(normalizeNoteGroupInput({ tags: ["pain"], exercises: many })).toHaveProperty("error");
+  });
 });
 
 describe("normalizeNoteInput", () => {

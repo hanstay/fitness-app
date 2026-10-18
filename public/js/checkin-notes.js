@@ -1,6 +1,7 @@
 // The check-in's "Something not right?" section: save a note for the next
-// plan update, take one back before it's used, and answer the follow-up on
-// an ongoing one ("Still bothering you?"). Notes are written only by the
+// plan update (one per exercise picked, kept together as a group), edit or
+// take one back before it's used, and answer the follow-up on an ongoing
+// one ("Still bothering you?"). Notes are written only by the
 // functions in functions/src/feedback/feedbackNotes.ts; this page listens to
 // them. On a group plan, the member's own layer works around them.
 import { collection, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
@@ -109,76 +110,138 @@ function syncExerciseHint() {
     : names.length === 1 ? names[0] : `${names.length} picked: ${names.join(", ")}`;
 }
 
+// The group being edited: its id and how many waiting notes it has.
+let editing = null;
+
 function bindForm() {
   $("noteForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const btn = $("noteSaveBtn");
     if (btn.disabled) return;
     const tags = checkedTags();
-    const picked = pickedExercises();
+    const exercises = pickedExercises();
     const text = $("noteText").value.trim();
     if (!tags.length) return setNoteStatus("Pick what it's about first.");
-    if (!text && (!picked.length || isQuestionOnly(tags))) return setNoteStatus("Tell us a bit more, or pick the exercises it's about.");
-    // One note per exercise, so each gets its own follow-up and can be
-    // marked better on its own; with none picked, one general note.
-    const targets = picked.length ? picked : [{ day: null, exercise: null }];
-    // The server's limits, checked up front so a long pick doesn't half save.
-    const pendingRoom = MAX_PENDING_NOTES - pendingOwnCount;
-    const activeRoom = MAX_ACTIVE_NOTES - activeOwnCount;
-    if (activeRoom <= 0) return setNoteStatus(`Your plan is already working around ${MAX_ACTIVE_NOTES} notes. Mark some as better, then add more.`);
-    if (pendingRoom <= 0) return setNoteStatus(`You already have ${MAX_PENDING_NOTES} notes waiting. Update your plan first, then add more.`);
-    const room = Math.min(pendingRoom, activeRoom);
-    if (targets.length > room) {
-      return setNoteStatus(`You can add ${room} more ${room === 1 ? "note" : "notes"} right now. Pick fewer exercises.`);
+    if (!text && (!exercises.length || isQuestionOnly(tags))) return setNoteStatus("Tell us a bit more, or pick the exercises it's about.");
+    // The server's limits, checked up front too. An edit frees its own notes.
+    const adding = Math.max(exercises.length, 1) - (editing?.size ?? 0);
+    const room = Math.min(MAX_PENDING_NOTES - pendingOwnCount, MAX_ACTIVE_NOTES - activeOwnCount);
+    if (adding > room) {
+      return setNoteStatus(room <= 0
+        ? `You can't add more notes right now. Update your plan, or mark some as better, first.`
+        : `You can add ${room} more ${room === 1 ? "note" : "notes"} right now. Pick fewer exercises.`);
     }
     const duration = document.querySelector('input[name="noteDuration"]:checked')?.value ?? "week";
 
     btn.disabled = true;
     setNoteStatus("Saving…");
-    // One at a time, so the server's note limits see each one before the next.
-    const add = httpsCallable(functions, "addFeedbackNote");
-    const boxes = [...document.querySelectorAll('input[name="noteExercise"]:checked')];
-    let saved = 0;
+    const card = { tags, text, duration, exercises };
     try {
-      for (const { day, exercise } of targets) {
-        await add({ tags, text, exercise, day, duration });
-        saved++;
-      }
-      $("noteForm").reset();
-      syncFormToTags();
-      setNoteStatus(saved === 1 ? "Saved. It goes into your next plan update."
-        : `Saved ${saved} notes. They go into your next plan update.`);
+      if (editing) await httpsCallable(functions, "updateFeedbackNoteGroup")({ groupId: editing.id, ...card });
+      else await httpsCallable(functions, "addFeedbackNote")(card);
+      const n = Math.max(exercises.length, 1);
+      setNoteStatus(editing ? "Changes saved. They go into your next plan update."
+        : n === 1 ? "Saved. It goes into your next plan update." : `Saved ${n} notes. They go into your next plan update.`);
+      resetForm();
     } catch (err) {
-      // Untick what saved, so trying again doesn't add those twice.
-      boxes.slice(0, saved).forEach((box) => { box.checked = false; });
-      setNoteStatus(`${saved ? `Saved ${saved} of ${targets.length}. ` : ""}${errorText(err)}`);
+      setNoteStatus(errorText(err));
     } finally {
-      syncExerciseHint();
       btn.disabled = false;
     }
   });
+  $("noteCancelEdit").addEventListener("click", () => { resetForm(); setNoteStatus(""); });
+}
+
+function resetForm() {
+  editing = null;
+  $("noteForm").reset();
+  $("noteSaveBtn").textContent = "Save note";
+  $("noteCancelEdit").hidden = true;
+  syncFormToTags();
+  syncExerciseHint();
+}
+
+// Fills the form from a group's notes, which share tags, text and duration.
+function editGroup(groupId) {
+  const notes = pendingGroups.get(groupId);
+  if (!notes?.length) return;
+  resetForm();
+  editing = { id: groupId, size: notes.length };
+  const [first] = notes;
+  document.querySelectorAll('input[name="noteTag"]').forEach((el) => { el.checked = (first.tags || []).includes(el.value); });
+  $("noteText").value = first.text || "";
+  const duration = document.querySelector(`input[name="noteDuration"][value="${first.duration === "ongoing" ? "ongoing" : "week"}"]`);
+  if (duration) duration.checked = true;
+  for (const n of notes) if (n.exercise) exerciseBox(n.day, n.exercise).checked = true;
+  $("noteExercisesBox").open = notes.some((n) => n.exercise);
+  $("noteSaveBtn").textContent = "Save changes";
+  $("noteCancelEdit").hidden = false;
+  syncFormToTags();
+  syncExerciseHint();
+  setNoteStatus("");
+  $("noteForm").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// A note's exercise as a box on the list, added if the plan no longer has it.
+function exerciseBox(day, exercise) {
+  const key = `${day ?? ""}|${exercise}`;
+  const found = [...document.querySelectorAll('input[name="noteExercise"]')].find((el) => el.value === key);
+  if (found) return found;
+  $("noteExercises").insertAdjacentHTML("beforeend",
+    `<div class="chips"><label><input type="checkbox" name="noteExercise" value="${esc(key)}"><span>${esc(day ? `${exercise} · ${day}` : exercise)}</span></label></div>`);
+  return $("noteExercises").lastElementChild.querySelector("input");
 }
 
 const setNoteStatus = (msg) => { $("noteStatus").textContent = msg; };
 
 /* ---------- waiting notes ---------- */
 
+// Waiting notes by group, oldest first; a note saved before groups is its own.
+let pendingGroups = new Map();
+
+// A card's title: its exercises (and their day, when they share one), or the
+// single note's own title.
+function groupTitle(notes) {
+  if (notes.length === 1) return noteTitle(notes[0]);
+  const days = [...new Set(notes.map((n) => n.day))];
+  const names = notes.map((n) => n.exercise).filter(Boolean).join(", ");
+  return days.length === 1 && days[0] ? `${names} · ${days[0]}` : names;
+}
+
 function renderPending(notes) {
+  pendingGroups = new Map();
+  for (const n of notes) {
+    const key = n.groupId || `note:${n.id}`;
+    pendingGroups.set(key, [...(pendingGroups.get(key) || []), n]);
+  }
+  if (editing && !pendingGroups.has(editing.id)) { resetForm(); setNoteStatus("That note was used or removed, so it can't be edited."); }
+  else if (editing) editing.size = pendingGroups.get(editing.id).length;
+
   const el = $("pendingNotes");
   if (!notes.length) { el.innerHTML = ""; return; }
-  el.innerHTML = `<p class="fb-list-head">Waiting for your next update</p>` + notes.map((n) => `
-    <div class="fb-card"><div class="fb-row">
+  el.innerHTML = `<p class="fb-list-head">Waiting for your next update</p>` + [...pendingGroups].map(([key, group]) => {
+    const [n] = group;
+    const title = groupTitle(group);
+    const grouped = !key.startsWith("note:");
+    const showText = n.text && group.some((g) => g.exercise);
+    return `<div class="fb-card"><div class="fb-row">
       <div>
-        <div class="fb-title">${esc(noteTitle(n))}</div>
+        <div class="fb-title">${esc(title)}</div>
         <div class="fb-meta">${esc((n.tags || []).map(tagLabel).join(", "))}${isQuestionOnly(n.tags || []) ? "" : n.duration === "ongoing" ? " · until it's better" : " · this week"}</div>
-        ${n.text && n.exercise ? `<p class="fb-text">${esc(n.text)}</p>` : ""}
+        ${showText ? `<p class="fb-text">${esc(n.text)}</p>` : ""}
       </div>
-      <button class="link-btn" type="button" data-remove="${esc(n.id)}" aria-label="Remove note: ${esc(noteTitle(n))}">Remove</button>
-    </div></div>`).join("");
-  el.querySelectorAll("[data-remove]").forEach((btn) => btn.addEventListener("click", async () => {
+      <div class="fb-actions">
+        ${grouped ? `<button class="link-btn" type="button" data-edit="${esc(key)}" aria-label="Edit note: ${esc(title)}">Edit</button>` : ""}
+        <button class="link-btn" type="button" ${grouped ? `data-remove-group="${esc(key)}"` : `data-remove="${esc(n.id)}"`} aria-label="Remove note: ${esc(title)}">Remove</button>
+      </div>
+    </div></div>`;
+  }).join("");
+  el.querySelectorAll("[data-edit]").forEach((btn) => btn.addEventListener("click", () => editGroup(btn.dataset.edit)));
+  el.querySelectorAll("[data-remove], [data-remove-group]").forEach((btn) => btn.addEventListener("click", async () => {
     btn.disabled = true;
+    const args = btn.dataset.removeGroup ? { groupId: btn.dataset.removeGroup } : { noteId: btn.dataset.remove };
     try {
-      await httpsCallable(functions, "removeFeedbackNote")({ noteId: btn.dataset.remove });
+      await httpsCallable(functions, "removeFeedbackNote")(args);
     } catch (err) {
       btn.disabled = false;
       setNoteStatus(errorText(err));

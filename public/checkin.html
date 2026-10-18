@@ -67,7 +67,10 @@
   .fb-exercises summary > span{min-width:0}
   .fb-day{font-size:.78rem; font-weight:700; color:var(--text-secondary); margin:10px 0 6px}
   .fb-day:first-child{margin-top:0}
-  .fb-list-head{font-size:.8rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--text-secondary); margin:18px 0 8px}
+  .fb-row > .fb-actions{display:flex; flex-direction:column; align-items:flex-end; gap:6px; flex:none}
+  .fb-cancel{display:block; margin:10px auto 0}
+  .fb-cancel[hidden]{display:none}
+    .fb-list-head{font-size:.8rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--text-secondary); margin:18px 0 8px}
 </style>
 </head>
 <body data-auth="pending">
@@ -159,6 +162,7 @@
         </div>
       </div>
       <button class="btn secondary full" id="noteSaveBtn" type="submit">Save note</button>
+      <button class="link-btn fb-cancel" id="noteCancelEdit" type="button" hidden>Cancel editing</button>
     </form>
     <!-- Outside the form: follow-ups and Remove report here too, while the form waits. -->
     <p class="status-line" id="noteStatus" role="status"></p>

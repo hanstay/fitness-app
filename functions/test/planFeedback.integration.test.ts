@@ -4,7 +4,7 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { Timestamp } from "firebase-admin/firestore";
 import { getTestDb, clearFirestoreEmulator } from "./helpers/emulatorFirestore";
-import { addFeedbackNote, removeFeedbackNote, followUpFeedbackNote } from "../src/feedback/feedbackNotes";
+import { addFeedbackNote, removeFeedbackNote, updateFeedbackNoteGroup, followUpFeedbackNote } from "../src/feedback/feedbackNotes";
 import { suggestExerciseSwaps, applyExerciseSwap, undoExerciseSwap, SWAP_SUGGESTIONS_PER_DAY } from "../src/feedback/exerciseSwap";
 import { MAX_PENDING_NOTES, MAX_ACTIVE_NOTES } from "../src/lib/planFeedback";
 
@@ -78,6 +78,45 @@ describe("check-in notes", () => {
     // A group member's own update works around their notes (groupProgram.ts).
     await seedUser("n3", { activeProgramSource: "group", groupId: "g1" });
     await expect(call(addFeedbackNote, "n3", { tags: ["dislike"], text: "x" })).resolves.toHaveProperty("noteId");
+  });
+
+  it("saves a card with several exercises as one group, edits it and removes it", async () => {
+    await seedUser("g1");
+    const saved = await call<{ noteIds: string[]; groupId: string }>(addFeedbackNote, "g1", {
+      tags: ["pain"], text: "Knee", duration: "ongoing",
+      exercises: [{ exercise: "Squat (Barbell)", day: "Monday" }, { exercise: "Walking Lunge (Dumbbell)", day: "Monday" }],
+    });
+    expect(saved.noteIds).toHaveLength(2);
+    const byExercise = async () => Object.fromEntries((await noteDocs("g1")).map((d) => [d.get("exercise"), { id: d.id, ...d.data() }]));
+    let notes = await byExercise();
+    expect(Object.values(notes).every((n) => (n as { groupId?: string }).groupId === saved.groupId)).toBe(true);
+    const squatId = (notes["Squat (Barbell)"] as { id: string }).id;
+
+    // Untick the lunge, add the step-up, and change the text.
+    await call(updateFeedbackNoteGroup, "g1", {
+      groupId: saved.groupId, tags: ["pain", "too_hard"], text: "Knee, worse going down", duration: "week",
+      exercises: [{ exercise: "Squat (Barbell)", day: "Monday" }, { exercise: "Box Step-Up (Dumbbell)", day: "Monday" }],
+    });
+    notes = await byExercise();
+    expect(Object.keys(notes).sort()).toEqual(["Box Step-Up (Dumbbell)", "Squat (Barbell)"]);
+    expect(notes["Squat (Barbell)"]).toMatchObject({ id: squatId, tags: ["pain", "too_hard"], text: "Knee, worse going down", duration: "week", status: "pending" });
+    expect(notes["Box Step-Up (Dumbbell)"]).toMatchObject({ groupId: saved.groupId, status: "pending", source: "checkin" });
+
+    await call(removeFeedbackNote, "g1", { groupId: saved.groupId });
+    expect(await noteDocs("g1")).toHaveLength(0);
+  });
+
+  it("refuses a card past the limit, and editing a group an update has used", async () => {
+    await seedUser("g2");
+    for (let i = 0; i < MAX_PENDING_NOTES - 1; i++) await db.collection("users/g2/feedbackNotes").add({ status: "pending" });
+    const two = [{ exercise: "Squat (Barbell)" }, { exercise: "Walking Lunge (Dumbbell)" }];
+    await expect(call(addFeedbackNote, "g2", { tags: ["dislike"], text: "x", exercises: two })).rejects.toMatchObject({ code: "resource-exhausted" });
+    expect(await noteDocs("g2")).toHaveLength(MAX_PENDING_NOTES - 1); // nothing half saved
+
+    await db.doc("users/g2/feedbackNotes/used").set({ status: "open", groupId: "grp", exercise: "Squat (Barbell)", day: null });
+    await expect(call(updateFeedbackNoteGroup, "g2", { groupId: "grp", tags: ["dislike"], text: "x" })).rejects.toMatchObject({ code: "failed-precondition" });
+    await expect(call(removeFeedbackNote, "g2", { groupId: "grp" })).rejects.toMatchObject({ code: "failed-precondition" });
+    await expect(call(removeFeedbackNote, "g2", { groupId: "../x" })).rejects.toMatchObject({ code: "invalid-argument" });
   });
 
   it("won't take back a note an update has used", async () => {

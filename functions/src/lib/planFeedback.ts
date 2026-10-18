@@ -84,6 +84,46 @@ export function normalizeNoteInput(raw: unknown): { note: FeedbackNoteFields } |
   };
 }
 
+/** The most exercises one note card can name: one per exercise in a full week. */
+export const MAX_NOTE_EXERCISES = 20;
+
+const noteTargetSchema = z.object({
+  exercise: z.string().max(120).nullable().default(null),
+  day: z.string().max(20).nullable().default(null),
+});
+
+/**
+ * One note card as the notes it saves: one per exercise named in
+ * `exercises` (same tags, text and duration), or a single note from
+ * `exercise`/`day` when there's no list. The same exercise on the same day
+ * is saved once. Notes saved together share a group, so they're listed,
+ * edited and removed together while each is still answered on its own.
+ */
+export function normalizeNoteGroupInput(raw: unknown): { notes: FeedbackNoteFields[] } | { error: string } {
+  const list = (raw as { exercises?: unknown } | null)?.exercises;
+  if (list === undefined || (Array.isArray(list) && list.length === 0)) {
+    const one = normalizeNoteInput(raw);
+    return "error" in one ? one : { notes: [one.note] };
+  }
+  const targets = z.array(noteTargetSchema).max(MAX_NOTE_EXERCISES).safeParse(list);
+  if (!targets.success) return { error: `Pick up to ${MAX_NOTE_EXERCISES} exercises for one note.` };
+  const notes: FeedbackNoteFields[] = [];
+  const seen = new Set<string>();
+  for (const target of targets.data) {
+    const one = normalizeNoteInput({ ...(raw as object), ...target });
+    if ("error" in one) return one;
+    const key = noteGroupKey(one.note);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    notes.push(one.note);
+  }
+  return { notes };
+}
+
+/** Which slot a note is about, to match an edited card's exercises to the notes it saved. */
+export const noteGroupKey = (note: Pick<FeedbackNoteFields, "day" | "exercise">): string =>
+  `${note.day ?? ""}|${note.exercise ?? ""}`;
+
 // ---------------------------------------------------------------------------
 // The weekly update's side: which notes it reads, how they're written into
 // the prompt, and how it answers them.
