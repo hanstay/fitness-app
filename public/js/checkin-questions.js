@@ -16,10 +16,11 @@ const $ = (id) => document.getElementById(id);
 const PAIN_AREAS = ["Knee", "Lower back", "Hip", "Shoulder", "Elbow", "Wrist", "Ankle", "Other"];
 const PAIN_LEVELS = ["A niggle", "Sore", "Sharp"];
 
-/** The athlete's own date, so "Thursday" means their Thursday. */
-const localToday = () => {
+/** The athlete's own date and time zone, so "Thursday" means their Thursday. */
+const clock = () => {
   const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return { today, tzOffset: d.getTimezoneOffset() };
 };
 
 let questions = new Map(); // key → question, as last loaded
@@ -48,7 +49,7 @@ export async function refreshCheckinQuestions() {
   if (loading) return loading;
   loading = (async () => {
     try {
-      const { data } = await httpsCallable(functions, "getCheckinQuestions")({ today: localToday() });
+      const { data } = await httpsCallable(functions, "getCheckinQuestions")(clock());
       render(data);
     } catch (err) {
       console.error("[checkin] questions failed to load", err);
@@ -147,7 +148,7 @@ function bindCard(el) {
     el.querySelectorAll("input, button, textarea").forEach((c) => { c.disabled = true; });
     status("Saving…");
     try {
-      const { data } = await httpsCallable(functions, "answerCheckinQuestion")({ key: q.key, answerId, today: localToday(), ...extra });
+      const { data } = await httpsCallable(functions, "answerCheckinQuestion")({ key: q.key, answerId, ...clock(), ...extra });
       q.answer = { noteId: data.noteId, answerId, followUpId: extra.followUpId ?? null };
       // The pain questions or the text box close once saved; a follow-up stays, showing its answer.
       if (extra.pain || "text" in extra) follow.innerHTML = "";
@@ -158,6 +159,11 @@ function bindCard(el) {
       el.querySelectorAll("input, button, textarea").forEach((c) => { c.disabled = false; });
     }
   };
+
+  // A saved answer's follow-up is already on the card; changing it saves.
+  const bindFollowUp = (answerId) => follow.querySelectorAll("input").forEach((f) =>
+    f.addEventListener("change", () => save(answerId, { followUpId: f.value })));
+  if (q.answer) bindFollowUp(q.answer.answerId);
 
   // Tapping the chosen answer again takes it back.
   el.querySelectorAll(":scope > .chips input").forEach((input) => {
@@ -187,11 +193,13 @@ function bindCard(el) {
     if (a.action === "dismiss") { el.remove(); return; }
     if (a.followUp) {
       follow.innerHTML = followUpHtml(q, a.followUp, null);
-      follow.querySelectorAll("input").forEach((f) => f.addEventListener("change", () => save(answerId, { followUpId: f.value })));
+      bindFollowUp(answerId);
+      if (q.answer) status("Not saved yet: pick one to change your answer.");
       return;
     }
     if (a.pain || a.details) {
       follow.innerHTML = a.pain ? painHtml(q) : detailsHtml(q, "Anything to add? (optional)");
+      if (q.answer) status("Not saved yet: tap Save to change your answer.");
       follow.querySelector("[data-save]").addEventListener("click", () => {
         const pick = (field) => follow.querySelector(`[data-field="${field}"] input:checked`)?.value;
         const text = follow.querySelector("textarea")?.value.trim() || "";

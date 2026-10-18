@@ -23,16 +23,27 @@ const PAIN_AREAS = ["Knee", "Lower back", "Hip", "Shoulder", "Elbow", "Wrist", "
 const PAIN_LEVELS = ["A niggle", "Sore", "Sharp"] as const;
 
 const asDate = (v: unknown, fallback: string): string => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : fallback);
-const millisToDate = (ms: number | null | undefined): string | null => (ms != null ? new Date(ms).toISOString().slice(0, 10) : null);
 
 /**
- * The athlete's date. Their own clock decides "today" (a day name is only
- * right in their time zone), within a day of the server's.
+ * The athlete's clock, from the page: their date and their offset from UTC
+ * (minutes, as Date.getTimezoneOffset gives it). A day name is only right in
+ * their time zone, so "today" and the times the plan and Hevy import
+ * happened are all read as their dates. Anything implausible falls back to UTC.
  */
-function athleteToday(raw: unknown): string {
+interface AthleteClock { today: string; offsetMin: number }
+
+function athleteClock(data: Record<string, unknown> | undefined): AthleteClock {
   const server = new Date().toISOString().slice(0, 10);
-  const today = asDate(raw, server);
-  return Math.abs(daysBetween(server, today)) <= 1 ? today : server;
+  const today = asDate(data?.today, server);
+  const raw = data?.tzOffset;
+  const offsetMin = Number.isInteger(raw) && Math.abs(raw as number) <= 14 * 60 ? (raw as number) : 0;
+  return Math.abs(daysBetween(server, today)) <= 1 ? { today, offsetMin } : { today: server, offsetMin: 0 };
+}
+
+/** A stored time as the athlete's date. */
+function localDate(ts: { toMillis?: () => number } | null | undefined, clock: AthleteClock): string | null {
+  const ms = ts?.toMillis?.();
+  return ms != null ? new Date(ms - clock.offsetMin * 60000).toISOString().slice(0, 10) : null;
 }
 
 interface Loaded {
@@ -41,7 +52,8 @@ interface Loaded {
   answered: Map<string, { noteId: string; status: string; answerId: string; followUpId: string | null }>;
 }
 
-async function loadQuestions(db: Firestore, uid: string, today: string): Promise<Loaded> {
+async function loadQuestions(db: Firestore, uid: string, clock: AthleteClock): Promise<Loaded> {
+  const { today } = clock;
   const summary = (await db.doc(`users/${uid}/state/summary`).get()).data() ?? {};
   if (summary.activeProgramSource === "group" && summary.groupId) {
     throw new HttpsError("failed-precondition", "Check-in questions aren't available on group plans yet.");
@@ -56,7 +68,7 @@ async function loadQuestions(db: Firestore, uid: string, today: string): Promise
   const program = programSnap?.exists ? programSnap.data() ?? null : null;
   // The time the plan read the logs (see plan-update-readiness.js); older
   // plans only have when they were saved.
-  const planReadDate = millisToDate(program?.inputsReadAt?.toMillis?.() ?? program?.createdAt?.toMillis?.());
+  const planReadDate = localDate(program?.inputsReadAt ?? program?.createdAt, clock);
   const hevy = summary.integrationsStatus?.hevy ?? {};
   const strength = strengthSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as StrengthSession);
   const activities: LoggedActivity[] = activitySnap.docs.map((d) => {
@@ -70,12 +82,13 @@ async function loadQuestions(db: Firestore, uid: string, today: string): Promise
   const questions = buildCheckinQuestions({
     today,
     planReadDate,
+    planSince: localDate(program?.blockStartedAt ?? program?.createdAt, clock),
     plan: program as CheckinPlan | null,
     fixedSessions: userSnap.data()?.athlete?.fixed_sessions ?? [],
     strength,
     activities,
     tsb: typeof summary.wellness?.tsb === "number" ? summary.wellness.tsb : null,
-    hevy: { used: hevy.csvUploaded === true, lastSessionDate: hevy.lastSessionDate ?? null },
+    hevy: { used: hevy.csvUploaded === true, lastSessionDate: hevy.lastSessionDate ?? null, importedDate: localDate(hevy.parsedAt, clock) },
     icuConnected: summary.integrationsStatus?.intervalsIcu?.connected === true,
   });
 
@@ -105,8 +118,7 @@ const allQuestions = (q: CheckinQuestions): CheckinQuestion[] => [...(q.gap ? [q
 export const getCheckinQuestions = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
   const uid = request.auth.uid;
-  const today = athleteToday(request.data?.today);
-  const { questions, answered } = await loadQuestions(getFirestore(), uid, today);
+  const { questions, answered } = await loadQuestions(getFirestore(), uid, athleteClock(request.data));
 
   const view = (q: CheckinQuestion) => {
     const a = answered.get(q.key);
@@ -161,7 +173,7 @@ export const answerCheckinQuestion = onCall(async (request) => {
   const followUpId = typeof request.data?.followUpId === "string" ? request.data.followUpId : null;
   if (typeof key !== "string" || typeof answerId !== "string") throw new HttpsError("invalid-argument", "Unknown answer.");
 
-  const { questions, answered } = await loadQuestions(db, uid, athleteToday(request.data?.today));
+  const { questions, answered } = await loadQuestions(db, uid, athleteClock(request.data));
   const q = allQuestions(questions).find((x) => x.key === key);
   if (!q) throw new HttpsError("failed-precondition", "That question no longer applies. Reload the page to see this week's.");
   const guidance = answerGuidance(q, answerId, followUpId);
@@ -183,7 +195,7 @@ export const answerCheckinQuestion = onCall(async (request) => {
     checkin: { question: q.text, answer: followUpLabel ? `${answer.label}: ${followUpLabel}` : answer.label, guidance },
     questionKey: q.key,
     answerId,
-    followUpId,
+    followUpId: answer.followUp ? followUpId : null,
   };
 
   const earlier = answered.get(key);

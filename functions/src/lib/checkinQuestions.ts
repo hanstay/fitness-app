@@ -57,8 +57,13 @@ export interface LoggedActivity {
 export interface CheckinInput {
   /** The athlete's local date, YYYY-MM-DD. */
   today: string;
-  /** When the current plan last read the logs (YYYY-MM-DD), or null with no plan. */
+  /** When the current plan last read the logs (YYYY-MM-DD, the athlete's date), or null with no plan. */
   planReadDate: string | null;
+  /**
+   * When the plan's current week structure began (its block start), so a
+   * pattern isn't judged against weeks an older plan laid out differently.
+   */
+  planSince: string | null;
   plan: CheckinPlan | null;
   fixedSessions: Array<{ day: string; activity: string }>;
   /** Hevy sessions from about the last 5 weeks. */
@@ -67,7 +72,11 @@ export interface CheckinInput {
   activities: LoggedActivity[];
   /** Training form (TSB) from intervals.icu, or null. */
   tsb: number | null;
-  hevy: { used: boolean; lastSessionDate: string | null };
+  /**
+   * lastSessionDate: the newest workout imported. importedDate: the day of
+   * the last import (the athlete's date); a later lift isn't in Hevy data yet.
+   */
+  hevy: { used: boolean; lastSessionDate: string | null; importedDate: string | null };
   icuConnected: boolean;
   units?: Units;
 }
@@ -435,7 +444,10 @@ export function buildCheckinQuestions(input: CheckinInput): CheckinQuestions {
   // Hevy is the strength log when it's in use; without fresh data in the
   // window, a missing lift is unknown, not skipped.
   const hevyFresh = input.hevy.used && input.hevy.lastSessionDate != null && input.hevy.lastSessionDate >= detailStart;
-  const liftsKnown = hevyFresh || (!input.hevy.used && input.icuConnected);
+  // Hevy comes in by CSV upload, so a day after the last import is unknown.
+  const liftsKnownOn = (date: string) => input.hevy.used
+    ? hevyFresh && input.hevy.importedDate != null && date <= input.hevy.importedDate
+    : input.icuConnected;
 
   const week: CheckinQuestion[] = [];
   const data: CheckinQuestion[] = [];
@@ -487,7 +499,7 @@ export function buildCheckinQuestions(input: CheckinInput): CheckinQuestions {
         compareLifts(plan, logs, date, day, label);
       } else if (unusedActs().some((a) => activitySport(a.type) === "strength")) {
         used.add(unusedActs().find((a) => activitySport(a.type) === "strength")!.id);
-      } else if (past && liftsKnown) {
+      } else if (past && liftsKnownOn(date)) {
         const other = cardioActs()[0];
         const session = sessionName(plan.label);
         if (other) {
@@ -615,7 +627,7 @@ export function buildCheckinQuestions(input: CheckinInput): CheckinQuestions {
 
   for (const [name, { count, last }] of added) {
     if (count < 2) continue;
-    week.push(question("added", `added|${detailStart}|${name}`, last, "Hevy · this week",
+    week.push(question("added", `added|${input.planReadDate ?? "none"}|${name}`, last, "Hevy · this week",
       `You added ${name} ${timesWord(count)} this week. Keep it in?`, { exercise: name, params: { exercise: name } }));
   }
 
@@ -629,17 +641,19 @@ export function buildCheckinQuestions(input: CheckinInput): CheckinQuestions {
         return addDays(d, -7 * w);
       });
       if (!firstLog || firstLog > dates[dates.length - 1]) continue; // not enough history
-      const needsLifts = plan.lifts.length > 0;
-      if (needsLifts ? !liftsKnown : !input.icuConnected) continue;
-      const missed = dates.filter((d) => !strengthOn(d).length && !activitiesOn(d).length);
+      // Only weeks this plan's structure laid out, and only days the logs cover.
+      const judged = dates.filter((d) => (!input.planSince || d >= input.planSince)
+        && (plan.lifts.length ? liftsKnownOn(d) : input.icuConnected));
+      if (judged.length < PATTERN_MIN_MISSES) continue;
+      const missed = judged.filter((d) => !strengthOn(d).length && !activitiesOn(d).length);
       if (missed.length < PATTERN_MIN_MISSES) continue;
       const session = sessionName(plan.label);
       for (let i = week.length - 1; i >= 0; i--) {
         if (week[i].kind === "skipped" && week[i].day === day) week.splice(i, 1);
       }
-      week.push(question("pattern", `pattern|${day}|${plan.label}`, dates[0], `Pattern · last ${PATTERN_WEEKS} weeks`,
-        `${possessive(day)} ${session} was missed in ${missed.length} of the last ${PATTERN_WEEKS} weeks.`,
-        { facts: dates.slice().reverse().map((d) => `${shortDate(d)}: ${missed.includes(d) ? "missed" : "done"}`), day, params: { session, day } }));
+      week.push(question("pattern", `pattern|${day}|${plan.label}`, dates[0], `Pattern · last ${plural(judged.length, "week")}`,
+        `${possessive(day)} ${session} was missed in ${missed.length} of the last ${plural(judged.length, "week")}.`,
+        { facts: judged.slice().reverse().map((d) => `${shortDate(d)}: ${missed.includes(d) ? "missed" : "done"}`), day, params: { session, day } }));
     }
   }
 
@@ -651,7 +665,7 @@ export function buildCheckinQuestions(input: CheckinInput): CheckinQuestions {
     if (offZone.length) facts.push(`${plural(offZone.length, "run")} above zone 2`);
     const rest = week.filter((q) => q.kind !== "fell_short" && q.kind !== "off_zone");
     week.length = 0;
-    week.push(...rest, question("fatigue", `fatigue|${detailStart}`, today, "Hevy + intervals.icu · this week",
+    week.push(...rest, question("fatigue", `fatigue|${input.planReadDate ?? "none"}`, today, "Hevy + intervals.icu · this week",
       `Your training load is high and ${plural(short.length, "lift")} fell short. How are you feeling?`, { facts }));
   }
 

@@ -38,6 +38,7 @@ function act(id: string, date: string, type: string, extra: Partial<LoggedActivi
 const cleanWeek = (): CheckinInput => ({
   today: TODAY,
   planReadDate: READ,
+  planSince: "2026-09-01",
   plan: PLAN,
   fixedSessions: [],
   strength: [
@@ -46,7 +47,7 @@ const cleanWeek = (): CheckinInput => ({
   ],
   activities: [act("a1", SAT, "Run", { distance_km: 14.2, duration_s: 5000 })],
   tsb: -5,
-  hevy: { used: true, lastSessionDate: WED },
+  hevy: { used: true, lastSessionDate: WED, importedDate: TODAY },
   icuConnected: true,
 });
 
@@ -129,6 +130,13 @@ describe("buildCheckinQuestions", () => {
     expect(q.week[1].text).toBe("You added a 5 km run on Thursday. Part of your week?");
   });
 
+  it("doesn't call a lift skipped when it's after the last Hevy import", () => {
+    const input = cleanWeek();
+    input.strength = [input.strength[0]]; // Wednesday's Upper not in the log...
+    input.hevy = { used: true, lastSessionDate: MON, importedDate: "2026-10-13" }; // ...but the export was from Tuesday
+    expect(buildCheckinQuestions(input).week).toEqual([]);
+  });
+
   it("asks about lifts that fell short or were too easy", () => {
     const input = cleanWeek();
     input.strength[1] = hevy(WED, [["Bench Press (Barbell)", [[80, 8], [80, 6], [80, 5]]], ["Seated Row (Cable)", [[60, 14], [60, 14], [60, 15]]]]);
@@ -161,6 +169,11 @@ describe("buildCheckinQuestions", () => {
       "No Hyrox class on Friday. What happened?",
       "You added Bicep Curl (Dumbbell) twice this week. Keep it in?",
     ]);
+    // The same question keeps its key on later days, so an answer sticks.
+    const old = { ...input, planReadDate: "2026-10-05" }; // so each day's window starts on a different date
+    const keyOn = (today: string) => buildCheckinQuestions({ ...old, today }).week.find((x) => x.kind === "added")?.key;
+    expect(keyOn("2026-10-17")).toBeDefined();
+    expect(keyOn("2026-10-17")).toBe(keyOn("2026-10-18"));
   });
 
   it("shows 3 questions, ranked, with the rest behind Show more", () => {
@@ -190,6 +203,10 @@ describe("buildCheckinQuestions", () => {
     expect(kinds(q.week)).toEqual(["pattern"]);
     expect(q.week[0].text).toBe("Wednesday's Upper session was missed in 3 of the last 4 weeks.");
     expect(answerGuidance(q.week[0], "move", "Saturday")).toContain("from Wednesday to Saturday");
+
+    // Weeks an older plan laid out don't count.
+    input.planSince = "2026-10-05";
+    expect(kinds(buildCheckinQuestions(input).week)).toEqual(["skipped"]);
   });
 
   it("replaces several short lifts with one fatigue question when form is low", () => {
@@ -237,7 +254,7 @@ describe("buildCheckinQuestions", () => {
     input.today = "2026-10-19"; // Monday, Lower not logged yet
     input.planReadDate = "2026-10-12";
     input.strength = [input.strength[1]];
-    input.hevy.lastSessionDate = WED;
+    input.hevy = { used: true, lastSessionDate: WED, importedDate: "2026-10-19" };
     expect(buildCheckinQuestions(input).week.filter((x) => x.kind === "skipped")).toEqual([]);
   });
 });

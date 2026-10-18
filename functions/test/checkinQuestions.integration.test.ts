@@ -61,12 +61,13 @@ describe("check-in questions", () => {
     expect(q.kind).toBe("swapped_exercise");
     expect(q.text).toBe(`You did Goblet Squat instead of Squat (Barbell) on ${weekdayOf(day)}. Why?`);
 
-    const { noteId } = await call<{ noteId: string }>(answerCheckinQuestion, "q1", { key: q.key, answerId: "prefer", today: TODAY });
+    const { noteId } = await call<{ noteId: string }>(answerCheckinQuestion, "q1", { key: q.key, answerId: "prefer", followUpId: "stray", today: TODAY, tzOffset: -480 });
     const saved = (await db.doc(`users/q1/feedbackNotes/${noteId}`).get()).data();
     expect(saved).toMatchObject({
       status: "pending", source: "checkin_question", tags: ["checkin"], questionKey: q.key, answerId: "prefer",
       exercise: "Squat (Barbell)", day: weekdayOf(day), duration: "week",
       checkin: { question: q.text, answer: "Prefer it" },
+      followUpId: null, // this answer has no follow-up
     });
 
     // The update sees it with the app's guidance.
