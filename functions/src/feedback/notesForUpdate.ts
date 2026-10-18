@@ -19,8 +19,9 @@ export async function loadActiveNotes(db: Firestore, uid: string): Promise<Activ
 
 /**
  * Inside the update's commit, after its other reads: moves on each note the
- * update was given. A note that changed while the update ran (taken back, or
- * answered at a follow-up) is left as it now is.
+ * update was given. A note that changed while the update ran (taken back,
+ * answered at a follow-up, or edited at check-in) is left as it now is, for
+ * the next update.
  */
 export async function settleNotesInTransaction(
   db: Firestore,
@@ -35,8 +36,7 @@ export async function settleNotesInTransaction(
   const snaps = await tx.getAll(...refs);
   settlements.forEach((s, i) => {
     const snap = snaps[i];
-    const unchanged = snap.exists && snap.get("status") === notes[i].status && (snap.get("worse") === true) === (notes[i].worse === true);
-    if (!unchanged) return;
+    if (!snap.exists || !sameNote(readActiveNote(snap.id, snap.data() ?? {}), notes[i])) return;
     tx.update(refs[i], {
       status: s.status,
       response: s.response,
@@ -47,3 +47,8 @@ export async function settleNotesInTransaction(
     });
   });
 }
+
+// What the update read is still what the note says.
+const sameNote = (now: ActiveNote | null, read: ActiveNote): boolean =>
+  now != null && now.status === read.status && now.worse === (read.worse === true) &&
+  now.text === read.text && now.duration === read.duration && now.tags.join() === read.tags.join();

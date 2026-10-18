@@ -7,6 +7,7 @@ import { getTestDb, clearFirestoreEmulator } from "./helpers/emulatorFirestore";
 import { addFeedbackNote, removeFeedbackNote, updateFeedbackNoteGroup, followUpFeedbackNote } from "../src/feedback/feedbackNotes";
 import { suggestExerciseSwaps, applyExerciseSwap, undoExerciseSwap, SWAP_SUGGESTIONS_PER_DAY } from "../src/feedback/exerciseSwap";
 import { MAX_PENDING_NOTES, MAX_ACTIVE_NOTES } from "../src/lib/planFeedback";
+import { loadActiveNotes, settleNotesInTransaction } from "../src/feedback/notesForUpdate";
 
 const mockExtractStructuredJson = vi.hoisted(() => vi.fn());
 vi.mock("../src/lib/claude", () => ({
@@ -104,6 +105,20 @@ describe("check-in notes", () => {
 
     await call(removeFeedbackNote, "g1", { groupId: saved.groupId });
     expect(await noteDocs("g1")).toHaveLength(0);
+  });
+
+  it("leaves a note edited while an update ran for the next update", async () => {
+    await seedUser("g3");
+    const { groupId } = await call<{ groupId: string }>(addFeedbackNote, "g3", {
+      tags: ["pain"], text: "Knee", exercises: [{ exercise: "Squat (Barbell)", day: "Monday" }, { exercise: "Walking Lunge (Dumbbell)", day: "Monday" }],
+    });
+    const read = await loadActiveNotes(db, "g3"); // the update reads its notes, then generates
+    await call(updateFeedbackNoteGroup, "g3", { groupId, tags: ["pain"], text: "Knee, sharp going down",
+      exercises: [{ exercise: "Squat (Barbell)", day: "Monday" }, { exercise: "Walking Lunge (Dumbbell)", day: "Monday" }] });
+    await db.runTransaction((tx) => settleNotesInTransaction(db, tx, "g3", read,
+      read.map((n) => ({ noteId: n.id, status: "done" as const, response: { status: "changed" as const, text: "Changed it." } })), "prog1"));
+    const after = (await noteDocs("g3")).map((d) => d.data());
+    expect(after.every((n) => n.status === "pending" && n.text === "Knee, sharp going down")).toBe(true);
   });
 
   it("refuses a card past the limit, and editing a group an update has used", async () => {

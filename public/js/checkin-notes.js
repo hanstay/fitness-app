@@ -88,10 +88,11 @@ async function fillExercises(uid, summary) {
     const day = normalizeDay(s.day) ?? "";
     const chips = [];
     for (const ex of s.exercises || []) {
-      const key = `${day}|${ex.name}`;
-      if (!ex.name?.trim() || seen.has(key) || /^rest(\s|$)/i.test(ex.name)) continue;
+      const name = ex.name?.trim(); // as the server stores it
+      const key = `${day}|${name}`;
+      if (!name || seen.has(key) || /^rest(\s|$)/i.test(name)) continue;
       seen.add(key);
-      chips.push(`<label><input type="checkbox" name="noteExercise" value="${esc(key)}"><span>${esc(ex.name)}</span></label>`);
+      chips.push(`<label><input type="checkbox" name="noteExercise" value="${esc(key)}"><span>${esc(name)}</span></label>`);
     }
     if (chips.length) groups.push(`<p class="fb-day">${esc(s.day || "Other")}</p><div class="chips">${chips.join("")}</div>`);
   }
@@ -155,6 +156,7 @@ function bindForm() {
 function resetForm() {
   editing = null;
   $("noteForm").reset();
+  document.querySelectorAll("#noteExercises [data-extra]").forEach((el) => el.remove());
   $("noteSaveBtn").textContent = "Save note";
   $("noteCancelEdit").hidden = true;
   syncFormToTags();
@@ -182,13 +184,14 @@ function editGroup(groupId) {
   $("noteForm").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-// A note's exercise as a box on the list, added if the plan no longer has it.
+// A note's exercise as a box on the list, added while editing if the plan no
+// longer has it.
 function exerciseBox(day, exercise) {
   const key = `${day ?? ""}|${exercise}`;
   const found = [...document.querySelectorAll('input[name="noteExercise"]')].find((el) => el.value === key);
   if (found) return found;
   $("noteExercises").insertAdjacentHTML("beforeend",
-    `<div class="chips"><label><input type="checkbox" name="noteExercise" value="${esc(key)}"><span>${esc(day ? `${exercise} · ${day}` : exercise)}</span></label></div>`);
+    `<div class="chips" data-extra><label><input type="checkbox" name="noteExercise" value="${esc(key)}"><span>${esc(day ? `${exercise} · ${day}` : exercise)}</span></label></div>`);
   return $("noteExercises").lastElementChild.querySelector("input");
 }
 
