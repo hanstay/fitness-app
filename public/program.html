@@ -115,6 +115,10 @@
     .day-cell.rest::after{background:var(--text-secondary)}
     .day-cell.selected::after{background:#ffffff}
   }
+  .fb-said{border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin:0 0 8px}
+  .fb-said .you{font-size:.8rem; color:var(--text-secondary)}
+  .fb-said .you b{color:var(--accent-dark); font-weight:600}
+  .fb-said .did{font-size:.9rem; margin-top:2px}
 </style>
 </head>
 <body data-auth="pending">
@@ -221,10 +225,17 @@
     </div>`;
 
     // ---- What changed in the latest update, until closed ----
-    // The update's answer to each check-in note it was given.
+    // The update's answer to each check-in note and question answer it was
+    // given: what the athlete said, then what changed.
+    const feedbackTitle = (r) => r.exercise ? `${r.exercise}${r.day ? ` · ${r.day}` : ""}`
+      : r.answer ? (r.day || "Your week")
+      : r.text.length > 50 ? `${r.text.slice(0, 47)}…` : r.text;
     const feedbackHtml = (p.feedbackResponses || []).length ? `
-      <h3 style="margin:14px 0 6px; font-size:.95rem">Your feedback</h3>
-      <ul class="small">${p.feedbackResponses.map((r) => `<li><b>${esc(r.exercise || (r.text.length > 50 ? `${r.text.slice(0, 47)}…` : r.text))}:</b> ${esc(r.response)}</li>`).join("")}</ul>` : "";
+      <h3 style="margin:14px 0 6px; font-size:.95rem">From your check-in</h3>
+      ${p.feedbackResponses.map((r) => `<div class="fb-said">
+        <div class="you">${esc(feedbackTitle(r))}${r.answer ? ` · you said <b>${esc(r.answer)}</b>` : ""}</div>
+        <div class="did">${esc(r.response)}</div>
+      </div>`).join("")}` : "";
     if (((p.changeSummary || []).length || feedbackHtml) && !changesDismissed(user.uid, planId)) {
       main.insertAdjacentHTML("beforeend", `
         <section id="changes">

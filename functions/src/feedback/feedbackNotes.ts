@@ -27,14 +27,19 @@ export const addFeedbackNote = onCall(async (request) => {
 
   const db = getFirestore();
   const notes = db.collection(`users/${uid}/feedbackNotes`);
-  const [pending, active] = await Promise.all([
+  // Answers to check-in questions have their own limit (checkin/checkinQuestions.ts).
+  const answers = notes.where("source", "==", "checkin_question");
+  const counts = await Promise.all([
     notes.where("status", "==", "pending").count().get(),
+    answers.where("status", "==", "pending").count().get(),
     notes.where("status", "in", ["pending", "open"]).count().get(),
+    answers.where("status", "in", ["pending", "open"]).count().get(),
   ]);
-  if (pending.data().count >= MAX_PENDING_NOTES) {
+  const [pendingCount, activeCount] = [counts[0].data().count - counts[1].data().count, counts[2].data().count - counts[3].data().count];
+  if (pendingCount >= MAX_PENDING_NOTES) {
     throw new HttpsError("resource-exhausted", `You already have ${MAX_PENDING_NOTES} notes waiting. Update your plan first, then add more.`);
   }
-  if (active.data().count >= MAX_ACTIVE_NOTES) {
+  if (activeCount >= MAX_ACTIVE_NOTES) {
     throw new HttpsError("resource-exhausted", `Your plan is already working around ${MAX_ACTIVE_NOTES} notes. Mark some as better at check-in, then add more.`);
   }
   const ref = await notes.add({

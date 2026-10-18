@@ -9,6 +9,7 @@
 //   a personal plan's generation decides it (structuralChanged).
 // - a group plan whose shared program was replaced (by another member's
 //   update) after this member's layer was written for it.
+// - a check-in note or answer waiting for the next update (pendingFeedback).
 // - starting the next phase early, or there being no plan yet.
 
 const millis = (ts) => (ts?.toMillis ? ts.toMillis() : null);
@@ -17,16 +18,17 @@ const millis = (ts) => (ts?.toMillis ? ts.toMillis() : null);
  * summary: users/{uid}/state/summary data. plan: the current plan from
  * loadCurrentProgram, or null if there's none. profileChanged: the athlete's
  * profile differs structurally from plan.profileSnapshot.
+ * pendingFeedback: notes and check-in answers waiting for the next update.
  * hevyImporting / icuSyncing: an import or sync this page started is in
  * flight; the update waits for it, so it runs on the newest data.
  * Returns { ready, hint }: hint says what's missing when it isn't ready.
  */
-export function planUpdateReadiness({ summary, plan, profileChanged, hevyImporting, icuSyncing, startNextPhase }) {
+export function planUpdateReadiness({ summary, plan, profileChanged, hevyImporting, icuSyncing, startNextPhase, pendingFeedback = 0 }) {
   if (hevyImporting) return { ready: false, hint: "Importing your Hevy workouts…" };
   const hevy = summary?.integrationsStatus?.hevy;
   const icu = summary?.integrationsStatus?.intervalsIcu;
   if (icu?.connected && icuSyncing) return { ready: false, hint: "Syncing intervals.icu…" };
-  if (!plan || startNextPhase || profileChanged || plan.layerOutdated) return { ready: true, hint: "" };
+  if (!plan || startNextPhase || profileChanged || plan.layerOutdated || pendingFeedback > 0) return { ready: true, hint: "" };
 
   // Older plans have no inputsReadAt; when they were saved is the nearest.
   const readAt = millis(plan.inputsReadAt) ?? millis(plan.updatedAt);

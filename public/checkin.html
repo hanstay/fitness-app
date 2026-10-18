@@ -46,6 +46,21 @@
   .fb-compact:first-child{border-top:0; padding-top:0}
   .fb-answers{display:flex; align-items:center; gap:6px; flex-wrap:wrap}
   .fb-answers .btn{padding:7px 12px; font-size:.82rem}
+  .cq-card{border:1px solid var(--border); border-radius:10px; padding:12px 14px; background:var(--card); margin:0 0 10px; display:flex; flex-direction:column; gap:10px}
+  .cq-card.cq-warn{border-color:var(--warn)}
+  .cq-card.cq-welcome{border-color:var(--accent); background:var(--accent-soft)}
+  .cq-src{font-size:.7rem; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:var(--text-secondary)}
+  .cq-text{font-weight:600; font-size:.95rem; line-height:1.4; margin:0}
+  .cq-facts{display:flex; flex-wrap:wrap; gap:4px 14px; font-size:.82rem; color:var(--text-secondary)}
+  .cq-card fieldset{border:0; margin:0; padding:0; min-width:0}
+  .cq-card legend{font-size:.82rem; font-weight:600; padding:0; margin:0 0 6px}
+  .cq-card .chips{gap:6px}
+  .cq-card .chips input + span{padding:7px 12px; font-size:.82rem}
+  .cq-more{display:flex; flex-direction:column; gap:10px}
+  .cq-card .status-line{margin:0}
+  .cq-card .status-line:empty{display:none}
+  .cq-card .field label{text-transform:none; letter-spacing:0; font-size:.82rem}
+  .cq-card .btn{padding:9px 14px; font-size:.86rem}
   .fb-list-head{font-size:.8rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--text-secondary); margin:18px 0 8px}
 </style>
 </head>
@@ -101,7 +116,20 @@
     </div>
   </section>
 
-  <!-- Section 3: notes for the next update (personal plans only; shown by checkin.js) -->
+  <!-- Section 3: questions about the week's logs (personal plans only; checkin-questions.js) -->
+  <section id="weekSection" style="display:none">
+    <div id="gapCard"></div>
+    <div id="dataCards"></div>
+    <div id="weekBlock" style="display:none">
+      <h2><span class="dot"></span>Your week</h2>
+      <p class="muted small" id="weekIntro"></p>
+      <div id="weekCards"></div>
+      <button class="link-btn" type="button" id="weekMoreBtn" style="display:none"></button>
+      <div id="weekMore"></div>
+    </div>
+  </section>
+
+  <!-- Section 4: notes for the next update (personal plans only; shown by checkin.js) -->
   <section id="feedbackSection" style="display:none">
     <h2><span class="dot"></span>Something not right?</h2>
     <p class="muted small">Tell us about pain, missing kit, or anything you'd change. Your next plan update works around it and
@@ -137,7 +165,7 @@
     <div id="pendingNotes"></div>
   </section>
 
-  <!-- Section 4: Regenerate plan -->
+  <!-- Section 5: Regenerate plan -->
   <section id="regenSection">
     <h2><span class="dot"></span>Update your plan</h2>
     <p class="muted small">Adjusts this week's sessions from your latest Hevy log and training load. Your roadmap stays as it

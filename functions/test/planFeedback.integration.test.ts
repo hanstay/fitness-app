@@ -65,6 +65,11 @@ describe("check-in notes", () => {
     for (let i = 0; i < MAX_PENDING_NOTES; i++) await db.collection("users/n2/feedbackNotes").add({ status: "pending" });
     await expect(call(addFeedbackNote, "n2", { tags: ["dislike"], text: "x" })).rejects.toMatchObject({ code: "resource-exhausted" });
 
+    // Check-in answers don't use up the notes' limit.
+    await seedUser("n7");
+    for (let i = 0; i < MAX_PENDING_NOTES; i++) await db.collection("users/n7/feedbackNotes").add({ status: "pending", source: "checkin_question" });
+    await expect(call(addFeedbackNote, "n7", { tags: ["dislike"], text: "x" })).resolves.toHaveProperty("noteId");
+
     await seedUser("n6");
     for (let i = 0; i < MAX_ACTIVE_NOTES; i++) await db.collection("users/n6/feedbackNotes").add({ status: "open" });
     await expect(call(addFeedbackNote, "n6", { tags: ["dislike"], text: "x" })).rejects.toMatchObject({ code: "resource-exhausted" });
