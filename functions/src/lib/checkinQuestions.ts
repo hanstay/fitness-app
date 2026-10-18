@@ -18,8 +18,8 @@ export interface CheckinInput {
   planHasLifts: boolean;
   /** used: Hevy is the athlete's strength log. lastSessionDate: the newest workout imported. */
   hevy: { used: boolean; lastSessionDate: string | null };
-  /** The newest training logged anywhere (a Hevy workout or an intervals.icu activity), YYYY-MM-DD. */
-  lastTrainedDate: string | null;
+  /** Days with training logged since the plan read the logs (Hevy workouts, intervals.icu activities), YYYY-MM-DD. */
+  trainedDates: string[];
 }
 
 export const QUESTION_KINDS = ["long_gap", "no_new_data"] as const;
@@ -100,8 +100,42 @@ function question(kind: QuestionKind, key: string, source: string, text: string,
   return { key, kind, source, text, answers: answersFor(kind), params };
 }
 
-/** Which question an answer's key belongs to ("long_gap|2026-09-20" is a long_gap). */
-export const questionKindOf = (key: string): string => key.split("|")[0];
+// Hevy has a workout from the days since the plan read the log (at most the last week).
+function hevyFresh({ today, planReadDate, hevy }: CheckinInput): boolean {
+  const weekAgo = addDays(today, -(RECENT_DAYS - 1));
+  const since = planReadDate && planReadDate > weekAgo ? planReadDate : weekAgo;
+  return hevy.lastSessionDate != null && hevy.lastSessionDate >= since;
+}
+
+/**
+ * Training was logged often enough since the plan read the logs that no
+ * stretch without any reaches a long gap: they weren't away, and the update
+ * reads what they did. One run after three weeks off still leaves the gap.
+ */
+function gapCovered({ today, planReadDate, trainedDates }: CheckinInput): boolean {
+  if (!planReadDate) return false;
+  let last = planReadDate;
+  for (const d of [...new Set(trainedDates)].filter((d) => d > planReadDate && d <= today).sort()) {
+    if (daysBetween(last, d) >= LONG_GAP_DAYS) return false;
+    last = d;
+  }
+  return daysBetween(last, today) < LONG_GAP_DAYS;
+}
+
+/**
+ * Keys of questions for this plan whose premise the logs have since
+ * disproved: Welcome back once the gap turns out to have been trained
+ * through, "nothing new from Hevy" once workouts arrive. A waiting answer
+ * to one of these is taken back rather than sent to the update.
+ */
+export function disprovedQuestionKeys(input: CheckinInput): string[] {
+  const { today, planReadDate } = input;
+  if (!planReadDate) return [];
+  const keys: string[] = [];
+  if (daysBetween(planReadDate, today) >= LONG_GAP_DAYS && gapCovered(input)) keys.push(`long_gap|${planReadDate}`);
+  if (hevyFresh(input)) keys.push(`no_new_data|${planReadDate}`);
+  return keys;
+}
 
 /** The questions for this check-in, welcome back first. */
 export function buildCheckinQuestions(input: CheckinInput): CheckinQuestion[] {
@@ -109,20 +143,15 @@ export function buildCheckinQuestions(input: CheckinInput): CheckinQuestion[] {
   if (!planReadDate) return [];
   const out: CheckinQuestion[] = [];
 
-  // Training logged since the plan read the logs means they weren't away:
-  // the update reads it, so there's nothing to ask.
   const gapDays = daysBetween(planReadDate, today);
-  const trainedSince = input.lastTrainedDate != null && input.lastTrainedDate > planReadDate;
-  if (gapDays >= LONG_GAP_DAYS && !trainedSince) {
+  if (gapDays >= LONG_GAP_DAYS && !gapCovered(input)) {
     const weeks = plural(Math.round(gapDays / 7), "week");
     out.push(question("long_gap", `long_gap|${planReadDate}`, "Welcome back",
       `It's been ${weeks} since your plan was last updated. What happened?`, { weeks }));
   }
 
-  // Nothing new from Hevy in the days since the plan read the log (at most the last week).
   const since = planReadDate > addDays(today, -(RECENT_DAYS - 1)) ? planReadDate : addDays(today, -(RECENT_DAYS - 1));
-  const fresh = input.hevy.lastSessionDate != null && input.hevy.lastSessionDate >= since;
-  if (input.hevy.used && input.planHasLifts && !fresh && daysBetween(since, today) >= STALE_DAYS) {
+  if (input.hevy.used && input.planHasLifts && !hevyFresh(input) && daysBetween(since, today) >= STALE_DAYS) {
     out.push(question("no_new_data", `no_new_data|${planReadDate}`, "Hevy",
       `No new Hevy workouts since ${dayOrDate(planReadDate, today)}, when your plan was last updated.`));
   }

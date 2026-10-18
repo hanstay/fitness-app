@@ -357,9 +357,9 @@ if (summary?.integrationsStatus?.intervalsIcu?.connected) {
   icuSyncing = true;
   renderGenerationStatus();
   httpsCallable(functions, "syncIntervalsActivities")()
-    .then(async () => {
-      // Activities from a long gap mean there's no "Welcome back" to ask.
-      refreshCheckinQuestions();
+    .then(async ({ data }) => {
+      // Activities from a long gap can mean there's no "Welcome back" to ask.
+      if (data?.newActivities > 0) refreshCheckinQuestions();
       summary = await loadSummary();
       renderIcuState(summary);
     })

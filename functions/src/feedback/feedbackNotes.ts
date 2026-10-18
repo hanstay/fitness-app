@@ -153,7 +153,10 @@ export const followUpFeedbackNote = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
   const outcome = request.data?.outcome as FollowUpOutcome;
   if (!FOLLOW_UP_OUTCOMES.includes(outcome)) throw new HttpsError("invalid-argument", "Unknown answer.");
-  const ref = noteRef(request.auth.uid, request.data?.noteId);
+  const uid = request.auth.uid;
+  const ref = noteRef(uid, request.data?.noteId);
+  // Taking back "better" puts the note back in play, so it needs room.
+  if (outcome !== "better" && (await ref.get()).get("status") === "resolved") await checkRoom(uid, 1);
   await getFirestore().runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     const status = snap.get("status");

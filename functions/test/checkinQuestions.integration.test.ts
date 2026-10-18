@@ -99,26 +99,35 @@ describe("check-in questions", () => {
     expect((await call<Questions>(getCheckinQuestions, "q5", { today: TODAY })).questions).toEqual([]);
   });
 
-  it("doesn't welcome back after a gap with training logged, and takes back an answer the logs disprove", async () => {
+  it("doesn't welcome back after a gap trained through, and takes back the answer it disproves", async () => {
     await seed("q8", 30, null);
     const [q] = (await call<Questions>(getCheckinQuestions, "q8", { today: TODAY })).questions;
     expect(q.kind).toBe("long_gap");
     await call(answerCheckinQuestion, "q8", { key: q.key, answerId: "unlogged", today: TODAY });
-    // The intervals.icu sync brings in a run from the gap.
-    await db.doc("users/q8/activities/a1").set({ date: daysAgo(3), type: "Run" });
+    // One run near the end leaves the gap and the answer.
+    await db.doc("users/q8/activities/a0").set({ date: daysAgo(2), type: "Run" });
+    expect((await call<Questions>(getCheckinQuestions, "q8", { today: TODAY })).questions.map((x) => x.kind)).toEqual(["long_gap"]);
+    // The intervals.icu sync brings in the runs from the gap.
+    for (const n of [26, 19, 12, 6]) await db.doc(`users/q8/activities/a${n}`).set({ date: daysAgo(n), type: "Run" });
     expect((await call<Questions>(getCheckinQuestions, "q8", { today: TODAY })).questions).toEqual([]);
     expect((await db.collection("users/q8/feedbackNotes").get()).size).toBe(0);
 
-    // The same for a Hevy import from the gap.
+    // The same for Hevy workouts from the gap; another plan's answers are left alone.
     await seed("q9", 30, 2);
+    await db.collection("users/q9/feedbackNotes").add({ status: "pending", source: "checkin_question", questionKey: "long_gap|2020-01-01" });
+    for (const n of [27, 20, 13, 7, 2]) {
+      const day = daysAgo(n);
+      await db.doc(`users/q9/strengthSessions/s${n}`).set({ date: day, title: "Lower", start_time: `${day} 07:00`, source: "hevy", exercises: [] });
+    }
     expect((await call<Questions>(getCheckinQuestions, "q9", { today: TODAY })).questions).toEqual([]);
+    expect((await db.collection("users/q9/feedbackNotes").get()).size).toBe(1);
   });
 
   it("limits answers waiting for one update", async () => {
     await seed("q6", 30, null);
     const [q] = (await call<Questions>(getCheckinQuestions, "q6", { today: TODAY })).questions;
     for (let i = 0; i < MAX_PENDING_ANSWERS; i++) {
-      await db.collection("users/q6/feedbackNotes").add({ status: "pending", source: "checkin_question", tags: ["checkin"], questionKey: `long_gap|2020-01-${10 + i}` });
+      await db.collection("users/q6/feedbackNotes").add({ status: "pending", source: "checkin_question", tags: ["checkin"], questionKey: `other|${i}` });
     }
     await expect(call(answerCheckinQuestion, "q6", { key: q.key, answerId: "busy", today: TODAY })).rejects.toThrow(/plenty/);
   });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildCheckinQuestions, answerGuidance, planHasLifts, CheckinInput, CheckinQuestion } from "../src/lib/checkinQuestions";
+import { buildCheckinQuestions, disprovedQuestionKeys, answerGuidance, planHasLifts, CheckinInput, CheckinQuestion } from "../src/lib/checkinQuestions";
 import { dayOrDate, weekdayOf, shortDate } from "../src/lib/checkinFormat";
 
 // 2026-10-18 is a Sunday; the plan last read the logs on Sunday 2026-10-11.
@@ -11,7 +11,7 @@ const input = (o: Partial<CheckinInput> = {}): CheckinInput => ({
   planReadDate: READ,
   planHasLifts: true,
   hevy: { used: true, lastSessionDate: "2026-10-16" },
-  lastTrainedDate: null,
+  trainedDates: [],
   ...o,
 });
 
@@ -54,9 +54,17 @@ describe("buildCheckinQuestions", () => {
     expect(answerGuidance(q, "made-up")).toBeNull();
   });
 
-  it("doesn't welcome back when training was logged since the plan last read the logs", () => {
-    expect(buildCheckinQuestions(input({ planReadDate: "2026-09-20", lastTrainedDate: "2026-10-02" }))).toEqual([]);
-    expect(kinds(buildCheckinQuestions(input({ planReadDate: "2026-09-20", lastTrainedDate: "2026-09-20" })))).toEqual(["long_gap"]);
+  it("doesn't welcome back when the gap was trained through, and says which answers that disproves", () => {
+    const through = input({ planReadDate: "2026-09-20", trainedDates: ["2026-09-24", "2026-10-01", "2026-10-08", "2026-10-15"] });
+    expect(buildCheckinQuestions(through)).toEqual([]);
+    expect(disprovedQuestionKeys(through)).toEqual(["long_gap|2026-09-20", "no_new_data|2026-09-20"]);
+    // One run after three weeks off is still a gap, and so is nothing since the 1st.
+    for (const trainedDates of [["2026-10-17"], ["2026-09-24", "2026-10-01"], ["2026-09-20"]]) {
+      const gap = input({ planReadDate: "2026-09-20", trainedDates, hevy: { used: false, lastSessionDate: null } });
+      expect(kinds(buildCheckinQuestions(gap))).toEqual(["long_gap"]);
+      expect(disprovedQuestionKeys(gap)).toEqual([]);
+    }
+    expect(disprovedQuestionKeys(input({ planReadDate: null }))).toEqual([]);
   });
 
   it("asks about missing Hevy data once a few days have passed with nothing new", () => {
