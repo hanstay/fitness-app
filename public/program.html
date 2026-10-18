@@ -149,6 +149,7 @@
   import { db } from "./js/firebase-init.js";
   import { requireOnboarded } from "./js/auth-guard.js";
   import { loadCurrentProgram, dayKey, sessionsOn, weeksOut } from "./js/current-program.js";
+  import { canMoveWeek, openMoveDaySheet } from "./js/move-day.js";
   import { normalizeDay, todayWeekday } from "./js/days.js";
   import { groupPlan, markPlanSeen, changesDismissed, dismissChanges } from "./js/plan-updates.js";
 
@@ -175,7 +176,7 @@
   const summarySnap = await getDoc(doc(db, "users", user.uid, "state", "summary"));
   const summary = summarySnap.data();
 
-  const p = await loadCurrentProgram(user.uid, summary);
+  let p = await loadCurrentProgram(user.uid, summary);
   const planId = p?.planId ?? null; // see js/plan-updates.js
 
   if (!p) {
@@ -291,21 +292,27 @@
     }
 
     // ---- This week: day strip + selected day's exercises ----
-    const days = (p.weeklyStructure || []).length
+    const weekDays = () => (p.weeklyStructure || []).length
       ? p.weeklyStructure
       : (p.sessions || [])
         .filter((s, i, all) => all.findIndex((o) => dayKey(o.day) === dayKey(s.day)) === i) // one cell per day
         .map((s) => ({ day: s.day, focus: s.label }));
+    let days = weekDays();
+    // Move day swaps two days of the current plan: the athlete's own, or on a
+    // group plan the shared week, which only the group's leader can move.
+    const isLeader = onGroupPlan && (await getDoc(doc(db, "groups", summary.groupId)).catch(() => null))?.data()?.leaderUid === user.uid;
+    const canMove = (onGroupPlan ? isLeader : planId === summary?.currentProgramId) && (p.weeklyStructure || []).length > 0;
 
     if (days.length) {
       main.insertAdjacentHTML("beforeend", section("week", "This week", `
         <div class="week-strip" id="weekStrip"></div>
+        ${canMove && canMoveWeek(days) ? `<button class="link-btn" id="moveDay" type="button">⇄ Move day</button>` : ""}
         <div id="dayDetail" style="margin-top:8px"></div>`));
 
       const weekStrip = document.getElementById("weekStrip");
       const dayDetail = document.getElementById("dayDetail");
       const isRestDay = (d) => sessionsOn(p, d.day).length === 0;
-      const todayIndex = days.findIndex((d) => normalizeDay(d.day) === todayWeekday());
+      let todayIndex = days.findIndex((d) => normalizeDay(d.day) === todayWeekday());
 
       // Opens on today when the week lists it, else on the first training day.
       let selected = todayIndex !== -1 ? todayIndex : days.findIndex((d) => !isRestDay(d));
@@ -317,6 +324,8 @@
             <span class="d">${esc((d.day || "").slice(0, 3).toUpperCase())}</span>
             <span class="f">${esc(d.focus)}</span>
           </div>`).join("");
+        const moveBtn = document.getElementById("moveDay");
+        if (moveBtn) moveBtn.textContent = `⇄ Move ${normalizeDay(days[selected].day)}`;
         weekStrip.querySelectorAll(".day-cell").forEach((el) => el.addEventListener("click", () => {
           selected = Number(el.dataset.i);
           renderStrip();
@@ -352,6 +361,23 @@
           });
         }
       };
+
+      document.getElementById("moveDay")?.addEventListener("click", () => openMoveDaySheet({
+        programId: p.programDocId,
+        days,
+        day: days[selected],
+        isGroup: onGroupPlan,
+        report: (message) => showToast(message, { type: "info" }),
+        // A move edits the plan in place: re-read it, and follow the day to where it went.
+        onMoved: async (to) => {
+          p = (await loadCurrentProgram(user.uid, summary)) ?? p;
+          days = weekDays();
+          todayIndex = days.findIndex((d) => normalizeDay(d.day) === todayWeekday());
+          selected = Math.max(0, days.findIndex((d) => normalizeDay(d.day) === to));
+          renderStrip();
+          renderDetail();
+        },
+      }));
 
       renderStrip();
       renderDetail();

@@ -94,6 +94,8 @@ export async function loadCurrentProgram(uid, summary) {
       changeSummary: plan.changeSummary,
       feedbackResponses: plan.feedbackResponses,
       planId: plan.planId,
+      // The shared program doc, which the leader's Move day edits (js/move-day.js).
+      programDocId: sharedDoc.id,
       // A weekly update rewrites only the member layer, so the shared
       // program's createdAt is when the cycle began, not when it last changed.
       updatedAt: member?.updatedAt ?? shared.createdAt ?? null,
@@ -109,7 +111,7 @@ export async function loadCurrentProgram(uid, summary) {
     if (!programSnap.exists()) return null;
     const program = programSnap.data();
     // Every personal update writes a new program doc.
-    return { ...program, planId: programSnap.id, updatedAt: program.createdAt ?? null };
+    return { ...program, planId: programSnap.id, programDocId: programSnap.id, updatedAt: program.createdAt ?? null };
   }
   return null;
 }
