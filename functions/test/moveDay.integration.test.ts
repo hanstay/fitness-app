@@ -121,6 +121,15 @@ describe("moveProgramDay on a group plan", () => {
     expect(days((await ref.get()).get("sessions"))).toEqual(["Monday", "Thursday"]);
   });
 
+  it("leaves a member who follows their own plan alone", async () => {
+    const ref = await seedGroup();
+    await db.doc("users/mem/state/summary").set({ activeProgramSource: "personal", programGenerationStatus: "generating", programGenerationStartedAt: Timestamp.now() });
+    const note = await db.collection("users/mem/feedbackNotes").add({ status: "pending", day: "Monday", exercise: "Squat (Barbell)" });
+    await call("lead", { programId: ref.id, from: "Monday", to: "Tuesday" });
+    expect(days((await ref.get()).get("sessions"))).toEqual(["Tuesday", "Thursday"]);
+    expect((await note.get()).get("day")).toBe("Monday");
+  });
+
   it("leaves a member's loads written for an earlier shared week alone", async () => {
     const ref = await seedGroup();
     await db.doc("groups/g1/members/mem").update({ groupProgramId: "older" });

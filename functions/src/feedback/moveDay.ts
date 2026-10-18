@@ -109,16 +109,18 @@ async function moveGroupDay(db: Firestore, uid: string, groupId: string, program
     const week = moveWeekDays(program.data()!, from, to);
     if (!week) throw new HttpsError("failed-precondition", "This plan's days can't be moved. Update your plan first.");
 
-    // A member's update running now writes their loads for the old days.
+    // Only members following the group plan train on its days; one who has
+    // switched to their own plan keeps their notes, and can update it freely.
     const memberUids: string[] = group.get("memberUids") ?? [];
-    const memberRefs = memberUids.map((m) => db.doc(`groups/${groupId}/members/${m}`));
     const summaries = memberUids.length ? await tx.getAll(...memberUids.map((m) => db.doc(`users/${m}/state/summary`))) : [];
-    const members = memberRefs.length ? await tx.getAll(...memberRefs) : [];
-    if (summaries.some(updating)) {
+    const following = summaries.filter((s) => s.get("activeProgramSource") === "group" && s.get("groupId") === groupId);
+    const members = memberUids.length ? await tx.getAll(...memberUids.map((m) => db.doc(`groups/${groupId}/members/${m}`))) : [];
+    // A member's update running now writes their loads for the old days.
+    if (following.some(updating)) {
       throw new HttpsError("failed-precondition", "A plan update is running for someone in your group. Try again once it's done.");
     }
 
-    const writeNotes = await moveWaitingNotes(db, tx, memberUids, from, to);
+    const writeNotes = await moveWaitingNotes(db, tx, following.map((s) => s.ref.parent.parent!.id), from, to);
     tx.update(programRef, { ...week, weekEditedAt: FieldValue.serverTimestamp() });
     // Loads written for an earlier shared week no longer match it either way.
     for (const member of members) {
