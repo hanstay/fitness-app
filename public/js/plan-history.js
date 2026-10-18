@@ -3,7 +3,7 @@
 // update since the history started writes users/{uid}/planHistory
 // (functions/src/lib/planHistory.ts); before that, a personal plan's
 // archived programs carry the same fields, so they fill in the older ones.
-import { collection, query, orderBy, limit, startAfter, getDocs } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+import { collection, query, where, orderBy, limit, startAfter, getDocs } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
 import { db } from "./firebase-init.js";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -36,6 +36,7 @@ function fromHistory(d) {
 
 function fromProgram(d) {
   const p = d.data();
+  if (p.status === "generating") return null; // an update still being written
   const phaseIndex = Number.isInteger(p.currentPhaseIndex) ? p.currentPhaseIndex : 0;
   return {
     programId: d.id, at: p.createdAt?.toDate?.() ?? null, mode: null, phase: p.roadmap?.[phaseIndex]?.phase ?? null,
@@ -45,49 +46,52 @@ function fromProgram(d) {
 
 /**
  * The history, a page at a time: next() gives the next entries, newest
- * first, and whether there are more. The two sources are merged by date;
- * an archived program that has its own history entry is shown once.
+ * first, and whether there are more. The history entries come first; then
+ * the programs from before the oldest of them (every later program has its
+ * own entry), so no program is read only to be skipped.
  */
 export function planHistory(uid) {
+  const historyRef = collection(db, "users", uid, "planHistory");
+  const programsRef = collection(db, "users", uid, "programs");
+  let programsBefore; // the oldest entry's time, once looked up (null: no entries)
   const sources = [
-    { ref: collection(db, "users", uid, "planHistory"), map: fromHistory, buffer: [], last: null, done: false },
-    { ref: collection(db, "users", uid, "programs"), map: fromProgram, buffer: [], last: null, done: false },
-  ];
-  const [history] = sources;
-  const shown = new Set(); // programs with a history entry already given
+    { base: () => query(historyRef, orderBy("createdAt", "desc")), map: fromHistory },
+    {
+      base: async () => {
+        if (programsBefore === undefined) {
+          const oldest = await getDocs(query(historyRef, orderBy("createdAt"), limit(1)));
+          programsBefore = oldest.docs[0]?.get("createdAt") ?? null;
+        }
+        return programsBefore
+          ? query(programsRef, where("createdAt", "<", programsBefore), orderBy("createdAt", "desc"))
+          : query(programsRef, orderBy("createdAt", "desc"));
+      },
+      map: fromProgram,
+    },
+  ].map((s) => ({ ...s, buffer: [], last: null, done: false }));
 
+  // The source's next entry, fetching a page when its buffer runs out.
   async function top(source) {
-    if (!source.buffer.length && !source.done) {
-      const q = query(source.ref, orderBy("createdAt", "desc"), ...(source.last ? [startAfter(source.last)] : []), limit(PAGE));
+    while (!source.buffer.length && !source.done) {
+      const q = query(await source.base(), ...(source.last ? [startAfter(source.last)] : []), limit(PAGE));
       const snap = await getDocs(q);
-      source.buffer = snap.docs.map(source.map);
+      source.buffer = snap.docs.map(source.map).filter(Boolean);
       source.last = snap.docs.at(-1) ?? source.last;
       source.done = snap.docs.length < PAGE;
     }
     return source.buffer[0] ?? null;
   }
 
-  async function nextOne() {
-    for (;;) {
-      const [h, p] = await Promise.all(sources.map(top));
-      if (!h && !p) return null;
-      // A history entry is written with its program, so on a tie it goes first.
-      const source = !p || (h && (h.at ?? 0) >= (p.at ?? 0)) ? history : sources[1];
-      const entry = source.buffer.shift();
-      if (source === history) { if (entry.programId) shown.add(entry.programId); return entry; }
-      if (!shown.has(entry.programId)) return entry;
-    }
+  async function peek() {
+    for (const source of sources) if (await top(source)) return source;
+    return null;
   }
 
   return {
     async next(count = PAGE) {
       const entries = [];
-      for (let i = 0; i < count; i++) {
-        const entry = await nextOne();
-        if (!entry) break;
-        entries.push(entry);
-      }
-      const more = (await Promise.all(sources.map(top))).some(Boolean);
+      for (let source; entries.length < count && (source = await peek());) entries.push(source.buffer.shift());
+      const more = (await peek()) != null;
       // The oldest plan, from before change summaries, was the first one made.
       const last = entries.at(-1);
       if (!more && last && !last.mode && !last.changeSummary.length) last.created = true;
