@@ -1,12 +1,14 @@
 // The Program page's "Not right?" on an exercise: swap it for an
-// AI-suggested alternative (a bottom sheet), undo a swap, or leave a note for
-// the next check-in. A group member only gets the note: the group's
-// exercises are shared, so their own update works around it instead. Swaps are made and undone by the functions in
+// AI-suggested alternative, undo a swap, or leave a note for the next plan
+// update, each in a bottom sheet on the page. A group member only gets the
+// note: the group's exercises are shared, so their own update works around it
+// instead. Swaps are made and undone by the functions in
 // functions/src/feedback/exerciseSwap.ts, which edit the current program doc;
-// the page re-reads it afterwards (`onChanged`).
+// the page re-reads it afterwards (`onChanged`). Notes are saved by
+// functions/src/feedback/feedbackNotes.ts, the same as the check-in's.
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
 import { functions } from "./firebase-init.js";
-import { SWAP_REASONS, SWAP_SCOPES, PAIN_SAFETY, errorText } from "./plan-feedback.js";
+import { SWAP_REASONS, SWAP_SCOPES, FEEDBACK_TAGS, PAIN_SAFETY, isQuestionOnly, errorText } from "./plan-feedback.js";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -17,23 +19,29 @@ export function swapAt(program, si, ei) {
   return (program.swaps || []).find((s) => s.sessionIndex === si && s.exerciseIndex === ei && s.to?.name === ex.name) ?? null;
 }
 
+/** Notes waiting for the next update are matched to a card by its day and exercise. */
+export const noteKey = (day, exercise) => `${day ?? ""}|${exercise}`;
+
 /**
- * The card's extra lines: the swapped-from pill (with Undo) and the "Not
- * right?" button and its menu. canSwap: false leaves only the note.
+ * The card's extra lines: the swapped-from pill (with Undo), the waiting
+ * note's pill (with Remove), and the "Not right?" button and its menu.
+ * canSwap: false leaves only the note, so "Not right?" opens it straight away.
+ * note: a waiting note on this exercise.
  */
-export function exerciseActionsHtml(program, si, ei, day, { canSwap = true } = {}) {
-  const ex = program.sessions[si].exercises[ei];
+export function exerciseActionsHtml(program, si, ei, day, { canSwap = true, note = null } = {}) {
   const swap = canSwap ? swapAt(program, si, ei) : null;
-  const note = `checkin.html?${new URLSearchParams({ exercise: ex.name, day })}#feedback`;
   return `
     ${swap ? `<div class="sub swapped"><span class="pill">Swapped from ${esc(swap.from.name)}${swap.scope === "this_week" ? " this week" : ""}
       <button class="undo" type="button" data-undo="${esc(swap.id)}">Undo</button></span></div>` : ""}
-    <div class="ex-actions">
+    ${note ? `<div class="sub swapped"><span class="pill">Note for your next update
+      <button class="undo" type="button" data-remove-note="${esc(note.id)}">Remove</button></span></div>` : ""}
+    <div class="ex-actions">${canSwap ? `
       <button class="link-btn" type="button" data-more aria-expanded="false">Not right? ▾</button>
       <div class="ex-menu" hidden>
-        ${canSwap ? `<button class="btn secondary" type="button" data-swap="${si}:${ei}">Swap it</button>` : ""}
-        <a class="btn secondary" href="${esc(note)}">Note for check-in</a>
-      </div>
+        <button class="btn secondary" type="button" data-swap="${si}:${ei}">Swap it</button>
+        <button class="btn secondary" type="button" data-note="${si}:${ei}">Leave a note</button>
+      </div>` : `
+      <button class="link-btn" type="button" data-note="${si}:${ei}">Not right?</button>`}
     </div>`;
 }
 
@@ -51,6 +59,20 @@ export function bindExerciseActions(container, { programId, program, report, onC
     const [si, ei] = btn.dataset.swap.split(":").map(Number);
     openSwapSheet({ programId, program, sessionIndex: si, exerciseIndex: ei, report, onChanged });
   }));
+  container.querySelectorAll("[data-note]").forEach((btn) => btn.addEventListener("click", () => {
+    const [si, ei] = btn.dataset.note.split(":").map(Number);
+    openNoteSheet({ program, sessionIndex: si, exerciseIndex: ei, report });
+  }));
+  container.querySelectorAll("[data-remove-note]").forEach((btn) => btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      await httpsCallable(functions, "removeFeedbackNote")({ noteId: btn.dataset.removeNote });
+      report("Note removed.");
+    } catch (err) {
+      btn.disabled = false;
+      report(errorText(err), true);
+    }
+  }));
   container.querySelectorAll("[data-undo]").forEach((btn) => btn.addEventListener("click", async () => {
     btn.disabled = true;
     try {
@@ -64,7 +86,7 @@ export function bindExerciseActions(container, { programId, program, report, onC
   }));
 }
 
-/* ---------- the swap sheet ---------- */
+/* ---------- the sheets ---------- */
 
 let sheet = null;
 
@@ -72,7 +94,6 @@ function sheetElement() {
   if (sheet) return sheet;
   sheet = document.createElement("dialog");
   sheet.className = "sheet";
-  sheet.setAttribute("aria-labelledby", "swapTitle");
   document.body.appendChild(sheet);
   // A tap on the backdrop (outside the sheet's box) closes it.
   sheet.addEventListener("click", (e) => { if (e.target === sheet) sheet.close(); });
@@ -83,6 +104,7 @@ function openSwapSheet({ programId, program, sessionIndex, exerciseIndex, report
   const session = program.sessions[sessionIndex];
   const ex = session.exercises[exerciseIndex];
   const el = sheetElement();
+  el.setAttribute("aria-labelledby", "swapTitle");
   el.innerHTML = `
     <div class="sheet-head">
       <h3 id="swapTitle">Swap ${esc(ex.name)}</h3>
@@ -173,6 +195,75 @@ function openSwapSheet({ programId, program, sessionIndex, exerciseIndex, report
     } catch (err) {
       btn.disabled = false;
       btn.textContent = "Swap exercise";
+      setStatus(errorText(err));
+    }
+  });
+
+  el.showModal();
+}
+
+/* ---------- the note sheet ---------- */
+
+function openNoteSheet({ program, sessionIndex, exerciseIndex, report }) {
+  const session = program.sessions[sessionIndex];
+  const ex = session.exercises[exerciseIndex];
+  const el = sheetElement();
+  el.setAttribute("aria-labelledby", "noteSheetTitle");
+  el.innerHTML = `
+    <div class="sheet-head">
+      <h3 id="noteSheetTitle">Note on ${esc(ex.name)}</h3>
+      <button class="sheet-close" type="button" aria-label="Close">✕</button>
+    </div>
+    <p class="muted small" style="margin:0 0 12px">${esc(session.day)} · your next plan update works around it, and says what it changed.</p>
+    <div class="field">
+      <label id="noteSheetTagsLabel">What's it about?</label>
+      <div class="chips" role="group" aria-labelledby="noteSheetTagsLabel">
+        ${FEEDBACK_TAGS.map(([tag, label]) => `<label><input type="checkbox" name="noteSheetTag" value="${tag}"><span>${esc(label)}</span></label>`).join("")}
+      </div>
+    </div>
+    <div class="callout warn small" id="noteSheetPain" hidden>${esc(PAIN_SAFETY)}</div>
+    <div class="field">
+      <label for="noteSheetText">Tell us more <span class="muted">(optional)</span></label>
+      <textarea class="input" id="noteSheetText" maxlength="1000" rows="3"></textarea>
+    </div>
+    <div class="field" id="noteSheetDuration">
+      <label id="noteSheetDurationLabel">How long should your plan work around it?</label>
+      <div class="seg" role="radiogroup" aria-labelledby="noteSheetDurationLabel">
+        <label><input type="radio" name="noteSheetDuration" value="week" checked><span>Just this week</span></label>
+        <label><input type="radio" name="noteSheetDuration" value="ongoing"><span>Until I say it's better</span></label>
+      </div>
+    </div>
+    <button class="btn full" id="noteSheetSave" type="button">Save note</button>
+    <p class="status-line" id="noteSheetStatus" role="status"></p>`;
+
+  const $ = (sel) => el.querySelector(sel);
+  const setStatus = (msg) => { $("#noteSheetStatus").textContent = msg; };
+  const tags = () => [...el.querySelectorAll('input[name="noteSheetTag"]:checked')].map((i) => i.value);
+
+  $(".sheet-close").addEventListener("click", () => el.close());
+  // The safety line shows for pain; a question has nothing to work around.
+  el.querySelectorAll('input[name="noteSheetTag"]').forEach((input) => input.addEventListener("change", () => {
+    $("#noteSheetPain").hidden = !tags().includes("pain");
+    $("#noteSheetDuration").hidden = isQuestionOnly(tags());
+  }));
+
+  $("#noteSheetSave").addEventListener("click", async () => {
+    const picked = tags();
+    const text = $("#noteSheetText").value.trim();
+    if (!picked.length) return setStatus("Pick what it's about first.");
+    if (!text && isQuestionOnly(picked)) return setStatus("Write your question first.");
+    const btn = $("#noteSheetSave");
+    btn.disabled = true;
+    setStatus("Saving…");
+    try {
+      await httpsCallable(functions, "addFeedbackNote")({
+        tags: picked, text, exercise: ex.name, day: session.day,
+        duration: el.querySelector('input[name="noteSheetDuration"]:checked')?.value ?? "week",
+      });
+      el.close();
+      report("Saved. It goes into your next plan update.");
+    } catch (err) {
+      btn.disabled = false;
       setStatus(errorText(err));
     }
   });
