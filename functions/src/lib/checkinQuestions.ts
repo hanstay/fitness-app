@@ -86,7 +86,7 @@ export interface CheckinInput {
 // ---------------------------------------------------------------------------
 
 export const QUESTION_KINDS = [
-  "swapped_exercise", "swapped_session", "skipped", "fell_short", "too_easy", "added", "cut_short", "off_zone",
+  "swapped_exercise", "swapped_session", "moved_session", "skipped", "fell_short", "too_easy", "added", "cut_short", "off_zone",
   "class_missing", "extra_activity", "pattern", "fatigue", "long_gap", "no_new_data", "odd_entry",
 ] as const;
 export type QuestionKind = (typeof QUESTION_KINDS)[number];
@@ -263,6 +263,8 @@ function answersFor(kind: QuestionKind, p: Record<string, string>): AnswerOption
         { id: "prefer", label: "Prefer this activity", followUp: { text: "Make it regular?", answers: [{ id: "yes", label: `Yes, every ${p.day}` }, { id: "no", label: "No, just this week" }] } },
         { id: "once", label: "Just this once" },
       ];
+    case "moved_session":
+      return [{ id: "once", label: "Just this week" }, { id: "regular", label: `Move it to ${p.day}s` }];
     case "skipped":
       return [{ id: "busy", label: "Busy" }, { id: "tired", label: "Too tired" }, PAIN_ANSWER("Sore or hurt"), { id: "logged", label: "Did it, didn't log it" }];
     case "fell_short":
@@ -321,6 +323,10 @@ export function answerGuidance(q: CheckinQuestion, answerId: string, followUpId:
         ? `Make ${p.activity} the regular ${p.day} session and move the ${p.session} work to another day if the week still works (spacing, fixed sessions, the block's goal). If it doesn't, keep the ${p.session} on ${p.day} and say why in the response.`
         : `A one-off: keep the plan.`,
       once: `A one-off: keep the plan.`,
+    },
+    moved_session: {
+      once: `They did the ${p.session} on ${p.day} instead of ${p.from} this week: a one-off, keep it on ${p.from}.`,
+      regular: `Move the ${p.session} from ${p.from} to ${p.day} if the week still works (spacing, fixed sessions, the block's goal); include both days in sessions. If it doesn't, keep it on ${p.from} and say why in the response.`,
     },
     skipped: {
       busy: `Missed for lack of time: a one-off unless it keeps happening; keep the week.`,
@@ -393,7 +399,7 @@ const RANK: Record<QuestionKind, number> = {
   long_gap: 0, no_new_data: 0, odd_entry: 0,
   pattern: 1,
   fatigue: 2, skipped: 2, swapped_session: 2, cut_short: 2, class_missing: 2,
-  swapped_exercise: 3, fell_short: 3, off_zone: 3,
+  swapped_exercise: 3, moved_session: 3, fell_short: 3, off_zone: 3,
   too_easy: 4, added: 4, extra_activity: 4,
 };
 
@@ -420,6 +426,15 @@ function question(
 function maxDate(a: string, b: string): string {
   return a > b ? a : b;
 }
+
+/** Plan labels and workout titles as words, without the generic ones ("Legs day" → leg). */
+function titleWords(s: string): Set<string> {
+  return new Set(s.toLowerCase().split(/[^a-z0-9]+/)
+    .filter((w) => w && !/^(day|session|workout|training|a|b|c|\d+)$/.test(w))
+    .map((w) => (w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w)));
+}
+
+const sameWords = (a: Set<string>, b: Set<string>) => a.size > 0 && a.size === b.size && [...a].every((w) => b.has(w));
 
 export function buildCheckinQuestions(input: CheckinInput): CheckinQuestions {
   const units = input.units ?? "metric";
@@ -453,20 +468,113 @@ export function buildCheckinQuestions(input: CheckinInput): CheckinQuestions {
   const data: CheckinQuestion[] = [];
   const added = new Map<string, { count: number; last: string }>();
 
+  // How well workouts fit a planned day, as the share of its lifts they
+  // cover (one logged exercise per planned lift), needing at least half; or
+  // by a title that is the plan's label ("Legs" for "Legs day"). 0 if neither.
+  function fitScore(plan: PlannedDay, logs: StrengthSession[]): number {
+    const logged = logs.flatMap((s) => s.exercises).filter((ex) => workingSets(ex.sets).length > 0);
+    const usedLogged = new Set<number>();
+    let matched = 0;
+    for (const p of plan.lifts) {
+      const i = logged.findIndex((l, idx) => !usedLogged.has(idx) && exercisesMatch(p.name!, l.name));
+      if (i !== -1) { usedLogged.add(i); matched++; }
+    }
+    const share = matched / plan.lifts.length;
+    const label = titleWords(plan.label);
+    const titled = logs.some((s) => sameWords(titleWords(s.title ?? ""), label));
+    return share >= 0.5 || titled ? share + (titled ? 0.1 : 0) : 0;
+  }
+
+  type Pairing = {
+    /** Workouts done for another day's planned session → that day and its date. */
+    moved: Map<StrengthSession, { day: Weekday; date: string }>;
+    /** Workouts that may be a session still to come, done early in part: not asked about yet. */
+    early: Set<StrengthSession>;
+  };
+
+  // A planned lift session done on another day of the same Monday-to-Sunday
+  // week is that session moved, not a skip plus an extra workout. Each
+  // workout goes to the planned session it fits best, best fits first, its
+  // own day's session winning a tie; one that fits nothing is left to the
+  // usual checks. Only days from doneFrom on count, so neither a workout nor
+  // a planned day an older plan already saw is paired.
+  function pairWeek(monday: string, doneFrom: string | null): Pairing {
+    const options: Array<{ s: StrengthSession; day: Weekday; date: string; score: number; own: boolean }> = [];
+    const early = new Set<StrengthSession>();
+    for (let i = 0; i < 7; i++) {
+      const done = addDays(monday, i);
+      if (done > today || (doneFrom && done < doneFrom)) continue;
+      for (const s of strengthOn(done)) {
+        for (const [day, plan] of planned) {
+          const date = addDays(monday, WEEKDAYS.indexOf(day));
+          if (!plan.lifts.length || (doneFrom && date < doneFrom)) continue;
+          const score = fitScore(plan, [s]);
+          if (!score) continue;
+          const own = day === weekdayOf(done);
+          // A session still to come today or later is only done early if all of it was.
+          if (!own && date >= today && score < 1) { early.add(s); continue; }
+          options.push({ s, day, date, score, own });
+        }
+      }
+    }
+    options.sort((a, b) => b.score - a.score || Number(b.own) - Number(a.own));
+    const takenDay = new Set<Weekday>();
+    const placed = new Set<StrengthSession>();
+    const moved = new Map<StrengthSession, { day: Weekday; date: string }>();
+    for (const o of options) {
+      if (placed.has(o.s) || takenDay.has(o.day)) continue;
+      placed.add(o.s);
+      takenDay.add(o.day);
+      if (!o.own) moved.set(o.s, { day: o.day, date: o.date });
+    }
+    for (const s of placed) early.delete(s);
+    return { moved, early };
+  }
+  const mondayOf = (date: string) => addDays(date, -WEEKDAYS.indexOf(weekdayOf(date)));
+  const moved = new Map<StrengthSession, { day: Weekday; date: string }>();
+  const early = new Set<StrengthSession>();
+  for (let monday = mondayOf(detailStart); monday <= today; monday = addDays(monday, 7)) {
+    const pairing = pairWeek(monday, input.planReadDate);
+    pairing.moved.forEach((to, s) => moved.set(s, to));
+    pairing.early.forEach((s) => early.add(s));
+  }
+  // Planned dates whose session was done on another day.
+  const doneElsewhere = new Set([...moved.values()].map((m) => m.date));
+
   for (let date = detailStart; date <= today; date = addDays(date, 1)) {
     const day = weekdayOf(date);
     const past = date < today; // today's session may still be ahead
     const label = dayOrDate(date, today);
-    const plan = planned.get(day);
-    const logs = strengthOn(date);
+    // The day's own plan, unless its session was done on another day.
+    const plan = doneElsewhere.has(date) ? undefined : planned.get(day);
+    // Workouts done today for other days' sessions, by the day they were planned for.
+    const movedHere = new Map<Weekday, { date: string; logs: StrengthSession[] }>();
+    for (const s of strengthOn(date)) {
+      const to = moved.get(s);
+      if (to) movedHere.set(to.day, { date: to.date, logs: [...(movedHere.get(to.day)?.logs ?? []), s] });
+    }
+    // The rest are the day's own, or extra.
+    const logs = strengthOn(date).filter((s) => !moved.has(s));
     // A Hevy workout synced to intervals.icu is the same workout twice.
-    const acts = activitiesOn(date).filter((a) => !(logs.length && activitySport(a.type) === "strength"));
+    const acts = activitiesOn(date).filter((a) => !(strengthOn(date).length && activitySport(a.type) === "strength"));
     const used = new Set<string>();
     const unusedActs = () => acts.filter((a) => !used.has(a.id));
     const cardioActs = () => unusedActs().filter((a) => activitySport(a.type) !== "strength");
 
-    // Planned cardio first: its matching activity is spoken for.
-    for (const ex of plan?.cardio ?? []) {
+    // Planned cardio first: its matching activity is spoken for. A moved
+    // session's cardio counts on its planned day and, if not done there, on
+    // the day its lifts were done.
+    const doneOn = (ex: PlanExercise, d: string) => activitiesOn(d).some((a) => {
+      const sport = plannedSport(ex);
+      return activitySport(a.type) !== "strength" && (sport === "other" || activitySport(a.type) === sport);
+    });
+    const ownCardio = planned.get(day)?.cardio ?? [];
+    const cardio = [
+      ...ownCardio.map((ex) => ({ ex, owner: planned.get(day)!, ownerDay: day })),
+      ...[...movedHere].flatMap(([d, m]) => planned.get(d)!.cardio
+        .filter((ex) => !doneOn(ex, m.date)).map((ex) => ({ ex, owner: planned.get(d)!, ownerDay: d }))),
+    ];
+    for (const { ex, owner, ownerDay } of cardio) {
       if (!input.icuConnected) break;
       const sport = plannedSport(ex);
       const match = cardioActs().find((a) => sport === "other" || activitySport(a.type) === sport);
@@ -477,20 +585,29 @@ export function buildCheckinQuestions(input: CheckinInput): CheckinQuestions {
       const ratio = plannedAmount.km != null && match.distance_km != null ? match.distance_km / plannedAmount.km
         : plannedAmount.seconds != null && match.duration_s != null ? match.duration_s / plannedAmount.seconds : null;
       // A run-only day reads better by its session name ("long run") than by its exercise.
-      const name = plan!.lifts.length === 0 && plan!.cardio.length === 1 ? plan!.label : ex.name ?? "session";
+      const name = owner.lifts.length === 0 && owner.cardio.length === 1 ? owner.label : ex.name ?? "session";
       const activity = lowerFirst(name);
       if (doneText && ratio != null && ratio < 0.75) {
         week.push(question("cut_short", `cut_short|${date}|${name}`, date, `intervals.icu · ${label}`,
           `${possessive(label)} ${activity} was ${doneText}. Why?`,
-          { exercise: ex.name ?? null, day, params: { activity, day } }));
+          { exercise: ex.name ?? null, day: ownerDay, params: { activity, day } }));
       }
       const easy = /zone\s*2|\bz2\b|easy|recovery|aerobic/i.test(`${ex.name} ${ex.reps} ${ex.load_note ?? ""}`);
       const z2Top = match.hrZones?.[1];
       if (easy && match.avg_hr != null && z2Top != null && match.avg_hr > z2Top + 3) {
         week.push(question("off_zone", `off_zone|${date}|${name}`, date, `intervals.icu · ${label}`,
           `${possessive(label)} ${activity} averaged ${match.avg_hr} bpm, above zone 2. How did it feel?`,
-          { facts: [`Zone 2 up to ${z2Top} bpm`, `Average ${match.avg_hr} bpm`], exercise: ex.name ?? null, day, params: { activity, day } }));
+          { facts: [`Zone 2 up to ${z2Top} bpm`, `Average ${match.avg_hr} bpm`], exercise: ex.name ?? null, day: ownerDay, params: { activity, day } }));
       }
+    }
+
+    for (const [fromDay, m] of movedHere) {
+      const from = planned.get(fromDay)!;
+      const session = sessionName(from.label);
+      week.push(question("moved_session", `moved_session|${date}|${fromDay}`, date, `Hevy · ${label}`,
+        `You did ${possessive(fromDay)} ${session} on ${label}. Why the move?`,
+        { day: fromDay, params: { session, from: fromDay, day } }));
+      compareLifts(from, m.logs, date, fromDay, label);
     }
 
     // Planned lifts.
@@ -554,15 +671,16 @@ export function buildCheckinQuestions(input: CheckinInput): CheckinQuestions {
         `You added ${activity} on ${label}. Part of your week?`, { day, params: { activity, day } }));
     }
     if (!plan?.lifts.length) {
-      for (const s of logs) {
+      for (const s of logs.filter((s) => !early.has(s))) {
         const activity = `your "${s.title}" workout`;
         week.push(question("extra_activity", `extra_activity|hevy|${date}|${s.title}`, date, `Hevy · ${label}`,
           `You added ${activity} on ${label}. Part of your week?`, { day, params: { activity, day } }));
       }
     }
-    for (const s of logs) checkOddEntries(s, date, day, label);
+    for (const s of strengthOn(date)) checkOddEntries(s, date, day, label);
   }
 
+  // day is the weekday the session was planned for; label names when it was done.
   function compareLifts(plan: PlannedDay, logs: StrengthSession[], date: string, day: Weekday, label: string) {
     const logged = logs.flatMap((s) => s.exercises).filter((ex) => workingSets(ex.sets).length > 0);
     const usedLogged = new Set<number>();
@@ -645,7 +763,19 @@ export function buildCheckinQuestions(input: CheckinInput): CheckinQuestions {
       const judged = dates.filter((d) => (!input.planSince || d >= input.planSince)
         && (plan.lifts.length ? liftsKnownOn(d) : input.icuConnected));
       if (judged.length < PATTERN_MIN_MISSES) continue;
-      const missed = judged.filter((d) => !strengthOn(d).length && !activitiesOn(d).length);
+      // A session done on another day of its week wasn't missed, and a day
+      // whose only workout was another day's session wasn't trained.
+      const weeks = new Map<string, Pairing>();
+      const pairingOf = (d: string) => {
+        const monday = mondayOf(d);
+        if (!weeks.has(monday)) weeks.set(monday, pairWeek(monday, input.planSince));
+        return weeks.get(monday)!;
+      };
+      const trained = (d: string) => activitiesOn(d).length > 0
+        || strengthOn(d).some((s) => !(plan.lifts.length && pairingOf(d).moved.has(s)));
+      const movedAway = (d: string) => plan.lifts.length > 0 && (doneElsewhere.has(d)
+        || [...pairingOf(d).moved.values()].some((m) => m.date === d));
+      const missed = judged.filter((d) => !trained(d) && !movedAway(d));
       if (missed.length < PATTERN_MIN_MISSES) continue;
       const session = sessionName(plan.label);
       for (let i = week.length - 1; i >= 0; i--) {

@@ -63,6 +63,51 @@ function parseHevyDate(raw: string): Date | null {
   return null;
 }
 
+const MONTHS: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+const HAS_ZONE = /(?:z|[+-]\d{2}:?\d{2})$/i;
+
+/**
+ * The day a zoneless start time names, read straight off its fields:
+ * "13 Oct 2026, 07:15", "Oct 13, 2026, 7:15 AM" or "2026-10-13 07:15".
+ * Hevy writes start times on the athlete's wall clock, so this is their
+ * day wherever the code runs. Null for anything else.
+ */
+function wallClockDate(raw: string): string | null {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const dmy = raw.match(/^(\d{1,2})\s+([a-z]{3})[a-z]*\.?\s+(\d{4})/i);
+  if (dmy && MONTHS[dmy[2].toLowerCase()]) return `${dmy[3]}-${pad(MONTHS[dmy[2].toLowerCase()])}-${pad(Number(dmy[1]))}`;
+  const mdy = raw.match(/^([a-z]{3})[a-z]*\.?\s+(\d{1,2}),?\s+(\d{4})/i);
+  if (mdy && MONTHS[mdy[1].toLowerCase()]) return `${mdy[3]}-${pad(MONTHS[mdy[1].toLowerCase()])}-${pad(Number(mdy[2]))}`;
+  return null;
+}
+
+/** The calendar day a Date falls on in this runtime's own zone. */
+export function localDateString(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * The athlete's day for a Hevy start time. toISOString would put a morning
+ * workout east of UTC on the day before.
+ */
+export function hevyDate(raw: string, parsed: Date): string {
+  return (!HAS_ZONE.test(raw.trim()) && wallClockDate(raw.trim())) || localDateString(parsed);
+}
+
+/**
+ * A stored session's day, read again from its start time: sessions imported
+ * before hevyDate can carry the UTC day. A start time with a zone keeps the
+ * stored day, which the athlete's browser worked out.
+ */
+export function storedSessionDate(startTime: string | undefined, storedDate: string): string {
+  const raw = startTime?.trim() ?? "";
+  return (raw && !HAS_ZONE.test(raw) && wallClockDate(raw)) || storedDate;
+}
+
 function toKg(row: HevyRow): number | null {
   if (row.weight_kg !== undefined && row.weight_kg !== "") return Number(row.weight_kg);
   if (row.weight_lbs !== undefined && row.weight_lbs !== "") return Number(row.weight_lbs) * 0.453592;
@@ -100,7 +145,7 @@ export function rowsToStrengthSession(rows: HevyRow[]): ParsedHevySession | null
   if (!title || !startTimeStr || !endTimeStr) return null;
   const startDate = parseHevyDate(startTimeStr);
   if (!startDate) return null;
-  const dateStr = startDate.toISOString().slice(0, 10);
+  const dateStr = hevyDate(startTimeStr, startDate);
   const exerciseMap = new Map<string, HevyRow[]>();
   for (const row of rows) {
     const exerciseName = row.exercise_title?.trim();

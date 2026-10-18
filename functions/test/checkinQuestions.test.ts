@@ -130,6 +130,150 @@ describe("buildCheckinQuestions", () => {
     expect(q.week[1].text).toBe("You added a 5 km run on Thursday. Part of your week?");
   });
 
+  it("pairs a session done on another day with its planned day, by its exercises", () => {
+    const input = cleanWeek();
+    // Monday's Lower done on Friday, under a title that names neither.
+    input.strength[0] = hevy(FRI, [["Squat (Barbell)", [[100, 7], [100, 7], [100, 6]]], ["Romanian Deadlift (Barbell)", [[80, 9], [80, 9], [80, 8]]]], "Morning");
+    const q = buildCheckinQuestions(input);
+    expect(kinds(q.week)).toEqual(["moved_session"]);
+    expect(q.week[0].text).toBe("You did Monday's Lower session on Friday. Why the move?");
+    expect(q.week[0].day).toBe("Monday");
+    expect(q.week[0].answers.map((a) => a.label)).toEqual(["Just this week", "Move it to Fridays"]);
+    expect(answerGuidance(q.week[0], "regular", null)).toContain("Move the Lower session from Monday to Friday if the week still works");
+    expect(answerGuidance(q.week[0], "once", null)).toContain("a one-off, keep it on Monday");
+  });
+
+  it("compares a moved session exercise by exercise against its planned day", () => {
+    const input = cleanWeek();
+    input.strength[0] = hevy(FRI, [["Goblet Squat", [[30, 10], [30, 10]]], ["Romanian Deadlift (Barbell)", [[80, 6], [80, 6], [80, 5]]]]);
+    const q = buildCheckinQuestions(input);
+    expect(kinds([...q.week, ...q.more]).sort()).toEqual(["fell_short", "moved_session", "swapped_exercise"]);
+    const swap = [...q.week, ...q.more].find((x) => x.kind === "swapped_exercise")!;
+    expect(swap.text).toBe("You did Goblet Squat instead of Squat (Barbell) on Friday. Why?");
+    expect(swap.day).toBe("Monday");
+  });
+
+  it("pairs by the workout's title when the exercises are all different", () => {
+    const input = cleanWeek();
+    input.plan = { sessions: PLAN.sessions.map((s) => (s.day === "Monday" ? { ...s, label: "Legs" } : s)) };
+    input.strength[0] = hevy(THU, [["Leg Press (Machine)", [[150, 10], [150, 10]]], ["Leg Curl (Machine)", [[40, 12], [40, 12]]]], "Legs");
+    const q = buildCheckinQuestions(input);
+    expect(kinds([...q.week, ...q.more])).toContain("moved_session");
+    expect(kinds([...q.week, ...q.more])).not.toContain("skipped");
+    expect(kinds([...q.week, ...q.more])).not.toContain("extra_activity");
+  });
+
+  it("pairs two planned sessions done on each other's days", () => {
+    const input = cleanWeek();
+    const [lower, upper] = input.strength;
+    input.strength = [{ ...upper, date: MON }, { ...lower, date: WED }];
+    const q = buildCheckinQuestions(input);
+    expect(q.week.map((x) => x.text).sort()).toEqual([
+      "You did Monday's Lower session on Wednesday. Why the move?",
+      "You did Wednesday's Upper session on Monday. Why the move?",
+    ]);
+  });
+
+  it("doesn't pair on one shared exercise or a shared word in the title", () => {
+    const input = cleanWeek();
+    input.plan = { sessions: PLAN.sessions.map((s) => ({ ...s, label: s.label === "Long run" ? s.label : `${s.label} body` })) };
+    input.strength = [input.strength[0], hevy(FRI, [["Leg Curl (Machine)", [[40, 12], [40, 12]]], ["Leg Press (Machine)", [[150, 10], [150, 10]]]], "Lower body"),
+      hevy(SAT, [["Leg Extension (Machine)", [[50, 12], [50, 12]]]], "Upper body pump")];
+    const q = buildCheckinQuestions(input);
+    expect(kinds([...q.week, ...q.more]).sort()).toEqual(["extra_activity", "extra_activity", "skipped"]);
+  });
+
+  it("gives a workout to the planned day it fits best, not the first that fits", () => {
+    const input = cleanWeek();
+    // Wednesday's workout is all of Monday's Lower plus one Upper lift; Upper itself was done on Thursday.
+    input.strength = [
+      hevy(WED, [["Squat (Barbell)", [[100, 7], [100, 7]]], ["Romanian Deadlift (Barbell)", [[80, 9], [80, 9]]], ["Seated Row (Cable)", [[60, 11], [60, 11]]]]),
+      hevy(THU, [["Bench Press (Barbell)", [[80, 8], [80, 8]]], ["Seated Row (Cable)", [[60, 11], [60, 11]]]]),
+    ];
+    const q = buildCheckinQuestions(input);
+    expect([...q.week, ...q.more].filter((x) => x.kind === "moved_session").map((x) => x.text).sort()).toEqual([
+      "You did Monday's Lower session on Wednesday. Why the move?",
+      "You did Wednesday's Upper session on Thursday. Why the move?",
+    ]);
+    expect(kinds([...q.week, ...q.more])).not.toContain("skipped");
+  });
+
+  it("matches a moved session's cardio too, and doesn't call that day's own plan skipped", () => {
+    const input = cleanWeek();
+    input.plan = { sessions: PLAN.sessions.map((s) => (s.day === "Monday"
+      ? { ...s, exercises: [...s.exercises, { name: "Bike, zone 2", sets: 1, reps: "30 min", rir: "n/a", load_note: null }] } : s)) };
+    input.strength[0] = { ...input.strength[0], date: FRI };
+    input.activities.push(act("r1", FRI, "Ride", { duration_s: 1800 }));
+    expect(kinds(buildCheckinQuestions(input).week)).toEqual(["moved_session"]);
+  });
+
+  it("only pairs within the Monday-to-Sunday week, from the last plan update on", () => {
+    const input = cleanWeek();
+    // Monday's Lower done on Sunday the 11th (last week, before the plan read the log).
+    input.strength[0] = { ...input.strength[0], date: READ };
+    expect(kinds(buildCheckinQuestions(input).week)).toEqual(["skipped"]);
+  });
+
+  it("doesn't let part of a session stand in for one still to come, or call it extra yet", () => {
+    const input = cleanWeek();
+    input.today = WED; // Upper not trained yet
+    input.strength = [input.strength[0], hevy("2026-10-13", [["Bench Press (Barbell)", [[80, 8], [80, 8]]]], "Upper")];
+    const q = buildCheckinQuestions(input);
+    expect([...q.week, ...q.more]).toEqual([]);
+  });
+
+  it("keeps a session done in full on its own day, even if a bigger plan shares its lifts", () => {
+    const input = cleanWeek();
+    input.plan = { sessions: [
+      { day: "Monday", label: "Full A", exercises: [lift("Squat (Barbell)", 3, "6-8"), lift("Bench Press (Barbell)", 3, "8")] },
+      { day: "Wednesday", label: "Full B", exercises: ["Squat (Barbell)", "Bench Press (Barbell)", "Seated Row (Cable)", "Deadlift (Barbell)", "Overhead Press (Barbell)", "Bicep Curl (Dumbbell)"].map((n) => lift(n, 3, "8")) },
+    ] };
+    input.strength = [hevy(MON, [["Squat (Barbell)", [[100, 7], [100, 7]]], ["Bench Press (Barbell)", [[80, 8], [80, 8]]], ["Seated Row (Cable)", [[60, 8], [60, 8]]]])];
+    input.activities = [];
+    expect(buildCheckinQuestions(input).week.map((x) => x.text)).toEqual(["Wednesday's Full B session isn't in your log. What happened?"]);
+  });
+
+  it("pairs each of two sessions done on the same day", () => {
+    const input = cleanWeek();
+    const [lower, upper] = input.strength;
+    input.strength = [{ ...upper, title: "Upper" }, { ...lower, date: WED, title: "Lower" }];
+    const q = buildCheckinQuestions(input);
+    expect(q.week.map((x) => x.text)).toEqual(["You did Monday's Lower session on Wednesday. Why the move?"]);
+  });
+
+  it("counts a day whose only workout was another day's session as missed in a pattern", () => {
+    const input = cleanWeek();
+    const upper = (date: string) => hevy(date, [["Bench Press (Barbell)", [[80, 8], [80, 8]]], ["Seated Row (Cable)", [[60, 11], [60, 11]]]]);
+    input.strength = ["2026-09-21", "2026-09-28", "2026-10-05", MON].map(upper);
+    input.activities = [act("a1", SAT, "Run", { distance_km: 14 }), act("a0", "2026-09-20", "Run", { distance_km: 14 })];
+    const q = buildCheckinQuestions(input);
+    expect([...q.week, ...q.more].map((x) => x.text)).toContain("Monday's Lower session was missed in 4 of the last 4 weeks.");
+  });
+
+  it("asks nothing yet about part of a session still to come", () => {
+    const input = cleanWeek();
+    input.plan = { sessions: [PLAN.sessions[0], { day: "Thursday", label: "Upper", exercises: [lift("Bench Press (Barbell)", 3, "8"), lift("Seated Row (Cable)", 3, "10-12"), lift("Overhead Press (Barbell)", 3, "8")] }] };
+    input.strength = [input.strength[0], hevy("2026-10-13", [["Bench Press (Barbell)", [[80, 8], [80, 8]]], ["Seated Row (Cable)", [[60, 11], [60, 11]]]])];
+    input.activities = [];
+    expect(buildCheckinQuestions({ ...input, today: WED }).week).toEqual([]);
+    expect(kinds(buildCheckinQuestions({ ...input, today: FRI }).week)).toContain("moved_session");
+  });
+
+  it("matches a moved session's cardio on its planned day when it was done there", () => {
+    const input = cleanWeek();
+    input.plan = { sessions: PLAN.sessions.map((s) => (s.day === "Monday"
+      ? { ...s, exercises: [...s.exercises, { name: "Easy run", sets: 1, reps: "5 km", rir: "n/a", load_note: null }] } : s)) };
+    input.strength[0] = { ...input.strength[0], date: THU };
+    input.activities.push(act("r1", MON, "Run", { distance_km: 5, duration_s: 1700 }));
+    expect(kinds(buildCheckinQuestions(input).week)).toEqual(["moved_session"]);
+  });
+
+  it("still calls a workout extra when it fits no planned session", () => {
+    const input = cleanWeek();
+    input.strength.push(hevy(FRI, [["Bicep Curl (Dumbbell)", [[12, 12], [12, 12]]]], "Arms"));
+    expect(kinds(buildCheckinQuestions(input).week)).toEqual(["extra_activity"]);
+  });
+
   it("doesn't call a lift skipped when it's after the last Hevy import", () => {
     const input = cleanWeek();
     input.strength = [input.strength[0]]; // Wednesday's Upper not in the log...
@@ -207,6 +351,18 @@ describe("buildCheckinQuestions", () => {
     // Weeks an older plan laid out don't count.
     input.planSince = "2026-10-05";
     expect(kinds(buildCheckinQuestions(input).week)).toEqual(["skipped"]);
+  });
+
+  it("doesn't count a session moved within its week as a missed one", () => {
+    const input = cleanWeek();
+    // Wednesday's Upper done on Thursday each week, Monday's Lower on Monday.
+    const upper = (date: string) => hevy(date, [["Bench Press (Barbell)", [[80, 8], [80, 8]]], ["Seated Row (Cable)", [[60, 11], [60, 11]]]]);
+    const lower = (date: string) => hevy(date, [["Squat (Barbell)", [[100, 7], [100, 7]]]]);
+    input.strength = [lower(MON), upper(THU), lower("2026-10-05"), upper("2026-10-08"), lower("2026-09-28"), upper("2026-10-01"),
+      lower("2026-09-21"), upper("2026-09-24")];
+    input.activities = [act("a1", SAT, "Run", { distance_km: 14 }), act("a0", "2026-09-20", "Run", { distance_km: 14 }),
+      act("b1", "2026-10-10", "Run", { distance_km: 14 }), act("b2", "2026-10-03", "Run", { distance_km: 14 }), act("b3", "2026-09-26", "Run", { distance_km: 14 })];
+    expect(kinds(buildCheckinQuestions(input).week)).toEqual(["moved_session"]);
   });
 
   it("replaces several short lifts with one fatigue question when form is low", () => {

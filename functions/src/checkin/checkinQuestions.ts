@@ -11,6 +11,7 @@ import {
 } from "../lib/checkinQuestions";
 import { addDays, daysBetween } from "../lib/checkinFormat";
 import type { StrengthSession } from "../lib/hevyDerivedData";
+import { storedSessionDate } from "../lib/hevyAnalyzer";
 import { applySessionLoads } from "../lib/sessionLoads";
 import { FeedbackTag, NOTE_TEXT_MAX } from "../lib/planFeedback";
 
@@ -118,7 +119,10 @@ async function loadQuestions(db: Firestore, uid: string, clock: AthleteClock): P
     db.collection(`users/${uid}/activities`).where("date", ">=", since).get(),
   ]);
   const hevy = summary.integrationsStatus?.hevy ?? {};
-  const strength = strengthSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as StrengthSession);
+  const strength = strengthSnap.docs.map((d) => {
+    const s = d.data();
+    return { id: d.id, ...s, date: storedSessionDate(s.start_time, s.date) } as StrengthSession;
+  });
   const activities: LoggedActivity[] = activitySnap.docs.map((d) => {
     const a = d.data();
     return {

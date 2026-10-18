@@ -5,6 +5,7 @@ import {
   groupRowsBySession,
   rowsToStrengthSession,
   parseHevyCsvToSessions,
+  storedSessionDate,
 } from "../src/lib/hevyAnalyzer";
 import { generateSessionId } from "../src/integrations/saveHevySessions";
 
@@ -263,6 +264,29 @@ describe("hevyAnalyzer", () => {
         const id = (s: typeof sessions1[number]) => generateSessionId("testuser", s.start_time, s.title);
         expect(id(sessions1[i])).toBe(id(sessions2[i]));
       }
+    });
+  });
+
+  describe("session dates", () => {
+    const withTz = <T>(tz: string, fn: () => T): T => {
+      const before = process.env.TZ;
+      process.env.TZ = tz;
+      try { return fn(); } finally { if (before === undefined) delete process.env.TZ; else process.env.TZ = before; }
+    };
+    const row = { title: "Legs", start_time: "13 Oct 2026, 07:15", end_time: "13 Oct 2026, 08:20", exercise_title: "Squat", set_index: "0", set_type: "normal", weight_kg: "85", reps: "6" } as any;
+
+    it("keeps a morning workout on its own day east of UTC", () => {
+      expect(withTz("Asia/Singapore", () => rowsToStrengthSession([row])!.date)).toBe("2026-10-13");
+      expect(withTz("America/Los_Angeles", () => rowsToStrengthSession([{ ...row, start_time: "13 Oct 2026, 22:30" }])!.date)).toBe("2026-10-13");
+      expect(withTz("America/Los_Angeles", () => rowsToStrengthSession([{ ...row, start_time: "2026-10-13" }])!.date)).toBe("2026-10-13");
+    });
+
+    it("reads a stored session's day again from its zoneless start time, in any zone", () => {
+      expect(withTz("Asia/Singapore", () => storedSessionDate("13 Oct 2026, 07:15", "2026-10-12"))).toBe("2026-10-13");
+      expect(withTz("America/Los_Angeles", () => storedSessionDate("Oct 13, 2026, 7:15 AM", "2026-10-12"))).toBe("2026-10-13");
+      expect(storedSessionDate("2026-10-13 07:15", "2026-10-12")).toBe("2026-10-13");
+      expect(storedSessionDate("2026-10-12T23:15:00Z", "2026-10-13")).toBe("2026-10-13");
+      expect(storedSessionDate(undefined, "2026-10-12")).toBe("2026-10-12");
     });
   });
 });

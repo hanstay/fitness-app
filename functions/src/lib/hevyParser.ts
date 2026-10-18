@@ -1,6 +1,7 @@
 // Deterministic Hevy CSV parser — ports tools/sync-hevy.ps1's logic to TypeScript.
 // Pure functions, no Firebase/network dependencies, so they're independently unit-testable.
 import { parse } from "csv-parse/sync";
+import { hevyDate } from "./hevyAnalyzer";
 
 export interface CurrentLift {
   exercise: string;
@@ -99,7 +100,7 @@ export function parseHevyCsvToCurrentLifts(csvText: string, windowDays = 30, lim
         exercise,
         weight_kg: weight_kg !== null ? Math.round(weight_kg * 10) / 10 : null,
         reps: Number.isFinite(reps) ? reps : null,
-        date: date.toISOString().slice(0, 10),
+        date: hevyDate(row.start_time, date),
       },
     });
   }
