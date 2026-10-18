@@ -84,6 +84,7 @@ describe("group generation", () => {
 
     const memberDoc = await db.doc("groups/g1/members/a").get();
     expect(memberDoc.exists).toBe(true);
+    expect(memberDoc.data()?.inputsReadAt.toMillis()).toBeLessThanOrEqual(memberDoc.data()?.updatedAt.toMillis());
     expect(result.programId).toBe(activeSnap.docs[0].id);
   });
 
