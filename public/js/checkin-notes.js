@@ -12,7 +12,7 @@ import {
   FEEDBACK_TAGS, tagLabel, isQuestionOnly, PAIN_SAFETY, noteTitle, followUpChoices, followUpDone, errorText,
 } from "./plan-feedback.js";
 
-const CHECKIN_ANSWER = "checkin_question"; // a note saved by answering "Your week" (checkin-questions.js)
+const CHECKIN_ANSWER = "checkin_question"; // a note saved by answering a check-in question (checkin-questions.js)
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const $ = (id) => document.getElementById(id);
 

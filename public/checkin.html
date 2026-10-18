@@ -51,9 +51,6 @@
   .cq-card.cq-welcome{border-color:var(--accent); background:var(--accent-soft)}
   .cq-src{font-size:.7rem; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:var(--text-secondary)}
   .cq-text{font-weight:600; font-size:.95rem; line-height:1.4; margin:0}
-  .cq-facts{display:flex; flex-wrap:wrap; gap:4px 14px; font-size:.82rem; color:var(--text-secondary)}
-  .cq-card fieldset{border:0; margin:0; padding:0; min-width:0}
-  .cq-card legend{font-size:.82rem; font-weight:600; padding:0; margin:0 0 6px}
   .cq-card .chips{gap:6px}
   .cq-card .chips input + span{padding:7px 12px; font-size:.82rem}
   .cq-done{display:flex; align-items:center; gap:10px; padding:8px 2px; border-bottom:1px solid var(--border); font-size:.86rem}
@@ -61,9 +58,6 @@
   .cq-done .what{flex:1; min-width:0; color:var(--text-secondary)}
   .cq-done .what b{color:var(--text); font-weight:600}
   .cq-card .cq-skip{align-self:flex-start}
-  /* While "Your week" still has questions, the note form waits below them (checkin.js). */
-  #feedbackSection[data-waiting] .fb-intro, #feedbackSection[data-waiting] #noteForm{display:none}
-  #feedbackSection[data-waiting]:not(:has(#followUps > *)):not(:has(#pendingNotes > *)){display:none}
   .cq-card .status-line{margin:0}
   .cq-card .status-line:empty{display:none}
   .cq-card .field label{text-transform:none; letter-spacing:0; font-size:.82rem}
@@ -123,12 +117,10 @@
     </div>
   </section>
 
-  <!-- Section 3: questions about the week's logs (personal plans only; checkin-questions.js) -->
+  <!-- Section 3: welcome back, and missing Hevy data (checkin-questions.js) -->
   <section id="weekSection" style="display:none">
-    <h2><span class="dot"></span>Your week</h2>
-    <p class="muted small" id="weekIntro"></p>
+    <h2><span class="dot"></span>Before you update</h2>
     <div id="weekCards"></div>
-    <button class="link-btn" type="button" id="weekSkippedBtn" style="display:none"></button>
   </section>
 
   <!-- Section 4: notes for the next update (personal plans only; shown by checkin.js) -->

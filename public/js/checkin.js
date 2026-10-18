@@ -176,7 +176,6 @@ document.getElementById("icuSyncBtn").addEventListener("click", (e) => {
     setStatus("icuStatus", newCount > 0 ? `Synced ${newCount} new ${newCount === 1 ? "activity" : "activities"}.` : "Synced. No new activities.");
     summary = await loadSummary();
     renderIcuState(summary);
-    if (newCount > 0) refreshCheckinQuestions();
   }).catch((err) => {
     setStatus("icuStatus", "");
     showError(`Sync failed: ${err.message || err}`);
@@ -343,19 +342,7 @@ if (summary) {
   initCheckinNotes(user.uid, summary, {
     onPendingChange: (count) => { pendingFeedback = count; renderGenerationStatus(); },
   }).catch((err) => console.error("[checkin] notes section failed to load", err));
-  // With intervals.icu connected, the questions wait for the sync below.
-  // The note form waits until the questions are answered or skipped, unless
-  // the athlete came here to write one ("Note for check-in" on the Program
-  // page) or has started on it: then it stays put.
-  const feedbackSection = document.getElementById("feedbackSection");
-  let noteStarted = location.hash === "#feedback" || new URLSearchParams(location.search).has("exercise");
-  document.getElementById("noteForm").addEventListener("focusin", () => {
-    noteStarted = true;
-    feedbackSection.removeAttribute("data-waiting");
-  });
   initCheckinQuestions({
-    onRemainingChange: (n) => { feedbackSection.toggleAttribute("data-waiting", n > 0 && !noteStarted); },
-    load: !summary.integrationsStatus?.intervalsIcu?.connected,
     onImportNow: () => {
       expandSection("hevySection");
       document.getElementById("hevySection").scrollIntoView({ behavior: "smooth" });
@@ -387,6 +374,5 @@ if (summary?.integrationsStatus?.intervalsIcu?.connected) {
     .finally(() => {
       icuSyncing = false;
       renderGenerationStatus();
-      if (summary) refreshCheckinQuestions();
     });
 }
