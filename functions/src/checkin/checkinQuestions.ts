@@ -79,23 +79,30 @@ async function personalPlan(db: Firestore, uid: string, summary: DocumentData): 
   };
 }
 
-/** The group's sessions with this member's loads, read when their own layer was last written. */
+const millis = (ts: { toMillis?: () => number } | null | undefined): number => ts?.toMillis?.() ?? -Infinity;
+
+/** The group's sessions with this member's loads. */
 async function groupPlan(db: Firestore, uid: string, groupId: string): Promise<PlanForQuestions> {
-  const [groupSnap, programSnap, memberSnap] = await Promise.all([
+  const [groupSnap, programSnap, memberSnap, userSnap] = await Promise.all([
     db.doc(`groups/${groupId}`).get(),
     db.collection(`groups/${groupId}/programs`).where("status", "==", "active").limit(1).get(),
     db.doc(`groups/${groupId}/members/${uid}`).get(),
+    db.doc(`users/${uid}`).get(),
   ]);
   const shared = programSnap.docs[0]?.data() ?? null;
   const member = memberSnap.data() ?? null;
+  // Logs from before the shared plan started were done on the one it replaced
+  // (another member's update can replace it after this member's last one), and
+  // a member's first update hasn't read their logs yet.
+  const readAt = millis(member?.inputsReadAt) >= millis(shared?.createdAt) ? member?.inputsReadAt : shared?.createdAt;
   return {
     plan: shared
       ? { sessions: Array.isArray(member?.sessionLoads) ? applySessionLoads(shared.sessions, member.sessionLoads) : shared.sessions }
       : null,
-    // A member's first update hasn't read their logs yet: the shared plan's start stands in.
-    readAt: member?.inputsReadAt ?? shared?.createdAt ?? null,
+    readAt: readAt ?? null,
     since: shared?.blockStartedAt ?? shared?.createdAt ?? null,
-    fixedSessions: groupSnap.data()?.fixedSessions ?? [],
+    // The group's fixed sessions, and the member's own (their own club run isn't an extra).
+    fixedSessions: [...(groupSnap.data()?.fixedSessions ?? []), ...(userSnap.data()?.athlete?.fixed_sessions ?? [])],
   };
 }
 

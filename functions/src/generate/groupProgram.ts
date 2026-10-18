@@ -423,17 +423,24 @@ export async function runGenerateGroupProgram(
       ? [REBUILD_CHANGE_NOTE, ...(memberLayer.currentState?.highlights ?? [])]
       : undefined;
 
-  // Stored on the member doc (program.html's "What changed" box reads it and
-  // the feedback answers there); set() replaces the whole doc, so a later run
-  // without them clears them.
+  // Stored on the member doc (program.html's "What changed" box reads it
+  // there); set() replaces the whole doc, so a later run without one clears it.
+  // The answers to their notes quote the notes, which only they can read, so
+  // those go in their own tree (users/{uid}/state/groupFeedback) instead of
+  // the member doc their group can read, written in the same commit.
   // groupProgramId: the shared program this layer was written against, so the
   // summary isn't shown once another member's run has replaced that program.
   await commitProgramGeneration(uid, opts?.placeholder, async (tx) => {
     await settleNotesInTransaction(db, tx, uid, notes, settlements, groupProgramRef!.id);
+    const feedbackRef = db.doc(`users/${uid}/state/groupFeedback`);
+    if (answeredFeedback.length) {
+      tx.set(feedbackRef, { groupProgramId: groupProgramRef!.id, feedbackResponses: answeredFeedback, updatedAt: FieldValue.serverTimestamp() });
+    } else {
+      tx.delete(feedbackRef);
+    }
     tx.set(db.doc(`groups/${groupId}/members/${uid}`), {
       ...memberLayer,
       ...(changeSummary ? { changeSummary } : {}),
-      ...(answeredFeedback.length ? { feedbackResponses: answeredFeedback } : {}),
       groupProgramId: groupProgramRef!.id,
       profileSnapshot: athlete,
       inputsReadAt,

@@ -254,10 +254,14 @@ describe("group generation", () => {
     expect(layerCall.userText).toContain('[n1] NEW · Pain / discomfort · about "Walking Lunge (Dumbbell)" on Tuesday');
     expect(layerCall.userText).toContain('[n2] NEW · Check-in answer · about Thursday');
 
+    // The answers quote the notes, so they're kept in the member's own tree, not on the doc the group reads.
     const member = (await db.doc("groups/g10/members/a").get()).data()!;
-    expect(member.feedbackResponses.map((r: { noteId: string; status: string }) => [r.noteId, r.status]))
+    expect(member).not.toHaveProperty("feedbackResponses");
+    const answers = (await db.doc("users/a/state/groupFeedback").get()).data()!;
+    expect(answers.groupProgramId).toBe(member.groupProgramId);
+    expect(answers.feedbackResponses.map((r: { noteId: string; status: string }) => [r.noteId, r.status]))
       .toEqual([["knee", "changed"], ["move", "no_change"]]);
-    expect(member.feedbackResponses[1]).toMatchObject({ question: expect.stringContaining("Thursday"), answer: "Move it: Sat" });
+    expect(answers.feedbackResponses[1]).toMatchObject({ question: expect.stringContaining("Thursday"), answer: "Move it: Sat" });
     const stored = async (id: string) => (await db.doc(`users/a/feedbackNotes/${id}`).get()).data()!;
     expect(await stored("knee")).toMatchObject({ status: "open", handledProgramId: member.groupProgramId });
     expect(await stored("move")).toMatchObject({ status: "done", response: { status: "no_change" } });
@@ -269,7 +273,7 @@ describe("group generation", () => {
     await runGenerateProgram("a");
     const plain = mockExtractStructuredJson.mock.calls.map((c) => c[0] as { toolName: string; system: string }).find((c) => c.toolName === "record_member_layer")!;
     expect(plain.system).not.toContain("ATHLETE FEEDBACK");
-    expect((await db.doc("groups/g10/members/a").get()).data()).not.toHaveProperty("feedbackResponses");
+    expect((await db.doc("users/a/state/groupFeedback").get()).exists).toBe(false);
   });
 
   it("scenario 9: moving to the next phase stores the change summary on the member's doc until their next update", async () => {
