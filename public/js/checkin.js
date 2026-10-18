@@ -345,6 +345,8 @@ if (summary) {
   }).catch((err) => console.error("[checkin] notes section failed to load", err));
   // With intervals.icu connected, the questions wait for the sync below.
   initCheckinQuestions({
+    // The note form waits until the questions are answered or skipped.
+    onRemainingChange: (n) => { document.getElementById("feedbackSection").toggleAttribute("data-waiting", n > 0); },
     load: !summary.integrationsStatus?.intervalsIcu?.connected,
     onImportNow: () => {
       expandSection("hevySection");

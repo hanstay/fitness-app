@@ -115,6 +115,31 @@ describe("check-in questions", () => {
     await expect(call(answerCheckinQuestion, "q4", { key: "skipped|2020-01-01", answerId: "busy", today: TODAY })).rejects.toThrow(/no longer applies/);
   });
 
+  it("trusts the stored workouts over a stale import status, and a layer's write time when it has no read time", async () => {
+    const day = daysAgo(3);
+    await db.doc("users/q7").set({ uid: "q7", athlete: { goal: "Get stronger" } });
+    await db.doc("groups/g7").set({ memberUids: ["q7"], fixedSessions: [] });
+    await db.doc("groups/g7/programs/p1").set({
+      status: "active", createdAt: Timestamp.fromMillis(Date.now() - 56 * 86400000),
+      sessions: [{ day: weekdayOf(day), label: "Lower", focus_note: null, exercises: [ex("Squat (Barbell)")] }],
+    });
+    // Written by a backend from before inputsReadAt.
+    await db.doc("groups/g7/members/q7").set({ groupProgramId: "p1", updatedAt: Timestamp.fromMillis(Date.now() - 6 * 86400000) });
+    await db.doc("users/q7/state/summary").set({
+      activeProgramSource: "group", groupId: "g7",
+      integrationsStatus: { hevy: { csvUploaded: true, lastSessionDate: daysAgo(56), parsedAt: Timestamp.fromMillis(Date.now() - 56 * 86400000) } },
+    });
+    await db.doc("users/q7/strengthSessions/s1").set({
+      date: day, title: "Lower", start_time: `${day} 18:00`, end_time: `${day} 19:00`, source: "hevy",
+      exercises: [{ name: "Goblet Squat", sets: [0, 1, 2].map((index) => ({ index, type: "normal", weight_kg: 30, reps: 10, distance_km: null, duration_seconds: null, rpe: null })) }],
+    });
+
+    const got = await call<Questions>(getCheckinQuestions, "q7", { today: TODAY });
+    expect(got.gap).toBeNull();
+    expect(got.data).toEqual([]);
+    expect(got.week.map((q) => q.kind)).toEqual(["swapped_exercise"]);
+  });
+
   it("limits answers waiting for one update", async () => {
     await seed("q5");
     const [q] = (await call<Questions>(getCheckinQuestions, "q5", { today: TODAY })).week;

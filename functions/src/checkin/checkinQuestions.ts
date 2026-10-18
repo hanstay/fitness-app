@@ -7,7 +7,7 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { getFirestore, FieldValue, Firestore, DocumentData } from "firebase-admin/firestore";
 import {
-  buildCheckinQuestions, answerGuidance, CheckinQuestion, CheckinQuestions, LoggedActivity, CheckinPlan, MAX_SHOWN,
+  buildCheckinQuestions, answerGuidance, CheckinQuestion, CheckinQuestions, LoggedActivity, CheckinPlan, CheckinInput, MAX_SHOWN,
 } from "../lib/checkinQuestions";
 import { addDays, daysBetween } from "../lib/checkinFormat";
 import type { StrengthSession } from "../lib/hevyDerivedData";
@@ -93,8 +93,10 @@ async function groupPlan(db: Firestore, uid: string, groupId: string): Promise<P
   const member = memberSnap.data() ?? null;
   // Logs from before the shared plan started were done on the one it replaced
   // (another member's update can replace it after this member's last one), and
-  // a member's first update hasn't read their logs yet.
-  const readAt = millis(member?.inputsReadAt) >= millis(shared?.createdAt) ? member?.inputsReadAt : shared?.createdAt;
+  // a member's first update hasn't read their logs yet. A layer written before
+  // inputsReadAt existed only has when it was written.
+  const layerReadAt = member?.inputsReadAt ?? member?.updatedAt;
+  const readAt = millis(layerReadAt) >= millis(shared?.createdAt) ? layerReadAt : shared?.createdAt;
   return {
     plan: shared
       ? { sessions: Array.isArray(member?.sessionLoads) ? applySessionLoads(shared.sessions, member.sessionLoads) : shared.sessions }
@@ -134,7 +136,7 @@ async function loadQuestions(db: Firestore, uid: string, clock: AthleteClock): P
     strength,
     activities,
     tsb: typeof summary.wellness?.tsb === "number" ? summary.wellness.tsb : null,
-    hevy: { used: hevy.csvUploaded === true, lastSessionDate: hevy.lastSessionDate ?? null, importedDate: localDate(hevy.parsedAt, clock) },
+    hevy: hevyStatus(hevy, strength, clock),
     icuConnected: summary.integrationsStatus?.intervalsIcu?.connected === true,
   });
 
@@ -152,6 +154,21 @@ async function loadQuestions(db: Firestore, uid: string, clock: AthleteClock): P
     }
   }
   return { questions, answered };
+}
+
+/**
+ * What the summary says about the last Hevy import, but never older than the
+ * workouts actually stored: an import whose closing status write failed (or
+ * predates it) has saved its sessions without saying so.
+ */
+function hevyStatus(hevy: DocumentData, strength: StrengthSession[], clock: AthleteClock): CheckinInput["hevy"] {
+  const newest = strength.reduce<string | null>((m, s) => (typeof s.date === "string" && (!m || s.date > m) ? s.date : m), null);
+  const later = (a: string | null, b: string | null) => (a && b ? (a > b ? a : b) : a ?? b);
+  return {
+    used: hevy.csvUploaded === true || newest != null,
+    lastSessionDate: later(hevy.lastSessionDate ?? null, newest),
+    importedDate: later(localDate(hevy.parsedAt, clock), newest),
+  };
 }
 
 const allQuestions = (q: CheckinQuestions): CheckinQuestion[] => [...(q.gap ? [q.gap] : []), ...q.data, ...q.week, ...q.more];

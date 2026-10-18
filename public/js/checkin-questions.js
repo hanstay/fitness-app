@@ -1,8 +1,9 @@
 // The check-in's "Your week": one-tap questions about where the logs
 // differed from the plan (built by functions/src/lib/checkinQuestions.ts and
-// served by getCheckinQuestions). A tap saves the answer straight away as a
-// note for the next plan update; tapping another answer changes it, and
-// tapping the chosen one again takes it back. What the update did with each
+// served by getCheckinQuestions), asked one at a time, most important first.
+// A tap saves the answer straight away as a note for the next plan update and
+// brings up the next question; "Change" reopens an answer, and tapping the
+// chosen one again takes it back. What the update did with each
 // answer shows in What changed on the Program page, not here.
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
 import { functions } from "./firebase-init.js";
@@ -23,19 +24,32 @@ const clock = () => {
 };
 
 let questions = new Map(); // key → question, as last loaded
+let queue = []; // every question, most important first
 let onImport = () => {};
+let onRemaining = () => {};
 let loading = null;
 let started = false; // initCheckinQuestions has run
+const expanded = new Set(); // answered questions opened again with "Change"
+
+// Skipped questions stay skipped for the day on this device (sessionStorage
+// can throw in private mode; then they just come back on reload).
+const SKIP_KEY = () => `checkinSkipped:${clock().today}`;
+const skipped = new Set((() => { try { return JSON.parse(sessionStorage.getItem(SKIP_KEY()) || "[]"); } catch { return []; } })());
+const saveSkipped = () => { try { sessionStorage.setItem(SKIP_KEY(), JSON.stringify([...skipped])); } catch { /* see above */ } };
 
 /**
  * Load the questions (the section shows once there are some). onImportNow
- * opens the Hevy import (the "Import now" answer).
+ * opens the Hevy import (the "Import now" answer). onRemainingChange(n)
+ * hears how many questions are still waiting for an answer or a skip, so the
+ * page can hold the note form back until they're done.
  */
-export function initCheckinQuestions({ onImportNow, load = true } = {}) {
+export function initCheckinQuestions({ onImportNow, onRemainingChange, load = true } = {}) {
   onImport = onImportNow ?? onImport;
-  $("weekMoreBtn").addEventListener("click", () => {
-    $("weekMore").hidden = !$("weekMore").hidden;
-    renderMoreButton();
+  onRemaining = onRemainingChange ?? onRemaining;
+  $("weekSkippedBtn").addEventListener("click", () => {
+    skipped.clear();
+    saveSkipped();
+    renderQueue();
   });
   started = true;
   if (load) refreshCheckinQuestions();
@@ -51,6 +65,7 @@ export async function refreshCheckinQuestions() {
       render(data);
     } catch (err) {
       console.error("[checkin] questions failed to load", err);
+      onRemaining(0); // don't hold the note form back for questions that won't come
     } finally {
       loading = null;
     }
@@ -60,31 +75,53 @@ export async function refreshCheckinQuestions() {
 
 /* ---------- rendering ---------- */
 
-let moreCount = 0;
-
+// One question at a time, most important first: the welcome back, then the
+// data checks, then the week's. Answered ones fold into a line (with
+// "Change"); answering or skipping brings up the next.
 function render({ gap, data, week, more }) {
-  questions = new Map([gap, ...data, ...week, ...more].filter(Boolean).map((q) => [q.key, q]));
-  $("weekSection").style.display = gap || data.length || week.length ? "" : "none";
-  $("gapCard").innerHTML = gap ? card(gap, "cq-welcome") : "";
-  $("dataCards").innerHTML = data.map((q) => card(q, "cq-warn")).join("");
-  // A week that went to plan shows no "Your week" at all.
-  $("weekBlock").style.display = week.length ? "" : "none";
-  const total = week.length + more.length;
-  $("weekIntro").textContent = more.length
-    ? `${total} things differed from your plan. Here are the ${week.length} that matter most. One tap each, or skip them.`
-    : `${total === 1 ? "1 thing" : `${total} things`} differed from your plan. One tap each, or skip them.`;
-  $("weekCards").innerHTML = week.map((q) => card(q)).join("");
-  $("weekMore").innerHTML = `<div class="cq-more">${more.map((q) => card(q)).join("")}</div>`;
-  $("weekMore").hidden = true;
-  moreCount = more.length;
-  renderMoreButton();
-  document.querySelectorAll("#weekSection .cq-card").forEach(bindCard);
+  queue = [gap, ...data, ...week, ...more].filter(Boolean);
+  questions = new Map(queue.map((q) => [q.key, q]));
+  renderQueue();
 }
 
-function renderMoreButton() {
-  const btn = $("weekMoreBtn");
-  btn.style.display = moreCount ? "" : "none";
-  btn.textContent = $("weekMore").hidden ? `Show ${moreCount} more` : "Show fewer";
+const waiting = (q) => !q.answer && !skipped.has(q.key);
+
+function renderQueue() {
+  const current = queue.find(waiting);
+  const remaining = queue.filter(waiting).length;
+  $("weekSection").style.display = queue.some((q) => q.answer || waiting(q)) ? "" : "none";
+  $("weekIntro").textContent = remaining
+    ? `${remaining === 1 ? "1 question" : `${remaining} questions`} about how your week went. One tap each, or skip.`
+    : "That's everything. Your answers go into your next plan update.";
+  $("weekCards").innerHTML = queue.map((q) => {
+    if (q.answer && !expanded.has(q.key)) return doneRow(q);
+    if (q === current || (q.answer && expanded.has(q.key))) {
+      return card(q, q.kind === "long_gap" ? "cq-welcome" : q.kind === "no_new_data" || q.kind === "odd_entry" ? "cq-warn" : "");
+    }
+    return "";
+  }).join("");
+  const skippedCount = queue.filter((q) => !q.answer && skipped.has(q.key)).length;
+  const btn = $("weekSkippedBtn");
+  btn.style.display = skippedCount ? "" : "none";
+  btn.textContent = `Show the ${skippedCount === 1 ? "question" : `${skippedCount} questions`} you skipped`;
+  document.querySelectorAll("#weekCards .cq-card").forEach(bindCard);
+  document.querySelectorAll("#weekCards [data-change]").forEach((b) => b.addEventListener("click", () => {
+    expanded.add(b.dataset.change);
+    renderQueue();
+  }));
+  onRemaining(remaining);
+}
+
+function answerLabel(q) {
+  const a = q.answers.find((x) => x.id === q.answer.answerId);
+  const f = a?.followUp?.answers.find((x) => x.id === q.answer.followUpId);
+  return [a?.label, f?.label].filter(Boolean).join(": ");
+}
+
+function doneRow(q) {
+  return `<div class="cq-done"><span class="tick" aria-hidden="true">✓</span>
+    <span class="what">${esc(q.text)} <b>${esc(answerLabel(q))}</b></span>
+    <button class="link-btn" type="button" data-change="${esc(q.key)}">Change</button></div>`;
 }
 
 function card(q, extra = "") {
@@ -103,6 +140,9 @@ function card(q, extra = "") {
     </div>
     <div class="cq-follow">${followUp ? followUpHtml(q, followUp, chosenFollowUp) : ""}</div>
     <p class="status-line small" role="status"></p>
+    ${q.answer
+      ? `<button class="link-btn cq-skip" type="button" data-collapse>Done</button>`
+      : `<button class="link-btn cq-skip" type="button" data-skip>Skip</button>`}
   </div>`;
 }
 
@@ -148,15 +188,26 @@ function bindCard(el) {
     try {
       const { data } = await httpsCallable(functions, "answerCheckinQuestion")({ key: q.key, answerId, ...clock(), ...extra });
       q.answer = { noteId: data.noteId, answerId, followUpId: extra.followUpId ?? null };
-      // The pain questions or the text box close once saved; a follow-up stays, showing its answer.
-      if (extra.pain || "text" in extra) follow.innerHTML = "";
-      status("Saved for your next plan update.");
+      // Saved: it folds into its line and the next question comes up.
+      expanded.delete(q.key);
+      renderQueue();
     } catch (err) {
       status(errorText(err));
     } finally {
       el.querySelectorAll("input, button, textarea").forEach((c) => { c.disabled = false; });
     }
   };
+
+  const skip = () => {
+    skipped.add(q.key);
+    saveSkipped();
+    renderQueue();
+  };
+  el.querySelector("[data-skip]")?.addEventListener("click", skip);
+  el.querySelector("[data-collapse]")?.addEventListener("click", () => {
+    expanded.delete(q.key);
+    renderQueue();
+  });
 
   // A saved answer's follow-up is already on the card; changing it saves.
   const bindFollowUp = (answerId) => follow.querySelectorAll("input").forEach((f) =>
@@ -173,7 +224,8 @@ function bindCard(el) {
         try {
           await httpsCallable(functions, "removeFeedbackNote")({ noteId: q.answer.noteId });
           q.answer = null;
-          status("");
+          expanded.delete(q.key);
+          renderQueue();
         } catch (err) {
           input.checked = true;
           status(errorText(err));
@@ -188,7 +240,7 @@ function bindCard(el) {
     if (!a) return;
     status("");
     if (a.action === "import") { follow.innerHTML = ""; onImport(); return; }
-    if (a.action === "dismiss") { el.remove(); return; }
+    if (a.action === "dismiss") { skip(); return; }
     if (a.followUp) {
       follow.innerHTML = followUpHtml(q, a.followUp, null);
       bindFollowUp(answerId);

@@ -56,7 +56,14 @@
   .cq-card legend{font-size:.82rem; font-weight:600; padding:0; margin:0 0 6px}
   .cq-card .chips{gap:6px}
   .cq-card .chips input + span{padding:7px 12px; font-size:.82rem}
-  .cq-more{display:flex; flex-direction:column; gap:10px}
+  .cq-done{display:flex; align-items:center; gap:10px; padding:8px 2px; border-bottom:1px solid var(--border); font-size:.86rem}
+  .cq-done .tick{color:var(--accent); font-weight:700}
+  .cq-done .what{flex:1; min-width:0; color:var(--text-secondary)}
+  .cq-done .what b{color:var(--text); font-weight:600}
+  .cq-card .cq-skip{align-self:flex-start}
+  /* While "Your week" still has questions, the note form waits below them (checkin.js). */
+  #feedbackSection[data-waiting] .fb-intro, #feedbackSection[data-waiting] #noteForm{display:none}
+  #feedbackSection[data-waiting]:not(:has(#followUps > *)):not(:has(#pendingNotes > *)){display:none}
   .cq-card .status-line{margin:0}
   .cq-card .status-line:empty{display:none}
   .cq-card .field label{text-transform:none; letter-spacing:0; font-size:.82rem}
@@ -118,21 +125,16 @@
 
   <!-- Section 3: questions about the week's logs (personal plans only; checkin-questions.js) -->
   <section id="weekSection" style="display:none">
-    <div id="gapCard"></div>
-    <div id="dataCards"></div>
-    <div id="weekBlock" style="display:none">
-      <h2><span class="dot"></span>Your week</h2>
-      <p class="muted small" id="weekIntro"></p>
-      <div id="weekCards"></div>
-      <button class="link-btn" type="button" id="weekMoreBtn" style="display:none"></button>
-      <div id="weekMore"></div>
-    </div>
+    <h2><span class="dot"></span>Your week</h2>
+    <p class="muted small" id="weekIntro"></p>
+    <div id="weekCards"></div>
+    <button class="link-btn" type="button" id="weekSkippedBtn" style="display:none"></button>
   </section>
 
   <!-- Section 4: notes for the next update (personal plans only; shown by checkin.js) -->
   <section id="feedbackSection" style="display:none">
     <h2><span class="dot"></span>Something not right?</h2>
-    <p class="muted small">Tell us about pain, missing kit, or anything you'd change. Your next plan update works around it and
+    <p class="muted small fb-intro">Tell us about pain, missing kit, or anything you'd change. Your next plan update works around it and
       says what it changed.</p>
 
     <div id="followUps"></div>
