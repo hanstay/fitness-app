@@ -8,6 +8,7 @@
 // functions/src/feedback/feedbackNotes.ts, the same as the check-in's.
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
 import { functions } from "./firebase-init.js";
+import { normalizeDay } from "./days.js";
 import { SWAP_REASONS, SWAP_SCOPES, FEEDBACK_TAGS, PAIN_SAFETY, isQuestionOnly, errorText } from "./plan-feedback.js";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -19,8 +20,12 @@ export function swapAt(program, si, ei) {
   return (program.swaps || []).find((s) => s.sessionIndex === si && s.exerciseIndex === ei && s.to?.name === ex.name) ?? null;
 }
 
-/** Notes waiting for the next update are matched to a card by its day and exercise. */
-export const noteKey = (day, exercise) => `${day ?? ""}|${exercise}`;
+/**
+ * Notes waiting for the next update are matched to a card by its day and
+ * exercise. A note's day is stored as the full weekday name (or null), and
+ * older plans can say "Mon" or "Day 1", so both sides are normalized.
+ */
+export const noteKey = (day, exercise) => `${normalizeDay(day) ?? ""}|${exercise}`;
 
 /**
  * The card's extra lines: the swapped-from pill (with Undo), the waiting
@@ -257,7 +262,7 @@ function openNoteSheet({ program, sessionIndex, exerciseIndex, report }) {
     setStatus("Saving…");
     try {
       await httpsCallable(functions, "addFeedbackNote")({
-        tags: picked, text, exercise: ex.name, day: session.day,
+        tags: picked, text, exercise: ex.name, day: normalizeDay(session.day),
         duration: el.querySelector('input[name="noteSheetDuration"]:checked')?.value ?? "week",
       });
       el.close();
