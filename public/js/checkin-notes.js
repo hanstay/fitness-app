@@ -27,6 +27,7 @@ export async function initCheckinNotes(uid, summary, { onPendingChange } = {}) {
   section.style.display = "";
 
   renderTagChips();
+  loadPicks(uid);
   await fillExercises(uid, summary);
   bindForm();
 
@@ -37,6 +38,7 @@ export async function initCheckinNotes(uid, summary, { onPendingChange } = {}) {
         .map((d) => ({ id: d.id, ...d.data() }))
         .sort((a, b) => (a.createdAt?.toMillis?.() ?? Infinity) - (b.createdAt?.toMillis?.() ?? Infinity));
       ongoing = notes.filter((n) => n.status === "open" || (n.status === "resolved" && n.announced === false));
+      if (!snap.metadata?.fromCache) dropStalePicks();
       renderFollowUps();
       const pending = notes.filter((n) => n.status === "pending");
       // Check-in answers show on their own question, not in this list, and
@@ -266,25 +268,61 @@ function reportPendingChange() {
 /* ---------- "How does it feel now?" ---------- */
 
 let ongoing = [];
-// Answers picked on this page, sent with Update plan (followUpsToSend) rather
-// than saved, so nothing is picked until the athlete picks it and a reload
-// starts over. Note id → outcome.
-const picks = new Map();
+// Answers picked at this check-in, sent with Update plan (followUpsToSend)
+// rather than saved on the note, so nothing is picked until the athlete picks
+// it. They're kept in this browser until then, so leaving or reloading the
+// page doesn't lose them. Note id → { outcome, since: the note's handledAt
+// when picked, so a pick from before a later update isn't carried over }.
+let picks = new Map();
+let picksKey = null;
 
-/** The follow-up answers picked on this page, for the update request. */
-export function followUpsToSend() {
-  return ongoing.filter((n) => picks.has(n.id)).map((n) => ({ noteId: n.id, outcome: picks.get(n.id) }));
+const handledMillis = (n) => n.handledAt?.toMillis?.() ?? 0;
+
+function loadPicks(uid) {
+  picksKey = `followUpPicks:${uid}`;
+  try {
+    picks = new Map(Object.entries(JSON.parse(localStorage.getItem(picksKey)) || {})
+      .filter(([, p]) => ["still", "better", "worse"].includes(p?.outcome) && typeof p.since === "number"));
+  } catch {
+    picks = new Map();
+  }
 }
 
-/** Forgets the picks once the update has them. */
-export function clearFollowUpPicks() {
-  picks.clear();
+function savePicks() {
+  try {
+    if (picks.size) localStorage.setItem(picksKey, JSON.stringify(Object.fromEntries(picks)));
+    else localStorage.removeItem(picksKey);
+  } catch { /* not kept past this page */ }
+}
+
+// Picks for notes that settled, or that an update has used since.
+function dropStalePicks() {
+  const live = new Map(ongoing.map((n) => [n.id, handledMillis(n)]));
+  const before = picks.size;
+  for (const [id, pick] of picks) if (live.get(id) !== pick.since) picks.delete(id);
+  if (picks.size !== before) savePicks();
+}
+
+const pickOf = (n) => {
+  const pick = picks.get(n.id);
+  return pick?.since === handledMillis(n) ? pick.outcome : undefined;
+};
+
+/** The follow-up answers picked at this check-in, for the update request. */
+export function followUpsToSend() {
+  return ongoing.filter(pickOf).map((n) => ({ noteId: n.id, outcome: pickOf(n) }));
+}
+
+/** Forgets the picks the update was sent, keeping any changed since. */
+export function clearFollowUpPicks(sent) {
+  for (const { noteId, outcome } of sent) if (picks.get(noteId)?.outcome === outcome) picks.delete(noteId);
+  savePicks();
   renderFollowUps();
   reportPendingChange();
 }
 
 function chosenAnswer(n) {
-  return picks.get(n.id) ?? followUpAnswer(n);
+  return pickOf(n) ?? followUpAnswer(n);
 }
 
 // An answer already saved since the update last used the note (by "Feels
@@ -315,15 +353,16 @@ function renderFollowUps() {
         <div class="fb-answers">${followUpChoices(n).map(([outcome, label]) =>
           `<button class="btn${outcome === chosen ? "" : " secondary"}" type="button" aria-pressed="${outcome === chosen}"
             data-note="${esc(n.id)}" data-outcome="${outcome}">${esc(label)}</button>`).join("")}</div>
-        ${chosen ? `<p class="fb-done small">${esc(followUpDone(n, chosen))} ${picks.has(n.id) ? "Sent when you update your plan." : "Saved for your plan update."}</p>` : ""}
+        ${chosen ? `<p class="fb-done small">${esc(followUpDone(n, chosen))} ${pickOf(n) ? "Sent when you update your plan." : "Saved for your plan update."}</p>` : ""}
       </div>`;
     }).join("")}
   </div>`;
   el.querySelectorAll("[data-outcome]").forEach((btn) => btn.addEventListener("click", () => {
     const { note, outcome } = btn.dataset;
     // Tapping the picked answer again takes it back.
-    if (picks.get(note) === outcome) picks.delete(note);
-    else picks.set(note, outcome);
+    if (picks.get(note)?.outcome === outcome) picks.delete(note);
+    else picks.set(note, { outcome, since: handledMillis(ongoing.find((n) => n.id === note) ?? {}) });
+    savePicks();
     renderFollowUps();
     el.querySelector(`[data-note="${CSS.escape(note)}"][data-outcome="${outcome}"]`)?.focus();
     reportPendingChange();
