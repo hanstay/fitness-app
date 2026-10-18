@@ -6,6 +6,7 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { toProgramGenerationRequest } from "../lib/programGenerationRequest";
+import { recordFollowUps } from "../feedback/feedbackNotes";
 
 export const queueProgramGeneration = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
@@ -22,6 +23,10 @@ export const queueProgramGeneration = onCall(async (request) => {
   if (!followsGroup && (!athlete?.training_days_per_week || !athlete?.session_length_minutes)) {
     throw new HttpsError("failed-precondition", "Complete your training profile first (days/week, session length).");
   }
+
+  // The check-in's follow-up answers on ongoing notes go with the request, so
+  // they're recorded before the update reads the notes.
+  await recordFollowUps(uid, request.data?.followUps);
 
   const placeholderRef = db.collection(`users/${uid}/programs`).doc();
   await db.batch()

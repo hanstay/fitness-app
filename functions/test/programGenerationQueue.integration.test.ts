@@ -101,6 +101,23 @@ describe("queued program generation", () => {
     expect(await summaryOf("u3")).not.toHaveProperty("programGenerationStatus");
   });
 
+  it("records the check-in's follow-up answers before the update, passing over notes no longer waiting for one", async () => {
+    await seedUser("u9");
+    await db.doc("users/u9/feedbackNotes/a").set({ status: "open", worse: false });
+    await db.doc("users/u9/feedbackNotes/b").set({ status: "resolved", announced: false });
+    await db.doc("users/u9/feedbackNotes/c").set({ status: "done" });
+    const { programId } = await queue("u9", { followUps: [
+      { noteId: "a", outcome: "better" }, { noteId: "b", outcome: "worse" }, { noteId: "c", outcome: "still" },
+    ] });
+    expect((await db.doc(`users/u9/programs/${programId}`).get()).data()?.request).toEqual({ force: false });
+    expect((await db.doc("users/u9/feedbackNotes/a").get()).data()).toMatchObject({ status: "resolved", announced: false, lastFollowUp: "better" });
+    expect((await db.doc("users/u9/feedbackNotes/b").get()).data()).toMatchObject({ status: "open", worse: true, lastFollowUp: "worse" });
+    expect((await db.doc("users/u9/feedbackNotes/c").get()).data()).toEqual({ status: "done" });
+    // A malformed answer queues nothing.
+    await expect(queue("u9", { followUps: [{ noteId: "a", outcome: "maybe" }] })).rejects.toMatchObject({ code: "invalid-argument" });
+    expect(await programDocs("u9", "generating")).toBe(1);
+  });
+
   it("lets a group member without their own days/week queue an update", async () => {
     await seedUser("g1", {}, { activeProgramSource: "group", groupId: "grp" });
 

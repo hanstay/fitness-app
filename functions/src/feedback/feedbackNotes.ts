@@ -145,34 +145,56 @@ export const updateFeedbackNoteGroup = onCall(async (request) => {
   return { ok: true };
 });
 
+/** A note an answer can still be given or changed on: ongoing, or "better" the update hasn't told yet. */
+const followable = (status: unknown, announced: unknown) => status === "open" || (status === "resolved" && announced === false);
+
 /**
- * The check-in follow-up on an ongoing note: still a problem, better, or
- * worse. Until the next update uses it, the answer can be changed, which
- * includes taking back "better" (a resolved note the update hasn't told).
+ * Records follow-up answers on ongoing notes: still a problem, better, or
+ * worse. The check-in sends them with Update plan (queueProgramGeneration),
+ * so they're in place before the update reads the notes. A note that's no
+ * longer waiting for one (taken back, or already settled) is passed over.
  */
+export async function recordFollowUps(uid: string, raw: unknown): Promise<void> {
+  if (raw === undefined || raw === null) return;
+  if (!Array.isArray(raw) || raw.length > MAX_ACTIVE_NOTES) throw new HttpsError("invalid-argument", "Unknown answer.");
+  const answers = new Map<string, FollowUpOutcome>();
+  for (const a of raw as Array<{ noteId?: unknown; outcome?: unknown }>) {
+    if (!validId(a?.noteId) || !FOLLOW_UP_OUTCOMES.includes(a?.outcome as FollowUpOutcome)) {
+      throw new HttpsError("invalid-argument", "Unknown answer.");
+    }
+    answers.set(a.noteId, a.outcome as FollowUpOutcome);
+  }
+  if (!answers.size) return;
+  const refs = [...answers.keys()].map((id) => notesOf(uid).doc(id));
+  // Taking back "better" puts a note back in play, so it needs room.
+  const reopening = (await getFirestore().getAll(...refs))
+    .filter((d) => d.get("status") === "resolved" && d.get("announced") === false && answers.get(d.id) !== "better").length;
+  await checkRoom(uid, reopening, { activeOnly: true });
+  await getFirestore().runTransaction(async (tx) => {
+    const snaps = await tx.getAll(...refs);
+    for (const snap of snaps) {
+      if (!snap.exists || !followable(snap.get("status"), snap.get("announced"))) continue;
+      const outcome = answers.get(snap.id)!;
+      tx.update(snap.ref, {
+        announced: FieldValue.delete(), // set again by "better"
+        ...followUpChange(outcome),
+        lastFollowUp: outcome,
+        followedUpAt: FieldValue.serverTimestamp(),
+      });
+    }
+  });
+}
+
+/** One follow-up answer, saved straight away (check-in pages from before answers went with Update plan). */
 export const followUpFeedbackNote = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
-  const outcome = request.data?.outcome as FollowUpOutcome;
+  const ref = noteRef(request.auth.uid, request.data?.noteId);
+  const outcome = request.data?.outcome;
   if (!FOLLOW_UP_OUTCOMES.includes(outcome)) throw new HttpsError("invalid-argument", "Unknown answer.");
-  const uid = request.auth.uid;
-  const ref = noteRef(uid, request.data?.noteId);
-  // Taking back "better" puts the note back in play, so it needs room.
-  const before = await ref.get();
-  if (outcome !== "better" && before.get("status") === "resolved" && before.get("announced") === false) {
-    await checkRoom(uid, 1, { activeOnly: true });
+  const snap = await ref.get();
+  if (!snap.exists || !followable(snap.get("status"), snap.get("announced"))) {
+    throw new HttpsError("failed-precondition", "That note isn't waiting for a follow-up.");
   }
-  await getFirestore().runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    const status = snap.get("status");
-    if (!snap.exists || !(status === "open" || (status === "resolved" && snap.get("announced") === false))) {
-      throw new HttpsError("failed-precondition", "That note isn't waiting for a follow-up.");
-    }
-    tx.update(ref, {
-      announced: FieldValue.delete(), // set again by "better"
-      ...followUpChange(outcome),
-      lastFollowUp: outcome,
-      followedUpAt: FieldValue.serverTimestamp(),
-    });
-  });
+  await recordFollowUps(request.auth.uid, [{ noteId: ref.id, outcome }]);
   return { ok: true };
 });

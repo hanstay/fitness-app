@@ -1,7 +1,7 @@
 // The check-in's "Something not right?" section: save a note for the next
 // plan update (one per exercise picked, kept together as a group), edit or
 // take one back before it's used, and answer the follow-up on an ongoing
-// one ("Still bothering you?"). Notes are written only by the
+// one ("Still bothering you?"), which goes in with Update plan. Notes are written only by the
 // functions in functions/src/feedback/feedbackNotes.ts; this page listens to
 // them. On a group plan, the member's own layer works around them.
 import { collection, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
@@ -36,8 +36,8 @@ export async function initCheckinNotes(uid, summary, { onPendingChange } = {}) {
       const notes = snap.docs
         .map((d) => ({ id: d.id, ...d.data() }))
         .sort((a, b) => (a.createdAt?.toMillis?.() ?? Infinity) - (b.createdAt?.toMillis?.() ?? Infinity));
-      const ongoing = notes.filter((n) => n.status === "open" || (n.status === "resolved" && n.announced === false));
-      renderFollowUps(ongoing);
+      ongoing = notes.filter((n) => n.status === "open" || (n.status === "resolved" && n.announced === false));
+      renderFollowUps();
       const pending = notes.filter((n) => n.status === "pending");
       // Check-in answers show on their own question, not in this list, and
       // have their own limit on the server.
@@ -46,8 +46,9 @@ export async function initCheckinNotes(uid, summary, { onPendingChange } = {}) {
       activeOwnCount = notes.filter((n) => (n.status === "pending" || n.status === "open") && n.source !== CHECKIN_ANSWER).length;
       renderPending(ownPending);
       renderUpdateLine(notes);
-      // A follow-up answered since the last update is new for it too.
-      onPendingChange?.(pending.length + ongoing.filter((n) => followUpAnswer(n) != null).length);
+      pendingCount = pending.length;
+      reportPending = onPendingChange;
+      reportPendingChange();
     },
     (err) => console.error("[checkin] notes listener failed", err)
   );
@@ -254,17 +255,49 @@ function renderPending(notes) {
   }));
 }
 
+let pendingCount = 0;
+let reportPending = null;
+
+// A follow-up answered since the last update is new for it too.
+function reportPendingChange() {
+  reportPending?.(pendingCount + ongoing.filter((n) => chosenAnswer(n) != null).length);
+}
+
 /* ---------- "How does it feel now?" ---------- */
 
-// The answer given since the update last used the note, which the next
-// update will act on; until then it can be changed.
+let ongoing = [];
+// Answers picked on this page, sent with Update plan (followUpsToSend) rather
+// than saved, so nothing is picked until the athlete picks it and a reload
+// starts over. Note id → outcome.
+const picks = new Map();
+
+/** The follow-up answers picked on this page, for the update request. */
+export function followUpsToSend() {
+  return ongoing.filter((n) => picks.has(n.id)).map((n) => ({ noteId: n.id, outcome: picks.get(n.id) }));
+}
+
+/** Forgets the picks once the update has them. */
+export function clearFollowUpPicks() {
+  picks.clear();
+  renderFollowUps();
+  reportPendingChange();
+}
+
+function chosenAnswer(n) {
+  return picks.get(n.id) ?? followUpAnswer(n);
+}
+
+// An answer already saved since the update last used the note (by "Feels
+// better" taken as resolved, or by a check-in page from before answers went
+// with the update), which the next update will act on.
 function followUpAnswer(n) {
   if (n.status === "resolved") return "better";
   const since = (n.followedUpAt?.toMillis?.() ?? 0) > (n.handledAt?.toMillis?.() ?? 0);
   return since ? n.lastFollowUp ?? null : null;
 }
 
-function renderFollowUps(notes) {
+function renderFollowUps() {
+  const notes = ongoing;
   const el = $("followUps");
   if (!notes.length) { el.innerHTML = ""; return; }
   // Every note stays on the list with its answer showing, so an answer can
@@ -272,7 +305,7 @@ function renderFollowUps(notes) {
   el.innerHTML = `<div class="fb-followups">
     <p class="fb-list-head">Your plan is working around ${notes.length === 1 ? "this" : "these"}</p>
     ${notes.map((n) => {
-      const chosen = followUpAnswer(n);
+      const chosen = chosenAnswer(n);
       const title = noteTitle(n);
       return `<div class="fb-compact" role="group" aria-label="${esc(title)}">
         <div class="fb-title">${esc(title)}</div>
@@ -282,21 +315,18 @@ function renderFollowUps(notes) {
         <div class="fb-answers">${followUpChoices(n).map(([outcome, label]) =>
           `<button class="btn${outcome === chosen ? "" : " secondary"}" type="button" aria-pressed="${outcome === chosen}"
             data-note="${esc(n.id)}" data-outcome="${outcome}">${esc(label)}</button>`).join("")}</div>
-        ${chosen ? `<p class="fb-done small">${esc(followUpDone(n, chosen))} You can change this until you update your plan.</p>` : ""}
+        ${chosen ? `<p class="fb-done small">${esc(followUpDone(n, chosen))} Sent when you update your plan.</p>` : ""}
       </div>`;
     }).join("")}
   </div>`;
-  el.querySelectorAll("[data-outcome]").forEach((btn) => btn.addEventListener("click", async () => {
-    if (btn.getAttribute("aria-pressed") === "true") return;
-    const row = btn.closest(".fb-compact");
-    row.querySelectorAll("button").forEach((b) => { b.disabled = true; });
-    try {
-      // The listener redraws the row with the answer chosen.
-      await httpsCallable(functions, "followUpFeedbackNote")({ noteId: btn.dataset.note, outcome: btn.dataset.outcome });
-    } catch (err) {
-      row.querySelectorAll("button").forEach((b) => { b.disabled = false; });
-      setNoteStatus(errorText(err));
-    }
+  el.querySelectorAll("[data-outcome]").forEach((btn) => btn.addEventListener("click", () => {
+    const { note, outcome } = btn.dataset;
+    // Tapping the picked answer again takes it back.
+    if (picks.get(note) === outcome) picks.delete(note);
+    else picks.set(note, outcome);
+    renderFollowUps();
+    el.querySelector(`[data-note="${CSS.escape(note)}"][data-outcome="${outcome}"]`)?.focus();
+    reportPendingChange();
   }));
 }
 
