@@ -18,8 +18,9 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 const $ = (id) => document.getElementById(id);
 
 /**
- * onPendingChange(count) hears how many notes and check-in answers are
- * waiting for the next update, which counts as something new for it.
+ * onPendingChange(count) hears how many notes, check-in answers and
+ * follow-up answers are waiting for the next update, which counts as
+ * something new for it.
  */
 export async function initCheckinNotes(uid, summary, { onPendingChange } = {}) {
   const section = $("feedbackSection");
@@ -35,7 +36,8 @@ export async function initCheckinNotes(uid, summary, { onPendingChange } = {}) {
       const notes = snap.docs
         .map((d) => ({ id: d.id, ...d.data() }))
         .sort((a, b) => (a.createdAt?.toMillis?.() ?? Infinity) - (b.createdAt?.toMillis?.() ?? Infinity));
-      renderFollowUps(notes.filter((n) => n.status === "open" || (n.status === "resolved" && n.announced === false)));
+      const ongoing = notes.filter((n) => n.status === "open" || (n.status === "resolved" && n.announced === false));
+      renderFollowUps(ongoing);
       const pending = notes.filter((n) => n.status === "pending");
       // Check-in answers show on their own question, not in this list, and
       // have their own limit on the server.
@@ -44,7 +46,8 @@ export async function initCheckinNotes(uid, summary, { onPendingChange } = {}) {
       activeOwnCount = notes.filter((n) => (n.status === "pending" || n.status === "open") && n.source !== CHECKIN_ANSWER).length;
       renderPending(ownPending);
       renderUpdateLine(notes);
-      onPendingChange?.(pending.length);
+      // A follow-up answered since the last update is new for it too.
+      onPendingChange?.(pending.length + ongoing.filter((n) => followUpAnswer(n) != null).length);
     },
     (err) => console.error("[checkin] notes listener failed", err)
   );
