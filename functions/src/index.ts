@@ -35,3 +35,4 @@ export { setActiveProgramSource, leaveGroup } from "./generate/groupMembership";
 export { addFeedbackNote, removeFeedbackNote, updateFeedbackNoteGroup, followUpFeedbackNote } from "./feedback/feedbackNotes";
 export { getCheckinQuestions, answerCheckinQuestion } from "./checkin/checkinQuestions";
 export { suggestExerciseSwaps, applyExerciseSwap, undoExerciseSwap } from "./feedback/exerciseSwap";
+export { moveProgramDay } from "./feedback/moveDay";
