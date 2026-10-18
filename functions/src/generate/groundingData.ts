@@ -9,6 +9,7 @@
 // and how fresh each data source is — not pre-computed verdicts.
 import { Firestore, QueryDocumentSnapshot } from "firebase-admin/firestore";
 import type { StrengthSession } from "../lib/hevyDerivedData";
+import { storedSessionDate } from "../lib/hevyAnalyzer";
 import {
   formatRecentLog, formatBestSetsByMonth, weeklySessionCounts,
   buildExerciseVocabulary, formatExerciseVocabulary, formatPrescription, PrescriptionProgram,
@@ -61,7 +62,7 @@ function toStrengthSessions(docs: QueryDocumentSnapshot[]): StrengthSession[] {
     const data = d.data();
     return {
       id: d.id,
-      date: data.date as string,
+      date: storedSessionDate(data.start_time, data.date as string),
       title: data.title ?? "",
       start_time: data.start_time ?? "",
       end_time: data.end_time ?? "",

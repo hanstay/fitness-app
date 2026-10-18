@@ -75,7 +75,7 @@
   .ex-card .sub .pill{display:block; background:var(--accent-soft); color:var(--accent-dark); border:1px solid #f3cfd0;
     border-radius:7px; padding:2px 8px; font-size:.72rem; font-weight:600; width:100%}
 
-  /* "Not right?" on an exercise, and the swap sheet (js/exercise-swap.js). */
+  /* "Not right?" on an exercise, and the swap and note sheets (js/exercise-swap.js). */
   .ex-card .swapped .pill{display:flex; align-items:center; justify-content:space-between; gap:8px}
   .ex-card .undo{background:none; border:0; padding:4px 0; color:var(--accent-dark); font:inherit; font-weight:700; text-decoration:underline; cursor:pointer}
   .ex-actions{margin-top:6px; margin-left:28px}
@@ -93,7 +93,7 @@
   .swap-option > span{display:flex; flex-direction:column; gap:2px; min-width:0}
   .swap-option input{margin-top:4px; accent-color:var(--accent)}
   .swap-option:has(input:checked){border-color:var(--accent); background:var(--accent-soft)}
-  #swapScopeField[hidden], #swapApply[hidden], #swapPain[hidden]{display:none}
+  #swapScopeField[hidden], #swapApply[hidden], #swapPain[hidden], #noteSheetPain[hidden], #noteSheetDuration[hidden]{display:none}
 
   @media (max-width:640px){
     .ex-grid{grid-template-columns:minmax(0, 1fr)}
@@ -146,8 +146,8 @@
 <script type="module" src="js/tab-bar.js"></script>
 <script src="update.js"></script>
 <script type="module">
-  import { doc, getDoc } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
-  import { exerciseActionsHtml, bindExerciseActions } from "./js/exercise-swap.js";
+  import { doc, getDoc, collection, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+  import { exerciseActionsHtml, bindExerciseActions, noteKey } from "./js/exercise-swap.js";
   import { showToast } from "./js/ui-messages.js";
   import { db } from "./js/firebase-init.js";
   import { requireOnboarded } from "./js/auth-guard.js";
@@ -210,9 +210,25 @@
       if (ex.load_note) bits.push(esc(ex.load_note));
       return bits.length ? `<div class="load">${bits.join(" · ")}</div>` : "";
     };
-    // Swaps and notes are for the athlete's own current plan (a group plan is
-    // written for the whole group).
-    const canSwap = !(summary?.activeProgramSource === "group" && summary?.groupId) && planId === summary?.currentProgramId;
+    // Swaps are for the athlete's own current plan (a group plan's exercises
+    // are shared); a group member gets "Not right?" for a check-in note only.
+    const onGroupPlan = summary?.activeProgramSource === "group" && !!summary?.groupId;
+    const canSwap = !onGroupPlan && planId === summary?.currentProgramId;
+    const canNote = canSwap || onGroupPlan;
+    // Notes on an exercise waiting for the next update, by day and exercise,
+    // so its card says so; kept live, so saving or removing one shows at once.
+    const pendingNotes = new Map();
+    let onNotesChanged = () => {};
+    if (canNote) {
+      onSnapshot(query(collection(db, "users", user.uid, "feedbackNotes"), where("status", "==", "pending")), (snap) => {
+        pendingNotes.clear();
+        for (const d of snap.docs) {
+          const n = d.data();
+          if (n.exercise) pendingNotes.set(noteKey(n.day, n.exercise), { id: d.id, ...n });
+        }
+        onNotesChanged();
+      }, (err) => console.error("[program] notes listener failed", err));
+    }
     const exHtml = ({ ex, si, ei, day }, i) => `<div class="ex-card">
       <div class="row">
         <span class="order">${i + 1}</span>
@@ -221,7 +237,7 @@
       <div class="sets">${ex.sets} × ${esc(ex.reps)}</div>
       ${loadLine(ex)}
       ${ex.substitution_note ? `<div class="sub"><span class="pill">Sub: ${esc(ex.substitution_note)}</span></div>` : ""}
-      ${canSwap ? exerciseActionsHtml(p, si, ei, day) : ""}
+      ${canNote ? exerciseActionsHtml(p, si, ei, day, { canSwap, note: pendingNotes.get(noteKey(day, ex.name)) }) : ""}
     </div>`;
 
     // ---- What changed in the latest update, until closed ----
@@ -331,7 +347,7 @@
           ${exs.length
             ? `<div class="ex-grid">${exs.map(exHtml).join("")}</div>`
             : `<p class="muted small" style="margin-top:8px">Rest day — no exercises scheduled.</p>`}`;
-        if (canSwap) {
+        if (canNote) {
           bindExerciseActions(dayDetail, {
             programId: planId,
             program: p,
@@ -350,6 +366,7 @@
 
       renderStrip();
       renderDetail();
+      onNotesChanged = renderDetail;
     }
 
     document.getElementById("loading").remove();

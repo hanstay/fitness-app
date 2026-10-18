@@ -11,7 +11,7 @@ import { requireOnboarded } from "./auth-guard.js";
 import { connectIntervalsIcuViaOAuth } from "./intervals-oauth.js";
 import { bindMessages } from "./ui-messages.js";
 import { isStale } from "./plan-updates.js";
-import { initCheckinNotes } from "./checkin-notes.js";
+import { initCheckinNotes, followUpsToSend, clearFollowUpPicks } from "./checkin-notes.js";
 import { initCheckinQuestions, refreshCheckinQuestions } from "./checkin-questions.js";
 import { loadCurrentProgram } from "./current-program.js";
 import { planUpdateReadiness } from "./plan-update-readiness.js";
@@ -176,7 +176,6 @@ document.getElementById("icuSyncBtn").addEventListener("click", (e) => {
     setStatus("icuStatus", newCount > 0 ? `Synced ${newCount} new ${newCount === 1 ? "activity" : "activities"}.` : "Synced. No new activities.");
     summary = await loadSummary();
     renderIcuState(summary);
-    if (newCount > 0) refreshCheckinQuestions();
   }).catch((err) => {
     setStatus("icuStatus", "");
     showError(`Sync failed: ${err.message || err}`);
@@ -219,8 +218,11 @@ regenBtn.addEventListener("click", async () => {
   renderGenerationStatus();
   try {
     const force = forceRegenCheck.checked;
-    const result = await httpsCallable(functions, "queueProgramGeneration")({ force });
+    // Follow-up answers are only picked on the page until now.
+    const followUps = followUpsToSend();
+    const result = await httpsCallable(functions, "queueProgramGeneration")({ force, followUps });
     followingId = result.data.programId;
+    clearFollowUpPicks(followUps);
   } catch (err) {
     const msg = String(err?.message || err);
     const isPrecondition = /first|required|Complete/i.test(msg);
@@ -338,14 +340,12 @@ try {
   showError("Couldn't load your intervals.icu status — Hevy import and program updates below still work.");
 }
 
-// Without the summary it can't tell a group plan (no notes or questions) from a personal one.
+// Without the summary there's no plan to list exercises from or compare the logs with.
 if (summary) {
   initCheckinNotes(user.uid, summary, {
     onPendingChange: (count) => { pendingFeedback = count; renderGenerationStatus(); },
   }).catch((err) => console.error("[checkin] notes section failed to load", err));
-  // With intervals.icu connected, the questions wait for the sync below.
-  initCheckinQuestions(summary, {
-    load: !summary.integrationsStatus?.intervalsIcu?.connected,
+  initCheckinQuestions({
     onImportNow: () => {
       expandSection("hevySection");
       document.getElementById("hevySection").scrollIntoView({ behavior: "smooth" });
@@ -360,7 +360,9 @@ if (summary?.integrationsStatus?.intervalsIcu?.connected) {
   icuSyncing = true;
   renderGenerationStatus();
   httpsCallable(functions, "syncIntervalsActivities")()
-    .then(async () => {
+    .then(async ({ data }) => {
+      // Activities from a long gap can mean there's no "Welcome back" to ask.
+      if (data?.newActivities > 0) refreshCheckinQuestions();
       summary = await loadSummary();
       renderIcuState(summary);
     })
@@ -377,6 +379,5 @@ if (summary?.integrationsStatus?.intervalsIcu?.connected) {
     .finally(() => {
       icuSyncing = false;
       renderGenerationStatus();
-      if (summary) refreshCheckinQuestions();
     });
 }

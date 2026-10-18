@@ -18,11 +18,15 @@ export function isStale(startedAt) {
 // A group plan is the shared program plus this member's own layer, and a
 // weekly update only rewrites the layer — so its id covers both. The layer's
 // change summary only describes the shared program it was written against;
-// once another member's run replaces that program, it's out of date.
-export function groupPlan(sharedProgramId, member) {
+// once another member's run replaces that program, it's out of date. So are
+// its answers to the member's check-in feedback (users/{uid}/state/groupFeedback,
+// written with the layer).
+export function groupPlan(sharedProgramId, member, feedback = null) {
+  const current = member?.groupProgramId === sharedProgramId;
   return {
     planId: `${sharedProgramId}@${member?.updatedAt?.toMillis?.() ?? ""}`,
-    changeSummary: member?.groupProgramId === sharedProgramId ? member.changeSummary : null,
+    changeSummary: current ? member.changeSummary : null,
+    feedbackResponses: current && feedback?.groupProgramId === sharedProgramId ? feedback.feedbackResponses ?? null : null,
   };
 }
 

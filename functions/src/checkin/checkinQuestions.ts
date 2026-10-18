@@ -1,26 +1,22 @@
-// The check-in's "Your week" questions (see lib/checkinQuestions.ts): load
-// the plan and the last few weeks of logs, build the questions, and save an
-// answer as a feedback note, which the next plan update reads like any other
-// (lib/planFeedback.ts) and answers in What changed. Personal plans only, as
-// with notes: a group plan is written for the whole group.
+// The check-in's questions about the data (see lib/checkinQuestions.ts):
+// work out when the plan last read the logs and what Hevy has, build the
+// questions, and save an answer as a feedback note, which the next plan
+// update reads like any other (lib/planFeedback.ts) and answers in What
+// changed. On a group plan the member's own layer is what read their logs
+// (generate/groupProgram.ts).
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { getFirestore, FieldValue, Firestore } from "firebase-admin/firestore";
-import {
-  buildCheckinQuestions, answerGuidance, CheckinQuestion, CheckinQuestions, LoggedActivity, CheckinPlan, MAX_SHOWN,
-} from "../lib/checkinQuestions";
+import { getFirestore, FieldValue, Firestore, DocumentData } from "firebase-admin/firestore";
+import { buildCheckinQuestions, disprovedQuestionKeys, answerGuidance, planHasLifts, CheckinQuestion, CheckinInput } from "../lib/checkinQuestions";
 import { addDays, daysBetween } from "../lib/checkinFormat";
-import type { StrengthSession } from "../lib/hevyDerivedData";
-import { FeedbackTag, NOTE_TEXT_MAX } from "../lib/planFeedback";
+import { storedSessionDate } from "../lib/hevyAnalyzer";
+import { NOTE_TEXT_MAX } from "../lib/planFeedback";
 
-/** How far back the logs are read: the detail week plus 4 weeks of patterns. */
-const HISTORY_DAYS = 35;
 /** An answered question isn't asked again for this long. */
 const ANSWERED_FOR_DAYS = 42;
-/** Answers waiting for the next update; questions are capped well below this. */
+/** Answers waiting for the next update; there are only ever a couple of questions. */
 export const MAX_PENDING_ANSWERS = 15;
-
-const PAIN_AREAS = ["Knee", "Lower back", "Hip", "Shoulder", "Elbow", "Wrist", "Ankle", "Other"] as const;
-const PAIN_LEVELS = ["A niggle", "Sore", "Sharp"] as const;
+/** Most logged sessions read since the plan read the logs, to see whether a gap was trained through. */
+const LOGGED_SINCE_MAX = 200;
 
 const asDate = (v: unknown, fallback: string): string => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : fallback);
 
@@ -47,68 +43,116 @@ function localDate(ts: { toMillis?: () => number } | null | undefined, clock: At
 }
 
 interface Loaded {
-  questions: CheckinQuestions;
+  questions: CheckinQuestion[];
   /** Keys answered earlier, by the note doc that holds the answer. */
-  answered: Map<string, { noteId: string; status: string; answerId: string; followUpId: string | null }>;
+  answered: Map<string, { noteId: string; status: string; answerId: string }>;
+}
+
+/** When the plan last read the logs, and whether it has lifting in it. */
+interface PlanForQuestions {
+  readAt: { toMillis?: () => number } | null;
+  hasLifts: boolean;
+}
+
+async function personalPlan(db: Firestore, uid: string, summary: DocumentData): Promise<PlanForQuestions> {
+  const snap = summary.currentProgramId ? await db.doc(`users/${uid}/programs/${summary.currentProgramId}`).get() : null;
+  const program = snap?.exists ? snap.data() ?? null : null;
+  // Older plans only have when they were saved.
+  return { readAt: program?.inputsReadAt ?? program?.createdAt ?? null, hasLifts: planHasLifts(program?.sessions) };
+}
+
+const millis = (ts: { toMillis?: () => number } | null | undefined): number => ts?.toMillis?.() ?? -Infinity;
+
+async function groupPlan(db: Firestore, uid: string, groupId: string): Promise<PlanForQuestions> {
+  const [programSnap, memberSnap] = await Promise.all([
+    db.collection(`groups/${groupId}/programs`).where("status", "==", "active").limit(1).get(),
+    db.doc(`groups/${groupId}/members/${uid}`).get(),
+  ]);
+  const shared = programSnap.docs[0]?.data() ?? null;
+  const member = memberSnap.data() ?? null;
+  // Logs from before the shared plan started were done on the one it replaced
+  // (another member's update can replace it after this member's last one), and
+  // a member's first update hasn't read their logs yet. A layer written before
+  // inputsReadAt existed only has when it was written.
+  const layerReadAt = member?.inputsReadAt ?? member?.updatedAt;
+  const readAt = millis(layerReadAt) >= millis(shared?.createdAt) ? layerReadAt : shared?.createdAt;
+  return { readAt: readAt ?? null, hasLifts: planHasLifts(shared?.sessions) };
 }
 
 async function loadQuestions(db: Firestore, uid: string, clock: AthleteClock): Promise<Loaded> {
-  const { today } = clock;
   const summary = (await db.doc(`users/${uid}/state/summary`).get()).data() ?? {};
-  if (summary.activeProgramSource === "group" && summary.groupId) {
-    throw new HttpsError("failed-precondition", "Check-in questions aren't available on group plans yet.");
-  }
-  const since = addDays(today, -HISTORY_DAYS);
-  const [programSnap, userSnap, strengthSnap, activitySnap] = await Promise.all([
-    summary.currentProgramId ? db.doc(`users/${uid}/programs/${summary.currentProgramId}`).get() : Promise.resolve(null),
-    db.doc(`users/${uid}`).get(),
-    db.collection(`users/${uid}/strengthSessions`).where("date", ">=", since).get(),
-    db.collection(`users/${uid}/activities`).where("date", ">=", since).get(),
+  const current = summary.activeProgramSource === "group" && summary.groupId
+    ? await groupPlan(db, uid, summary.groupId) : await personalPlan(db, uid, summary);
+  const planReadDate = localDate(current.readAt, clock);
+
+  // What was logged since then (a day early, for stored dates in another
+  // time zone), oldest first so a gap right after the update is seen, plus
+  // the newest of each.
+  const from = planReadDate ? addDays(planReadDate, -1) : clock.today;
+  const sessions = db.collection(`users/${uid}/strengthSessions`).select("date", "start_time");
+  const acts = db.collection(`users/${uid}/activities`).select("date");
+  const [workouts, newestWorkout, activities, newestActivity] = await Promise.all([
+    sessions.where("date", ">=", from).orderBy("date").limit(LOGGED_SINCE_MAX).get(),
+    sessions.orderBy("date", "desc").limit(1).get(),
+    acts.where("date", ">=", from).orderBy("date").limit(LOGGED_SINCE_MAX).get(),
+    acts.orderBy("date", "desc").limit(1).get(),
   ]);
-  const program = programSnap?.exists ? programSnap.data() ?? null : null;
-  // The time the plan read the logs (see plan-update-readiness.js); older
-  // plans only have when they were saved.
-  const planReadDate = localDate(program?.inputsReadAt ?? program?.createdAt, clock);
-  const hevy = summary.integrationsStatus?.hevy ?? {};
-  const strength = strengthSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as StrengthSession);
-  const activities: LoggedActivity[] = activitySnap.docs.map((d) => {
-    const a = d.data();
-    return {
-      id: d.id, date: a.date ?? null, type: a.type ?? "Other", name: a.name ?? null,
-      distance_km: a.distance_km ?? null, duration_s: a.duration_s ?? null, avg_hr: a.avg_hr ?? null, hrZones: a.hrZones ?? null,
-    };
-  });
-
-  const questions = buildCheckinQuestions({
-    today,
+  const dateOf = (d: DocumentData) => storedSessionDate(d.start_time, d.date);
+  const workoutDates = [...workouts.docs, ...newestWorkout.docs].map((d) => dateOf(d.data())).filter((d): d is string => !!d);
+  const newest = workoutDates.slice().sort().pop() ?? null;
+  const hevy = hevyStatus(summary.integrationsStatus?.hevy ?? {}, newest);
+  const input: CheckinInput = {
+    today: clock.today,
     planReadDate,
-    planSince: localDate(program?.blockStartedAt ?? program?.createdAt, clock),
-    plan: program as CheckinPlan | null,
-    fixedSessions: userSnap.data()?.athlete?.fixed_sessions ?? [],
-    strength,
-    activities,
-    tsb: typeof summary.wellness?.tsb === "number" ? summary.wellness.tsb : null,
-    hevy: { used: hevy.csvUploaded === true, lastSessionDate: hevy.lastSessionDate ?? null, importedDate: localDate(hevy.parsedAt, clock) },
-    icuConnected: summary.integrationsStatus?.intervalsIcu?.connected === true,
-  });
+    planHasLifts: current.hasLifts,
+    hevy,
+    trainedDates: [...workoutDates, ...[...activities.docs, ...newestActivity.docs].map((d) => asDate(d.get("date"), "")).filter(Boolean),
+      ...(hevy.lastSessionDate ? [hevy.lastSessionDate] : [])],
+  };
+  const questions = buildCheckinQuestions(input);
+  await dropDisprovedAnswers(db, uid, disprovedQuestionKeys(input));
 
-  // Earlier answers to these questions, in groups of 30 (Firestore's "in" limit).
-  const all = allQuestions(questions);
-  const keys = all.map((q) => q.key);
   const answered: Loaded["answered"] = new Map();
-  const oldest = Date.now() - ANSWERED_FOR_DAYS * 86400000;
-  for (let i = 0; i < keys.length; i += 30) {
-    const snap = await db.collection(`users/${uid}/feedbackNotes`).where("questionKey", "in", keys.slice(i, i + 30)).get();
+  const keys = questions.map((q) => q.key);
+  if (keys.length) {
+    const oldest = Date.now() - ANSWERED_FOR_DAYS * 86400000;
+    const snap = await db.collection(`users/${uid}/feedbackNotes`).where("questionKey", "in", keys).get();
     for (const d of snap.docs) {
       const n = d.data();
       if (n.status !== "pending" && (n.createdAt?.toMillis?.() ?? 0) < oldest) continue;
-      answered.set(n.questionKey, { noteId: d.id, status: n.status, answerId: n.answerId, followUpId: n.followUpId ?? null });
+      answered.set(n.questionKey, { noteId: d.id, status: n.status, answerId: n.answerId });
     }
   }
   return { questions, answered };
 }
 
-const allQuestions = (q: CheckinQuestions): CheckinQuestion[] => [...(q.gap ? [q.gap] : []), ...q.data, ...q.week, ...q.more];
+/**
+ * Takes back waiting answers to this plan's questions that the logs have
+ * since disproved (Welcome back, once workouts from the gap are imported),
+ * so the premise doesn't reach the next update.
+ */
+async function dropDisprovedAnswers(db: Firestore, uid: string, keys: string[]): Promise<void> {
+  if (!keys.length) return;
+  const waiting = await db.collection(`users/${uid}/feedbackNotes`).where("questionKey", "in", keys).get();
+  const stale = waiting.docs.filter((d) => d.get("status") === "pending" && d.get("source") === "checkin_question");
+  if (!stale.length) return;
+  const batch = db.batch();
+  stale.forEach((d) => batch.delete(d.ref));
+  await batch.commit();
+}
+
+/**
+ * What the summary says about the last Hevy import, but never older than the
+ * workouts actually stored: an import whose closing status write failed (or
+ * predates it) has saved its sessions without saying so.
+ */
+function hevyStatus(hevy: DocumentData, newest: string | null): CheckinInput["hevy"] {
+  const stated: string | null = hevy.lastSessionDate ?? null;
+  return {
+    used: hevy.csvUploaded === true || newest != null,
+    lastSessionDate: stated && newest ? (stated > newest ? stated : newest) : stated ?? newest,
+  };
+}
 
 /**
  * The questions for this check-in. One answered in an earlier check-in is
@@ -119,39 +163,17 @@ export const getCheckinQuestions = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
   const uid = request.auth.uid;
   const { questions, answered } = await loadQuestions(getFirestore(), uid, athleteClock(request.data));
-
-  const view = (q: CheckinQuestion) => {
-    const a = answered.get(q.key);
-    return {
-      key: q.key, kind: q.kind, source: q.source, text: q.text, facts: q.facts, answers: q.answers,
-      answer: a ? { noteId: a.noteId, answerId: a.answerId, followUpId: a.followUpId } : null,
-    };
-  };
   const open = (q: CheckinQuestion) => answered.get(q.key)?.status === "pending" || !answered.has(q.key);
-  // An earlier check-in's answers drop out, and the next questions move up.
-  const ranked = [...questions.week, ...questions.more].filter(open);
   return {
-    gap: questions.gap && open(questions.gap) ? view(questions.gap) : null,
-    data: questions.data.filter(open).map(view),
-    week: ranked.slice(0, MAX_SHOWN).map(view),
-    more: ranked.slice(MAX_SHOWN).map(view),
+    questions: questions.filter(open).map((q) => {
+      const a = answered.get(q.key);
+      return {
+        key: q.key, kind: q.kind, source: q.source, text: q.text, answers: q.answers,
+        answer: a ? { noteId: a.noteId, answerId: a.answerId } : null,
+      };
+    }),
   };
 });
-
-interface PainInput { area: string; level: string; duration: "week" | "ongoing"; text: string }
-
-function readPain(raw: unknown): PainInput {
-  const r = (raw ?? {}) as Record<string, unknown>;
-  if (!PAIN_AREAS.includes(r.area as (typeof PAIN_AREAS)[number]) || !PAIN_LEVELS.includes(r.level as (typeof PAIN_LEVELS)[number])) {
-    throw new HttpsError("invalid-argument", "Say where it hurts and how bad it is.");
-  }
-  return {
-    area: r.area as string,
-    level: r.level as string,
-    duration: r.duration === "ongoing" ? "ongoing" : "week",
-    text: readText(r.text),
-  };
-}
 
 function readText(raw: unknown): string {
   if (raw == null) return "";
@@ -170,32 +192,23 @@ export const answerCheckinQuestion = onCall(async (request) => {
   const db = getFirestore();
   const key = request.data?.key;
   const answerId = request.data?.answerId;
-  const followUpId = typeof request.data?.followUpId === "string" ? request.data.followUpId : null;
   if (typeof key !== "string" || typeof answerId !== "string") throw new HttpsError("invalid-argument", "Unknown answer.");
 
   const { questions, answered } = await loadQuestions(db, uid, athleteClock(request.data));
-  const q = allQuestions(questions).find((x) => x.key === key);
-  if (!q) throw new HttpsError("failed-precondition", "That question no longer applies. Reload the page to see this week's.");
-  const guidance = answerGuidance(q, answerId, followUpId);
+  const q = questions.find((x) => x.key === key);
+  if (!q) throw new HttpsError("failed-precondition", "That question no longer applies. Reload the page to see the current ones.");
+  const guidance = answerGuidance(q, answerId);
   if (!guidance) throw new HttpsError("invalid-argument", "Unknown answer.");
   const answer = q.answers.find((a) => a.id === answerId)!;
-  const followUpLabel = answer.followUp?.answers.find((f) => f.id === followUpId)?.label;
-
-  const pain = answer.pain ? readPain(request.data?.pain) : null;
-  const text = pain
-    ? [`${pain.area}, ${pain.level.toLowerCase()}.`, pain.text].filter(Boolean).join(" ")
-    : answer.details ? readText(request.data?.text) : "";
-  const tags: FeedbackTag[] = pain ? ["pain", "checkin"] : ["checkin"];
   const note = {
-    tags,
-    text,
-    exercise: q.exercise,
-    day: q.day,
-    duration: pain?.duration ?? "week",
-    checkin: { question: q.text, answer: followUpLabel ? `${answer.label}: ${followUpLabel}` : answer.label, guidance },
+    tags: ["checkin"],
+    text: answer.details ? readText(request.data?.text) : "",
+    exercise: null,
+    day: null,
+    duration: "week",
+    checkin: { question: q.text, answer: answer.label, guidance },
     questionKey: q.key,
     answerId,
-    followUpId: answer.followUp ? followUpId : null,
   };
 
   const earlier = answered.get(key);

@@ -78,9 +78,12 @@ export async function loadCurrentProgram(uid, summary) {
     const sharedDoc = activeSnap.docs[0];
     if (!sharedDoc) return null;
     const shared = sharedDoc.data();
-    const memberSnap = await getDoc(doc(db, "groups", summary.groupId, "members", uid));
+    const [memberSnap, feedbackSnap] = await Promise.all([
+      getDoc(doc(db, "groups", summary.groupId, "members", uid)),
+      getDoc(doc(db, "users", uid, "state", "groupFeedback")),
+    ]);
     const member = memberSnap.exists() ? memberSnap.data() : null;
-    const plan = groupPlan(sharedDoc.id, member);
+    const plan = groupPlan(sharedDoc.id, member, feedbackSnap.exists() ? feedbackSnap.data() : null);
     return {
       ...shared,
       sessions: applySessionLoads(shared.sessions, member?.sessionLoads),
@@ -89,6 +92,7 @@ export async function loadCurrentProgram(uid, summary) {
       sportNotes: member?.sportNotes ?? null,
       nutritionNote: member?.nutritionNote ?? null,
       changeSummary: plan.changeSummary,
+      feedbackResponses: plan.feedbackResponses,
       planId: plan.planId,
       // A weekly update rewrites only the member layer, so the shared
       // program's createdAt is when the cycle began, not when it last changed.

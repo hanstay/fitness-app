@@ -2,32 +2,24 @@
 // one for the next plan update, take back one that hasn't been used yet, and
 // answer the follow-up on an ongoing one. Notes live at
 // users/{uid}/feedbackNotes/{id}, readable by their owner and written only
-// here and by the plan update (generateProgram.ts).
+// here and by the plan update (generateProgram.ts, or groupProgram.ts for a
+// group member, whose own layer works around them).
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import {
-  normalizeNoteInput, MAX_PENDING_NOTES, MAX_ACTIVE_NOTES, FOLLOW_UP_OUTCOMES, FollowUpOutcome, followUpChange,
+  normalizeNoteGroupInput, noteGroupKey, MAX_PENDING_NOTES, MAX_ACTIVE_NOTES, FOLLOW_UP_OUTCOMES, FollowUpOutcome, followUpChange,
 } from "../lib/planFeedback";
 
-// Group plans are written for the whole group, and a note can't change one
-// member's copy of it yet, so notes are for personal plans only.
-async function requirePersonalPlan(uid: string): Promise<void> {
-  const summary = (await getFirestore().doc(`users/${uid}/state/summary`).get()).data() ?? {};
-  if (summary.activeProgramSource === "group" && summary.groupId) {
-    throw new HttpsError("failed-precondition", "Notes aren't available on group plans yet.");
-  }
-}
+const notesOf = (uid: string) => getFirestore().collection(`users/${uid}/feedbackNotes`);
 
-export const addFeedbackNote = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
-  const uid = request.auth.uid;
-  const normalized = normalizeNoteInput(request.data);
-  if ("error" in normalized) throw new HttpsError("invalid-argument", normalized.error);
-  await requirePersonalPlan(uid);
-
-  const db = getFirestore();
-  const notes = db.collection(`users/${uid}/feedbackNotes`);
-  // Answers to check-in questions have their own limit (checkin/checkinQuestions.ts).
+/**
+ * Refuses `adding` more notes past either limit (only the in-play one for a
+ * note coming back into play, which isn't waiting). Answers to check-in
+ * questions have their own limit (checkin/checkinQuestions.ts).
+ */
+async function checkRoom(uid: string, adding: number, { activeOnly = false } = {}): Promise<void> {
+  if (adding <= 0) return;
+  const notes = notesOf(uid);
   const answers = notes.where("source", "==", "checkin_question");
   const counts = await Promise.all([
     notes.where("status", "==", "pending").count().get(),
@@ -36,56 +28,183 @@ export const addFeedbackNote = onCall(async (request) => {
     answers.where("status", "in", ["pending", "open"]).count().get(),
   ]);
   const [pendingCount, activeCount] = [counts[0].data().count - counts[1].data().count, counts[2].data().count - counts[3].data().count];
-  if (pendingCount >= MAX_PENDING_NOTES) {
-    throw new HttpsError("resource-exhausted", `You already have ${MAX_PENDING_NOTES} notes waiting. Update your plan first, then add more.`);
+  const more = adding === 1 ? "" : ` There's room for ${Math.max(0, Math.min(MAX_PENDING_NOTES - pendingCount, MAX_ACTIVE_NOTES - activeCount))} more.`;
+  if (!activeOnly && pendingCount + adding > MAX_PENDING_NOTES) {
+    throw new HttpsError("resource-exhausted", `You can have ${MAX_PENDING_NOTES} notes waiting. Update your plan first, then add more.${more}`);
   }
-  if (activeCount >= MAX_ACTIVE_NOTES) {
-    throw new HttpsError("resource-exhausted", `Your plan is already working around ${MAX_ACTIVE_NOTES} notes. Mark some as better at check-in, then add more.`);
+  if (activeCount + adding > MAX_ACTIVE_NOTES) {
+    throw new HttpsError("resource-exhausted", `Your plan can work around ${MAX_ACTIVE_NOTES} notes at once. Mark some as better at check-in, then add more.${more}`);
   }
-  const ref = await notes.add({
-    ...normalized.note,
-    status: "pending",
-    source: "checkin",
-    worse: false,
-    createdAt: FieldValue.serverTimestamp(),
-  });
-  return { noteId: ref.id };
+}
+
+const newNote = (note: object, groupId: string) => ({
+  ...note,
+  groupId,
+  status: "pending",
+  source: "checkin",
+  worse: false,
+  createdAt: FieldValue.serverTimestamp(),
 });
 
+/** Saves a note card: one note per exercise it names, all in one new group. */
+export const addFeedbackNote = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
+  const uid = request.auth.uid;
+  const normalized = normalizeNoteGroupInput(request.data);
+  if ("error" in normalized) throw new HttpsError("invalid-argument", normalized.error);
+  await checkRoom(uid, normalized.notes.length);
+
+  const notes = notesOf(uid);
+  const groupId = notes.doc().id;
+  const batch = getFirestore().batch();
+  const refs = normalized.notes.map((note) => {
+    const ref = notes.doc();
+    batch.set(ref, newNote(note, groupId));
+    return ref;
+  });
+  await batch.commit();
+  return { noteId: refs[0].id, noteIds: refs.map((r) => r.id), groupId };
+});
+
+const validId = (id: unknown): id is string => typeof id === "string" && /^[A-Za-z0-9]{1,40}$/.test(id);
+
 const noteRef = (uid: string, noteId: unknown) => {
-  if (typeof noteId !== "string" || !/^[A-Za-z0-9]{1,40}$/.test(noteId)) {
-    throw new HttpsError("invalid-argument", "Unknown note.");
-  }
-  return getFirestore().doc(`users/${uid}/feedbackNotes/${noteId}`);
+  if (!validId(noteId)) throw new HttpsError("invalid-argument", "Unknown note.");
+  return notesOf(uid).doc(noteId);
 };
 
-/** Takes back a note the next update hasn't used yet. */
+const groupQuery = (uid: string, groupId: unknown) => {
+  if (!validId(groupId)) throw new HttpsError("invalid-argument", "Unknown note.");
+  return notesOf(uid).where("groupId", "==", groupId);
+};
+
+const USED = "That note has already been used in a plan update.";
+
+/**
+ * Takes back a note the next update hasn't used yet, or with `groupId`
+ * every waiting note of a card.
+ */
 export const removeFeedbackNote = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
-  const ref = noteRef(request.auth.uid, request.data?.noteId);
+  const uid = request.auth.uid;
+  if (request.data?.groupId !== undefined) {
+    const group = groupQuery(uid, request.data.groupId);
+    await getFirestore().runTransaction(async (tx) => {
+      const snap = await tx.get(group);
+      const waiting = snap.docs.filter((d) => d.get("status") === "pending");
+      if (!waiting.length && !snap.empty) throw new HttpsError("failed-precondition", USED);
+      waiting.forEach((d) => tx.delete(d.ref));
+    });
+    return { ok: true };
+  }
+  const ref = noteRef(uid, request.data?.noteId);
   await getFirestore().runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) return; // already gone
-    if (snap.get("status") !== "pending") {
-      throw new HttpsError("failed-precondition", "That note has already been used in a plan update.");
-    }
+    if (snap.get("status") !== "pending") throw new HttpsError("failed-precondition", USED);
     tx.delete(ref);
   });
   return { ok: true };
 });
 
-/** The check-in follow-up on an ongoing note: still a problem, better, or worse. */
+/**
+ * Edits a card's waiting notes: the kept exercises take the new tags, text
+ * and duration, unticked ones are removed, and newly ticked ones join the
+ * group. Each note keeps its id, so the Program page's tag stays on it.
+ */
+export const updateFeedbackNoteGroup = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
+  const uid = request.auth.uid;
+  const groupId = request.data?.groupId;
+  const group = groupQuery(uid, groupId);
+  const normalized = normalizeNoteGroupInput(request.data);
+  if ("error" in normalized) throw new HttpsError("invalid-argument", normalized.error);
+
+  // Checked against the group as it stands; the transaction re-reads it.
+  const before = (await group.where("status", "==", "pending").count().get()).data().count;
+  if (!before) throw new HttpsError("failed-precondition", USED);
+  await checkRoom(uid, normalized.notes.length - before);
+
+  const notes = notesOf(uid);
+  await getFirestore().runTransaction(async (tx) => {
+    const snap = await tx.get(group);
+    const waiting = new Map(snap.docs.filter((d) => d.get("status") === "pending")
+      .map((d) => [noteGroupKey({ day: d.get("day") ?? null, exercise: d.get("exercise") ?? null }), d]));
+    if (!waiting.size) throw new HttpsError("failed-precondition", USED);
+    for (const note of normalized.notes) {
+      const existing = waiting.get(noteGroupKey(note));
+      if (existing) {
+        tx.update(existing.ref, { tags: note.tags, text: note.text, duration: note.duration });
+        waiting.delete(noteGroupKey(note));
+      } else {
+        tx.set(notes.doc(), newNote(note, groupId));
+      }
+    }
+    waiting.forEach((d) => tx.delete(d.ref));
+  });
+  return { ok: true };
+});
+
+/** A note an answer can still be given or changed on: ongoing, or "better" the update hasn't told yet. */
+const followable = (status: unknown, announced: unknown) => status === "open" || (status === "resolved" && announced === false);
+
+/**
+ * Records follow-up answers on ongoing notes: still a problem, better, or
+ * worse. The check-in sends them with Update plan (queueProgramGeneration),
+ * so they're in place before the update reads the notes. A note that's no
+ * longer waiting for one (taken back, or already settled) is passed over.
+ * Returns how many were recorded.
+ */
+export async function recordFollowUps(uid: string, raw: unknown): Promise<number> {
+  if (raw === undefined || raw === null) return 0;
+  if (!Array.isArray(raw) || raw.length > MAX_ACTIVE_NOTES) throw new HttpsError("invalid-argument", "Unknown answer.");
+  const answers = new Map<string, FollowUpOutcome>();
+  for (const a of raw as Array<{ noteId?: unknown; outcome?: unknown }>) {
+    if (!validId(a?.noteId) || !FOLLOW_UP_OUTCOMES.includes(a?.outcome as FollowUpOutcome)) {
+      throw new HttpsError("invalid-argument", "Unknown answer.");
+    }
+    answers.set(a.noteId, a.outcome as FollowUpOutcome);
+  }
+  if (!answers.size) return 0;
+  const refs = [...answers.keys()].map((id) => notesOf(uid).doc(id));
+  // Taking back "better" puts a note back in play, so it needs room, less
+  // the notes these same answers mark better.
+  const before = await getFirestore().getAll(...refs);
+  const reopening = before.filter((d) => d.get("status") === "resolved" && d.get("announced") === false && answers.get(d.id) !== "better").length;
+  const settling = before.filter((d) => d.get("status") === "open" && answers.get(d.id) === "better").length;
+  try {
+    await checkRoom(uid, reopening - settling, { activeOnly: true });
+  } catch (err) {
+    throw err instanceof HttpsError && err.code === "resource-exhausted"
+      ? new HttpsError("resource-exhausted", `Your plan can work around ${MAX_ACTIVE_NOTES} notes at once, so it can't bring back one you'd said feels better. Leave that one as better, or mark another as better.`)
+      : err;
+  }
+  return getFirestore().runTransaction(async (tx) => {
+    const snaps = await tx.getAll(...refs);
+    let recorded = 0;
+    for (const snap of snaps) {
+      if (!snap.exists || !followable(snap.get("status"), snap.get("announced"))) continue;
+      recorded++;
+      const outcome = answers.get(snap.id)!;
+      tx.update(snap.ref, {
+        announced: FieldValue.delete(), // set again by "better"
+        ...followUpChange(outcome),
+        lastFollowUp: outcome,
+        followedUpAt: FieldValue.serverTimestamp(),
+      });
+    }
+    return recorded;
+  });
+}
+
+/** One follow-up answer, saved straight away (check-in pages from before answers went with Update plan). */
 export const followUpFeedbackNote = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
-  const outcome = request.data?.outcome as FollowUpOutcome;
-  if (!FOLLOW_UP_OUTCOMES.includes(outcome)) throw new HttpsError("invalid-argument", "Unknown answer.");
   const ref = noteRef(request.auth.uid, request.data?.noteId);
-  await getFirestore().runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    if (!snap.exists || snap.get("status") !== "open") {
-      throw new HttpsError("failed-precondition", "That note isn't waiting for a follow-up.");
-    }
-    tx.update(ref, { ...followUpChange(outcome), lastFollowUp: outcome, followedUpAt: FieldValue.serverTimestamp() });
-  });
+  const outcome = request.data?.outcome;
+  if (!FOLLOW_UP_OUTCOMES.includes(outcome)) throw new HttpsError("invalid-argument", "Unknown answer.");
+  if (!(await recordFollowUps(request.auth.uid, [{ noteId: ref.id, outcome }]))) {
+    throw new HttpsError("failed-precondition", "That note isn't waiting for a follow-up.");
+  }
   return { ok: true };
 });

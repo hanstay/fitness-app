@@ -32,6 +32,6 @@ export { createGroup } from "./generate/createGroup";
 export { updateGroup } from "./generate/updateGroup";
 export { addGroupMember } from "./generate/addGroupMember";
 export { setActiveProgramSource, leaveGroup } from "./generate/groupMembership";
-export { addFeedbackNote, removeFeedbackNote, followUpFeedbackNote } from "./feedback/feedbackNotes";
+export { addFeedbackNote, removeFeedbackNote, updateFeedbackNoteGroup, followUpFeedbackNote } from "./feedback/feedbackNotes";
 export { getCheckinQuestions, answerCheckinQuestion } from "./checkin/checkinQuestions";
 export { suggestExerciseSwaps, applyExerciseSwap, undoExerciseSwap } from "./feedback/exerciseSwap";

@@ -5,7 +5,7 @@
 // `firebase emulators:exec --only firestore --project demo-ci "npx vitest run test/groupGeneration.integration.test.ts"`
 // — see functions/test/README.md.
 import { vi, describe, it, expect, beforeEach, afterAll } from "vitest";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getTestDb, clearFirestoreEmulator } from "./helpers/emulatorFirestore";
 import { FIXTURES, defaultFixtureResponse } from "./fixtures/llmFixtures";
 import { runGenerateProgram } from "../src/generate/generateProgram";
@@ -217,6 +217,63 @@ describe("group generation", () => {
     expect(after.data().blockStartedAt.toMillis()).toBe(before.data().blockStartedAt.toMillis());
     expect(after.data().sessions[0].day).toBe("Monday");
     expect(result.changeSummary?.[0]).toBe(REBUILD_CHANGE_NOTE);
+  });
+
+  it("scenario 10: the member's own layer answers their check-in notes and keeps the answers for What changed", async () => {
+    await seedGroup("g10", ["a", "b"]);
+    await seedMember("a", "a", "g10");
+    await seedMember("b", "b", "g10");
+    await runGenerateProgram("a");
+    const note = (id: string, fields: Record<string, unknown>, ageMs: number) => db.doc(`users/a/feedbackNotes/${id}`).set({
+      tags: ["pain"], text: "", exercise: null, day: null, duration: "week", worse: false, source: "checkin",
+      createdAt: Timestamp.fromMillis(Date.now() - ageMs), ...fields,
+    });
+    await note("knee", { text: "Knee on lunges", exercise: "Walking Lunge (Dumbbell)", day: "Tuesday", duration: "ongoing", status: "pending" }, 2000);
+    await note("move", {
+      tags: ["checkin"], day: "Thursday", status: "pending", source: "checkin_question",
+      checkin: { question: "You've skipped Thursday 3 of the last 4 weeks. Change it?", answer: "Move it: Sat", guidance: "Move the Thursday session to Saturday." },
+    }, 1000);
+    mockExtractStructuredJson.mockClear();
+    mockExtractStructuredJson.mockImplementation(async (params: { toolName: string }) => ({
+      ...(await defaultFixtureResponse(params) as object),
+      ...(params.toolName === "record_member_layer" ? {
+        feedbackResponses: [
+          { id: "n1", status: "changed", response: "Do Box Step-Up (Dumbbell) at 16 kg in place of the lunges on Tuesday." },
+          { id: "n2", status: "no_change", response: "The group's days are set for everyone, so it's one to raise with the group." },
+        ],
+      } : {}),
+    }));
+
+    await runGenerateProgram("a");
+
+    const layerCall = mockExtractStructuredJson.mock.calls
+      .map((c) => c[0] as { toolName: string; system: string; userText: string; inputSchema: { required: string[] } })
+      .find((c) => c.toolName === "record_member_layer")!;
+    expect(layerCall.system).toContain("The group's exercises and\ndays are shared and fixed");
+    expect(layerCall.inputSchema.required).toContain("feedbackResponses");
+    expect(layerCall.userText).toContain('[n1] NEW · Pain / discomfort · about "Walking Lunge (Dumbbell)" on Tuesday');
+    expect(layerCall.userText).toContain('[n2] NEW · Check-in answer · about Thursday');
+
+    // The answers quote the notes, so they're kept in the member's own tree, not on the doc the group reads.
+    const member = (await db.doc("groups/g10/members/a").get()).data()!;
+    expect(member).not.toHaveProperty("feedbackResponses");
+    const answers = (await db.doc("users/a/state/groupFeedback").get()).data()!;
+    expect(answers.groupProgramId).toBe(member.groupProgramId);
+    expect(answers.feedbackResponses.map((r: { noteId: string; status: string }) => [r.noteId, r.status]))
+      .toEqual([["knee", "changed"], ["move", "no_change"]]);
+    expect(answers.feedbackResponses[1]).toMatchObject({ question: expect.stringContaining("Thursday"), answer: "Move it: Sat" });
+    const stored = async (id: string) => (await db.doc(`users/a/feedbackNotes/${id}`).get()).data()!;
+    expect(await stored("knee")).toMatchObject({ status: "open", handledProgramId: member.groupProgramId });
+    expect(await stored("move")).toMatchObject({ status: "done", response: { status: "no_change" } });
+
+    // The next update with nothing new leaves the prompt alone and clears the answers.
+    mockExtractStructuredJson.mockClear();
+    mockExtractStructuredJson.mockImplementation(defaultFixtureResponse);
+    await db.doc("users/a/feedbackNotes/knee").delete();
+    await runGenerateProgram("a");
+    const plain = mockExtractStructuredJson.mock.calls.map((c) => c[0] as { toolName: string; system: string }).find((c) => c.toolName === "record_member_layer")!;
+    expect(plain.system).not.toContain("ATHLETE FEEDBACK");
+    expect((await db.doc("users/a/state/groupFeedback").get()).exists).toBe(false);
   });
 
   it("scenario 9: moving to the next phase stores the change summary on the member's doc until their next update", async () => {

@@ -4,9 +4,10 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { Timestamp } from "firebase-admin/firestore";
 import { getTestDb, clearFirestoreEmulator } from "./helpers/emulatorFirestore";
-import { addFeedbackNote, removeFeedbackNote, followUpFeedbackNote } from "../src/feedback/feedbackNotes";
+import { addFeedbackNote, removeFeedbackNote, updateFeedbackNoteGroup, followUpFeedbackNote } from "../src/feedback/feedbackNotes";
 import { suggestExerciseSwaps, applyExerciseSwap, undoExerciseSwap, SWAP_SUGGESTIONS_PER_DAY } from "../src/feedback/exerciseSwap";
 import { MAX_PENDING_NOTES, MAX_ACTIVE_NOTES } from "../src/lib/planFeedback";
+import { loadActiveNotes, settleNotesInTransaction } from "../src/feedback/notesForUpdate";
 
 const mockExtractStructuredJson = vi.hoisted(() => vi.fn());
 vi.mock("../src/lib/claude", () => ({
@@ -59,7 +60,7 @@ describe("check-in notes", () => {
     expect(await noteDocs("n1")).toHaveLength(0);
   });
 
-  it("rejects a bad note, a group plan, and more than the pending limit", async () => {
+  it("rejects a bad note and more than the pending limit", async () => {
     await seedUser("n2");
     await expect(call(addFeedbackNote, "n2", { tags: [], text: "x" })).rejects.toMatchObject({ code: "invalid-argument" });
     for (let i = 0; i < MAX_PENDING_NOTES; i++) await db.collection("users/n2/feedbackNotes").add({ status: "pending" });
@@ -74,8 +75,63 @@ describe("check-in notes", () => {
     for (let i = 0; i < MAX_ACTIVE_NOTES; i++) await db.collection("users/n6/feedbackNotes").add({ status: "open" });
     await expect(call(addFeedbackNote, "n6", { tags: ["dislike"], text: "x" })).rejects.toMatchObject({ code: "resource-exhausted" });
 
+
+    // A group member's own update works around their notes (groupProgram.ts).
     await seedUser("n3", { activeProgramSource: "group", groupId: "g1" });
-    await expect(call(addFeedbackNote, "n3", { tags: ["dislike"], text: "x" })).rejects.toMatchObject({ code: "failed-precondition" });
+    await expect(call(addFeedbackNote, "n3", { tags: ["dislike"], text: "x" })).resolves.toHaveProperty("noteId");
+  });
+
+  it("saves a card with several exercises as one group, edits it and removes it", async () => {
+    await seedUser("g1");
+    const saved = await call<{ noteIds: string[]; groupId: string }>(addFeedbackNote, "g1", {
+      tags: ["pain"], text: "Knee", duration: "ongoing",
+      exercises: [{ exercise: "Squat (Barbell)", day: "Monday" }, { exercise: "Walking Lunge (Dumbbell)", day: "Monday" }],
+    });
+    expect(saved.noteIds).toHaveLength(2);
+    const byExercise = async () => Object.fromEntries((await noteDocs("g1")).map((d) => [d.get("exercise"), { id: d.id, ...d.data() }]));
+    let notes = await byExercise();
+    expect(Object.values(notes).every((n) => (n as { groupId?: string }).groupId === saved.groupId)).toBe(true);
+    const squatId = (notes["Squat (Barbell)"] as { id: string }).id;
+
+    // Untick the lunge, add the step-up, and change the text.
+    await call(updateFeedbackNoteGroup, "g1", {
+      groupId: saved.groupId, tags: ["pain", "too_hard"], text: "Knee, worse going down", duration: "week",
+      exercises: [{ exercise: "Squat (Barbell)", day: "Monday" }, { exercise: "Box Step-Up (Dumbbell)", day: "Monday" }],
+    });
+    notes = await byExercise();
+    expect(Object.keys(notes).sort()).toEqual(["Box Step-Up (Dumbbell)", "Squat (Barbell)"]);
+    expect(notes["Squat (Barbell)"]).toMatchObject({ id: squatId, tags: ["pain", "too_hard"], text: "Knee, worse going down", duration: "week", status: "pending" });
+    expect(notes["Box Step-Up (Dumbbell)"]).toMatchObject({ groupId: saved.groupId, status: "pending", source: "checkin" });
+
+    await call(removeFeedbackNote, "g1", { groupId: saved.groupId });
+    expect(await noteDocs("g1")).toHaveLength(0);
+  });
+
+  it("leaves a note edited while an update ran for the next update", async () => {
+    await seedUser("g3");
+    const { groupId } = await call<{ groupId: string }>(addFeedbackNote, "g3", {
+      tags: ["pain"], text: "Knee", exercises: [{ exercise: "Squat (Barbell)", day: "Monday" }, { exercise: "Walking Lunge (Dumbbell)", day: "Monday" }],
+    });
+    const read = await loadActiveNotes(db, "g3"); // the update reads its notes, then generates
+    await call(updateFeedbackNoteGroup, "g3", { groupId, tags: ["pain"], text: "Knee, sharp going down",
+      exercises: [{ exercise: "Squat (Barbell)", day: "Monday" }, { exercise: "Walking Lunge (Dumbbell)", day: "Monday" }] });
+    await db.runTransaction((tx) => settleNotesInTransaction(db, tx, "g3", read,
+      read.map((n) => ({ noteId: n.id, status: "done" as const, response: { status: "changed" as const, text: "Changed it." } })), "prog1"));
+    const after = (await noteDocs("g3")).map((d) => d.data());
+    expect(after.every((n) => n.status === "pending" && n.text === "Knee, sharp going down")).toBe(true);
+  });
+
+  it("refuses a card past the limit, and editing a group an update has used", async () => {
+    await seedUser("g2");
+    for (let i = 0; i < MAX_PENDING_NOTES - 1; i++) await db.collection("users/g2/feedbackNotes").add({ status: "pending" });
+    const two = [{ exercise: "Squat (Barbell)" }, { exercise: "Walking Lunge (Dumbbell)" }];
+    await expect(call(addFeedbackNote, "g2", { tags: ["dislike"], text: "x", exercises: two })).rejects.toMatchObject({ code: "resource-exhausted" });
+    expect(await noteDocs("g2")).toHaveLength(MAX_PENDING_NOTES - 1); // nothing half saved
+
+    await db.doc("users/g2/feedbackNotes/used").set({ status: "open", groupId: "grp", exercise: "Squat (Barbell)", day: null });
+    await expect(call(updateFeedbackNoteGroup, "g2", { groupId: "grp", tags: ["dislike"], text: "x" })).rejects.toMatchObject({ code: "failed-precondition" });
+    await expect(call(removeFeedbackNote, "g2", { groupId: "grp" })).rejects.toMatchObject({ code: "failed-precondition" });
+    await expect(call(removeFeedbackNote, "g2", { groupId: "../x" })).rejects.toMatchObject({ code: "invalid-argument" });
   });
 
   it("won't take back a note an update has used", async () => {
@@ -89,7 +145,23 @@ describe("check-in notes", () => {
     await db.doc("users/n5/feedbackNotes/a").set({ status: "open", worse: false });
     await call(followUpFeedbackNote, "n5", { noteId: "a", outcome: "better" });
     expect((await db.doc("users/n5/feedbackNotes/a").get()).data()).toMatchObject({ status: "resolved", announced: false });
-    await expect(call(followUpFeedbackNote, "n5", { noteId: "a", outcome: "worse" })).rejects.toMatchObject({ code: "failed-precondition" });
+    // Changed before the next update: "better" taken back.
+    await call(followUpFeedbackNote, "n5", { noteId: "a", outcome: "worse" });
+    const changed = (await db.doc("users/n5/feedbackNotes/a").get()).data();
+    expect(changed).toMatchObject({ status: "open", worse: true, lastFollowUp: "worse" });
+    expect(changed).not.toHaveProperty("announced");
+    // Taking back "better" needs room in play, but not among waiting notes.
+    await call(followUpFeedbackNote, "n5", { noteId: "a", outcome: "better" });
+    for (let i = 0; i < MAX_PENDING_NOTES; i++) await db.collection("users/n5/feedbackNotes").add({ status: "pending" });
+    await call(followUpFeedbackNote, "n5", { noteId: "a", outcome: "still" });
+    await call(followUpFeedbackNote, "n5", { noteId: "a", outcome: "better" });
+    for (let i = 0; i < MAX_ACTIVE_NOTES - MAX_PENDING_NOTES; i++) await db.collection("users/n5/feedbackNotes").add({ status: "open" });
+    await expect(call(followUpFeedbackNote, "n5", { noteId: "a", outcome: "still" })).rejects.toMatchObject({ code: "resource-exhausted" });
+    // Once the update has told it, it's settled.
+    await db.doc("users/n5/feedbackNotes/b").set({ status: "resolved", announced: true });
+    await expect(call(followUpFeedbackNote, "n5", { noteId: "b", outcome: "still" })).rejects.toMatchObject({ code: "failed-precondition" });
+    await db.doc("users/n5/feedbackNotes/c").set({ status: "done" });
+    await expect(call(followUpFeedbackNote, "n5", { noteId: "c", outcome: "still" })).rejects.toMatchObject({ code: "failed-precondition" });
   });
 });
 

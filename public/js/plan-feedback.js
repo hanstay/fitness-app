@@ -17,6 +17,10 @@ export const FEEDBACK_TAGS = [
 const TAG_LABEL = { ...Object.fromEntries(FEEDBACK_TAGS), checkin: "Check-in answer" };
 export const tagLabel = (tag) => TAG_LABEL[tag] ?? tag;
 export const isQuestionOnly = (tags) => tags.length > 0 && tags.every((t) => t === "question");
+// Note limits, not counting check-in answers: waiting for the next update,
+// and in play (waiting or ongoing).
+export const MAX_PENDING_NOTES = 10;
+export const MAX_ACTIVE_NOTES = 20;
 
 export const SWAP_REASONS = [
   ["hurts", "It hurts"],
@@ -47,9 +51,14 @@ export function noteTitle(note) {
  */
 export function followUpChoices(note) {
   return (note.tags || []).includes("pain")
-    ? [["still", "Still hurts"], ["better", "Feels better"]]
+    ? [["better", "Feels better"], ["still", "Still hurts"], ["worse", "Getting worse"]]
     : [["still", "Keep the change"], ["better", "Bring it back"]];
 }
+
+/** The follow-up's question for an open note. */
+export const followUpQuestion = (note) => ((note.tags || []).includes("pain")
+  ? "How does it feel now?"
+  : "Keep working around it, or bring it back?");
 
 /** What the follow-up says once it's answered. */
 export function followUpDone(note, outcome) {

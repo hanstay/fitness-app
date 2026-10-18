@@ -89,6 +89,12 @@ describe("cross-user isolation", () => {
     const other = testEnv.authenticatedContext(OTHER_UID);
     await assertFails(getDoc(doc(other.firestore(), `users/${OWNER_UID}/state/summary`)));
   });
+
+  it("another authenticated user (a group mate, say) cannot read the owner's answers to their notes", async () => {
+    await seedAsAdmin(`users/${OWNER_UID}/state/groupFeedback`, { feedbackResponses: [] });
+    const other = testEnv.authenticatedContext(OTHER_UID);
+    await assertFails(getDoc(doc(other.firestore(), `users/${OWNER_UID}/state/groupFeedback`)));
+  });
 });
 
 describe("users/{uid} profile doc", () => {
@@ -124,6 +130,7 @@ describe("Functions-only collections reject client writes, even for the owner", 
     ["strengthSessions/s1", { date: "2026-08-10" }],
     ["checkins/c1", { summary: "..." }],
     ["feedbackNotes/n1", { status: "pending" }],
+    ["state/groupFeedback", { feedbackResponses: [] }],
   ])("owner cannot write users/{uid}/%s", async (subpath) => {
     const owner = testEnv.authenticatedContext(OWNER_UID);
     await assertFails(setDoc(doc(owner.firestore(), `users/${OWNER_UID}/${subpath}`), { x: 1 }));
@@ -138,6 +145,7 @@ describe("Functions-only collections reject client writes, even for the owner", 
     "strengthSessions/s1",
     "checkins/c1",
     "feedbackNotes/n1",
+    "state/groupFeedback",
   ])("owner CAN read users/{uid}/%s once seeded", async (subpath) => {
     await seedAsAdmin(`users/${OWNER_UID}/${subpath}`, { x: 1 });
     const owner = testEnv.authenticatedContext(OWNER_UID);

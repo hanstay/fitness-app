@@ -9,7 +9,8 @@
 //   a personal plan's generation decides it (structuralChanged).
 // - a group plan whose shared program was replaced (by another member's
 //   update) after this member's layer was written for it.
-// - a check-in note or answer waiting for the next update (pendingFeedback).
+// - a check-in note, answer or follow-up answer waiting for the next update
+//   (pendingFeedback), so "still hurts" on its own can update the plan.
 // - starting the next phase early, or there being no plan yet.
 
 const millis = (ts) => (ts?.toMillis ? ts.toMillis() : null);
