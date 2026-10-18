@@ -153,7 +153,11 @@ function bindCard(el) {
     if (!a) return;
     status("");
     follow.innerHTML = "";
-    if (a.action === "import") { onImport(); return; }
+    if (a.action === "import") {
+      el.querySelector(`input[value="import"]`).checked = false; // nothing is saved
+      onImport();
+      return;
+    }
     if (a.action === "dismiss") {
       dismissed.add(q.key);
       saveDismissed();
