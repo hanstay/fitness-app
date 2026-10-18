@@ -241,7 +241,8 @@ describe("duplicate and concurrent runs", () => {
 
     expect((await db.collection("users/r2/programs").get()).size).toBe(1);
     expect(await programDocs("r2", "active")).toBe(1);
-  });
+    // Contending transactions, as below: the emulator's lock waits can pass 5s.
+  }, 20_000);
 
   it("two overlapping generations leave exactly one active program", async () => {
     await seedUser("r3");
