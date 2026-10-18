@@ -344,9 +344,17 @@ if (summary) {
     onPendingChange: (count) => { pendingFeedback = count; renderGenerationStatus(); },
   }).catch((err) => console.error("[checkin] notes section failed to load", err));
   // With intervals.icu connected, the questions wait for the sync below.
+  // The note form waits until the questions are answered or skipped, unless
+  // the athlete came here to write one ("Note for check-in" on the Program
+  // page) or has started on it: then it stays put.
+  const feedbackSection = document.getElementById("feedbackSection");
+  let noteStarted = location.hash === "#feedback" || new URLSearchParams(location.search).has("exercise");
+  document.getElementById("noteForm").addEventListener("focusin", () => {
+    noteStarted = true;
+    feedbackSection.removeAttribute("data-waiting");
+  });
   initCheckinQuestions({
-    // The note form waits until the questions are answered or skipped.
-    onRemainingChange: (n) => { document.getElementById("feedbackSection").toggleAttribute("data-waiting", n > 0); },
+    onRemainingChange: (n) => { feedbackSection.toggleAttribute("data-waiting", n > 0 && !noteStarted); },
     load: !summary.integrationsStatus?.intervalsIcu?.connected,
     onImportNow: () => {
       expandSection("hevySection");

@@ -89,13 +89,13 @@ const waiting = (q) => !q.answer && !skipped.has(q.key);
 function renderQueue() {
   const current = queue.find(waiting);
   const remaining = queue.filter(waiting).length;
-  $("weekSection").style.display = queue.some((q) => q.answer || waiting(q)) ? "" : "none";
+  $("weekSection").style.display = queue.length ? "" : "none";
   $("weekIntro").textContent = remaining
     ? `${remaining === 1 ? "1 question" : `${remaining} questions`} about how your week went. One tap each, or skip.`
-    : "That's everything. Your answers go into your next plan update.";
+    : queue.some((q) => q.answer) ? "That's everything. Your answers go into your next plan update." : "All skipped for now.";
   $("weekCards").innerHTML = queue.map((q) => {
     if (q.answer && !expanded.has(q.key)) return doneRow(q);
-    if (q === current || (q.answer && expanded.has(q.key))) {
+    if (q === current || expanded.has(q.key)) {
       return card(q, q.kind === "long_gap" ? "cq-welcome" : q.kind === "no_new_data" || q.kind === "odd_entry" ? "cq-warn" : "");
     }
     return "";
@@ -187,9 +187,13 @@ function bindCard(el) {
     status("Saving…");
     try {
       const { data } = await httpsCallable(functions, "answerCheckinQuestion")({ key: q.key, answerId, ...clock(), ...extra });
-      q.answer = { noteId: data.noteId, answerId, followUpId: extra.followUpId ?? null };
+      // A reload while this saved has replaced the question objects.
+      const saved = questions.get(q.key) ?? q;
+      saved.answer = { noteId: data.noteId, answerId, followUpId: extra.followUpId ?? null };
       // Saved: it folds into its line and the next question comes up.
       expanded.delete(q.key);
+      skipped.delete(q.key);
+      saveSkipped();
       renderQueue();
     } catch (err) {
       status(errorText(err));
@@ -199,6 +203,7 @@ function bindCard(el) {
   };
 
   const skip = () => {
+    expanded.delete(q.key);
     skipped.add(q.key);
     saveSkipped();
     renderQueue();
@@ -224,7 +229,8 @@ function bindCard(el) {
         try {
           await httpsCallable(functions, "removeFeedbackNote")({ noteId: q.answer.noteId });
           q.answer = null;
-          expanded.delete(q.key);
+          // It stays open where it is, unanswered, rather than going back in the queue out of sight.
+          expanded.add(q.key);
           renderQueue();
         } catch (err) {
           input.checked = true;
