@@ -17,6 +17,8 @@ export const FEEDBACK_TAGS = [
 const TAG_LABEL = { ...Object.fromEntries(FEEDBACK_TAGS), checkin: "Check-in answer" };
 export const tagLabel = (tag) => TAG_LABEL[tag] ?? tag;
 export const isQuestionOnly = (tags) => tags.length > 0 && tags.every((t) => t === "question");
+// Notes waiting for the next update, not counting check-in answers.
+export const MAX_PENDING_NOTES = 10;
 
 export const SWAP_REASONS = [
   ["hurts", "It hurts"],

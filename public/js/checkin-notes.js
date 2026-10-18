@@ -8,8 +8,9 @@ import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebas
 import { db, functions } from "./firebase-init.js";
 import { showToast } from "./ui-messages.js";
 import { loadCurrentProgram } from "./current-program.js";
+import { normalizeDay } from "./days.js";
 import {
-  FEEDBACK_TAGS, tagLabel, isQuestionOnly, PAIN_SAFETY, noteTitle, followUpChoices, followUpDone, errorText,
+  MAX_PENDING_NOTES, FEEDBACK_TAGS, tagLabel, isQuestionOnly, PAIN_SAFETY, noteTitle, followUpChoices, followUpDone, errorText,
 } from "./plan-feedback.js";
 
 const CHECKIN_ANSWER = "checkin_question"; // a note saved by answering a check-in question (checkin-questions.js)
@@ -26,7 +27,6 @@ export async function initCheckinNotes(uid, summary, { onPendingChange } = {}) {
 
   renderTagChips();
   await fillExercises(uid, summary);
-  prefillFromLink();
   bindForm();
 
   onSnapshot(
@@ -37,8 +37,11 @@ export async function initCheckinNotes(uid, summary, { onPendingChange } = {}) {
         .sort((a, b) => (a.createdAt?.toMillis?.() ?? Infinity) - (b.createdAt?.toMillis?.() ?? Infinity));
       renderFollowUps(notes.filter((n) => n.status === "open" || (n.status === "resolved" && n.announced === false)));
       const pending = notes.filter((n) => n.status === "pending");
-      // Check-in answers show on their own question, not in this list.
-      renderPending(pending.filter((n) => n.source !== CHECKIN_ANSWER));
+      // Check-in answers show on their own question, not in this list, and
+      // have their own limit on the server.
+      const ownPending = pending.filter((n) => n.source !== CHECKIN_ANSWER);
+      pendingOwnCount = ownPending.length;
+      renderPending(ownPending);
       renderUpdateLine(notes);
       onPendingChange?.(pending.length);
     },
@@ -47,6 +50,8 @@ export async function initCheckinNotes(uid, summary, { onPendingChange } = {}) {
 }
 
 /* ---------- the form ---------- */
+
+let pendingOwnCount = 0;
 
 function renderTagChips() {
   $("noteTags").innerHTML = FEEDBACK_TAGS.map(([tag, label]) =>
@@ -64,7 +69,9 @@ function syncFormToTags() {
   $("noteDurationField").style.display = isQuestionOnly(tags) ? "none" : "";
 }
 
-// Every exercise in the current week, by day, so a note can name its slot.
+// Every exercise in the current week, grouped by day, so a note can name the
+// slots it's about. The day is stored as the full weekday name the Program
+// page matches on (or none, for an older plan's "Day 1").
 async function fillExercises(uid, summary) {
   let program = null;
   try {
@@ -73,31 +80,31 @@ async function fillExercises(uid, summary) {
     console.error("[checkin] couldn't load the plan for the exercise list", err);
   }
   const seen = new Set();
-  const options = [];
+  const groups = [];
   for (const s of program?.sessions || []) {
+    const day = normalizeDay(s.day) ?? "";
+    const chips = [];
     for (const ex of s.exercises || []) {
-      const key = `${s.day}|${ex.name}`;
-      if (seen.has(key) || /^rest(\s|$)/i.test(ex.name || "")) continue;
+      const key = `${day}|${ex.name}`;
+      if (!ex.name || seen.has(key) || /^rest(\s|$)/i.test(ex.name)) continue;
       seen.add(key);
-      options.push(`<option value="${esc(key)}">${esc(s.day)} · ${esc(ex.name)}</option>`);
+      chips.push(`<label><input type="checkbox" name="noteExercise" value="${esc(key)}"><span>${esc(ex.name)}</span></label>`);
     }
+    if (chips.length) groups.push(`<p class="fb-day">${esc(s.day || "Other")}</p><div class="chips">${chips.join("")}</div>`);
   }
-  $("noteExercise").insertAdjacentHTML("beforeend", options.join(""));
+  $("noteExercises").innerHTML = groups.join("") || `<p class="muted small" style="margin:0">No exercises in this week's plan.</p>`;
+  $("noteExercises").addEventListener("change", syncExerciseHint);
+  syncExerciseHint();
 }
 
-// The Program page's "Note for check-in" links here as
-// checkin.html?exercise=…&day=…#feedback.
-function prefillFromLink() {
-  const params = new URLSearchParams(location.search);
-  const exercise = params.get("exercise");
-  if (!exercise) return;
-  const key = `${params.get("day") ?? ""}|${exercise}`;
-  const select = $("noteExercise");
-  if (![...select.options].some((o) => o.value === key)) {
-    select.insertAdjacentHTML("beforeend", `<option value="${esc(key)}">${esc(params.get("day") ?? "")} · ${esc(exercise)}</option>`);
-  }
-  select.value = key;
-  if (location.hash === "#feedback") $("feedbackSection").scrollIntoView();
+const pickedExercises = () => [...document.querySelectorAll('input[name="noteExercise"]:checked')]
+  .map((el) => { const [day, exercise] = el.value.split(/\|(.*)/s); return { day: day || null, exercise }; });
+
+// The collapsed row says what's picked, so the list can stay closed.
+function syncExerciseHint() {
+  const names = pickedExercises().map((p) => p.exercise);
+  $("noteExercisesHint").textContent = !names.length ? "None picked: it's about your plan in general"
+    : names.length === 1 ? names[0] : `${names.length} picked: ${names.join(", ")}`;
 }
 
 function bindForm() {
@@ -106,22 +113,42 @@ function bindForm() {
     const btn = $("noteSaveBtn");
     if (btn.disabled) return;
     const tags = checkedTags();
-    const [day, exercise] = $("noteExercise").value ? $("noteExercise").value.split(/\|(.*)/s) : [null, null];
+    const picked = pickedExercises();
     const text = $("noteText").value.trim();
     if (!tags.length) return setNoteStatus("Pick what it's about first.");
-    if (!text && (!exercise || isQuestionOnly(tags))) return setNoteStatus("Tell us a bit more, or pick the exercise it's about.");
+    if (!text && (!picked.length || isQuestionOnly(tags))) return setNoteStatus("Tell us a bit more, or pick the exercises it's about.");
+    // One note per exercise, so each gets its own follow-up and can be
+    // marked better on its own; with none picked, one general note.
+    const targets = picked.length ? picked : [{ day: null, exercise: null }];
+    const room = MAX_PENDING_NOTES - pendingOwnCount;
+    if (targets.length > room) {
+      return setNoteStatus(room <= 0
+        ? `You already have ${MAX_PENDING_NOTES} notes waiting. Update your plan first, then add more.`
+        : `You can add ${room} more ${room === 1 ? "note" : "notes"} before your next update. Pick fewer exercises.`);
+    }
     const duration = document.querySelector('input[name="noteDuration"]:checked')?.value ?? "week";
 
     btn.disabled = true;
     setNoteStatus("Saving…");
+    // One at a time, so the server's note limits see each one before the next.
+    const add = httpsCallable(functions, "addFeedbackNote");
+    const boxes = [...document.querySelectorAll('input[name="noteExercise"]:checked')];
+    let saved = 0;
     try {
-      await httpsCallable(functions, "addFeedbackNote")({ tags, text, exercise: exercise || null, day: day || null, duration });
+      for (const { day, exercise } of targets) {
+        await add({ tags, text, exercise, day, duration });
+        saved++;
+      }
       $("noteForm").reset();
       syncFormToTags();
-      setNoteStatus("Saved. It goes into your next plan update.");
+      setNoteStatus(saved === 1 ? "Saved. It goes into your next plan update."
+        : `Saved ${saved} notes. They go into your next plan update.`);
     } catch (err) {
-      setNoteStatus(errorText(err));
+      // Untick what saved, so trying again doesn't add those twice.
+      boxes.slice(0, saved).forEach((box) => { box.checked = false; });
+      setNoteStatus(`${saved ? `Saved ${saved} of ${targets.length}. ` : ""}${errorText(err)}`);
     } finally {
+      syncExerciseHint();
       btn.disabled = false;
     }
   });

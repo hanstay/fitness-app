@@ -62,6 +62,11 @@
   .cq-card .status-line:empty{display:none}
   .cq-card .field label{text-transform:none; letter-spacing:0; font-size:.82rem}
   .cq-card .btn{padding:9px 14px; font-size:.86rem}
+  .fb-exercises{border:1px solid var(--border); border-radius:10px; padding:0 14px}
+  .fb-exercises .disclosure-hint{white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .fb-exercises summary > span{min-width:0}
+  .fb-day{font-size:.78rem; font-weight:700; color:var(--text-secondary); margin:10px 0 6px}
+  .fb-day:first-child{margin-top:0}
   .fb-list-head{font-size:.8rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--text-secondary); margin:18px 0 8px}
 </style>
 </head>
@@ -137,10 +142,11 @@
         <div class="chips" id="noteTags" role="group" aria-labelledby="noteTagsLabel"></div>
       </div>
       <div class="callout warn small" id="painCallout" style="display:none"></div>
-      <div class="field">
-        <label for="noteExercise">Which exercise? <span class="muted">(optional)</span></label>
-        <select class="input" id="noteExercise"><option value="">Not about one exercise</option></select>
-      </div>
+      <details class="disclosure fb-exercises field" id="noteExercisesBox">
+        <summary><span><span class="disclosure-title" id="noteExercisesLabel">Which exercises? <span class="muted">(optional, pick any)</span></span>
+          <span class="disclosure-hint" id="noteExercisesHint"></span></span></summary>
+        <div class="disclosure-body" id="noteExercises" role="group" aria-labelledby="noteExercisesLabel"></div>
+      </details>
       <div class="field">
         <label for="noteText">Tell us more</label>
         <textarea class="input" id="noteText" maxlength="1000" placeholder="e.g. My left knee aches on the lunges, mostly going down."></textarea>
