@@ -25,6 +25,11 @@ describe("planUpdateReadiness", () => {
     expect(readiness({ summary: summary(null, 2000), plan }).ready).toBe(true);
   });
 
+  it("is ready when a check-in note or answer is waiting, once imports have finished", () => {
+    expect(readiness({ summary: summary(null, null), plan, pendingFeedback: 1 }).ready).toBe(true);
+    expect(readiness({ summary: summary(null, null), plan, pendingFeedback: 1, hevyImporting: true }).ready).toBe(false);
+  });
+
   it("ignores intervals.icu activities once it's disconnected", () => {
     const result = readiness({ summary: summary(null, 2000, false), plan });
     expect(result.ready).toBe(false);

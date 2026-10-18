@@ -90,11 +90,34 @@ describe("settleNotes", () => {
 describe("readActiveNote", () => {
   it("reads a stored note and skips ones the update shouldn't see", () => {
     expect(readActiveNote("a", { tags: ["pain", "nonsense"], status: "open", day: "Mon", duration: "ongoing", worse: true }))
-      .toEqual({ id: "a", status: "open", tags: ["pain"], text: "", exercise: null, day: "Monday", duration: "ongoing", worse: true });
+      .toEqual({ id: "a", status: "open", tags: ["pain"], text: "", exercise: null, day: "Monday", duration: "ongoing", worse: true, checkin: null });
     expect(readActiveNote("a", { tags: ["pain"], status: "done" })).toBeNull();
     expect(readActiveNote("a", { tags: [], status: "pending" })).toBeNull();
     expect(readActiveNote("a", { tags: ["pain"], status: "resolved", announced: true })).toBeNull();
     expect(readActiveNote("a", { tags: ["pain"], status: "resolved", announced: false })?.status).toBe("resolved");
+  });
+});
+
+describe("check-in answers", () => {
+  const answer: ActiveNote = {
+    id: "c", status: "pending", tags: ["checkin"], text: "", exercise: null, day: "Wednesday", duration: "week",
+    checkin: { question: "You did a 5 km run instead of your Upper session on Wednesday. Why?", answer: "Prefer this activity: Yes, every Wednesday", guidance: "Make a 5 km run the regular Wednesday session." },
+  };
+
+  it("can't be picked as a tag on the note form", () => {
+    expect(normalizeNoteInput({ tags: ["checkin"], text: "hi" })).toHaveProperty("error");
+  });
+
+  it("is shown to the update as the question, the answer and what to do", () => {
+    expect(formatFeedbackBlock([answer]).split("\n")[1]).toBe(
+      '- [n1] NEW · Check-in answer · about Wednesday · this week only: asked "You did a 5 km run instead of your Upper session on Wednesday. Why?", answered "Prefer this activity: Yes, every Wednesday". To do: Make a 5 km run the regular Wednesday session.');
+  });
+
+  it("is read back from the stored note and kept for What changed", () => {
+    const read = readActiveNote("c", { tags: ["checkin"], status: "pending", day: "Wednesday", checkin: answer.checkin });
+    expect(read?.checkin).toEqual(answer.checkin);
+    const { stored } = settleNotes([answer], [{ id: "n1", status: "changed", response: "Wednesday is now a 5 km easy run." }]);
+    expect(stored[0]).toMatchObject({ question: answer.checkin!.question, answer: answer.checkin!.answer, response: "Wednesday is now a 5 km easy run." });
   });
 });
 

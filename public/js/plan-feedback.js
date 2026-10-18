@@ -13,7 +13,8 @@ export const FEEDBACK_TAGS = [
   ["dislike", "Don't like it"],
   ["question", "Question"],
 ];
-const TAG_LABEL = Object.fromEntries(FEEDBACK_TAGS);
+// "checkin" marks an answer to a check-in question; it's never picked on the form.
+const TAG_LABEL = { ...Object.fromEntries(FEEDBACK_TAGS), checkin: "Check-in answer" };
 export const tagLabel = (tag) => TAG_LABEL[tag] ?? tag;
 export const isQuestionOnly = (tags) => tags.length > 0 && tags.every((t) => t === "question");
 

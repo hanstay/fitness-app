@@ -12,10 +12,15 @@ import {
   FEEDBACK_TAGS, tagLabel, isQuestionOnly, PAIN_SAFETY, noteTitle, followUpChoices, followUpDone, errorText,
 } from "./plan-feedback.js";
 
+const CHECKIN_ANSWER = "checkin_question"; // a note saved by answering "Your week" (checkin-questions.js)
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const $ = (id) => document.getElementById(id);
 
-export async function initCheckinNotes(uid, summary) {
+/**
+ * onPendingChange(count) hears how many notes and check-in answers are
+ * waiting for the next update, which counts as something new for it.
+ */
+export async function initCheckinNotes(uid, summary, { onPendingChange } = {}) {
   if (summary?.activeProgramSource === "group" && summary?.groupId) return;
   const section = $("feedbackSection");
   section.style.display = "";
@@ -32,8 +37,11 @@ export async function initCheckinNotes(uid, summary) {
         .map((d) => ({ id: d.id, ...d.data() }))
         .sort((a, b) => (a.createdAt?.toMillis?.() ?? Infinity) - (b.createdAt?.toMillis?.() ?? Infinity));
       renderFollowUps(notes.filter((n) => n.status === "open" || (n.status === "resolved" && n.announced === false)));
-      renderPending(notes.filter((n) => n.status === "pending"));
+      const pending = notes.filter((n) => n.status === "pending");
+      // Check-in answers show on their own question, not in this list.
+      renderPending(pending.filter((n) => n.source !== CHECKIN_ANSWER));
       renderUpdateLine(notes);
+      onPendingChange?.(pending.length);
     },
     (err) => console.error("[checkin] notes listener failed", err)
   );
@@ -201,8 +209,14 @@ function renderFollowUps(notes) {
 /* ---------- the update button's line ---------- */
 
 function renderUpdateLine(notes) {
-  const used = notes.filter((n) => n.status === "pending" || n.status === "open" || (n.status === "resolved" && n.announced === false)).length;
+  const inUse = notes.filter((n) => n.status === "pending" || n.status === "open" || (n.status === "resolved" && n.announced === false));
+  const answers = inUse.filter((n) => n.source === CHECKIN_ANSWER).length;
+  const own = inUse.length - answers;
+  const parts = [
+    answers ? (answers === 1 ? "1 answer" : `${answers} answers`) : null,
+    own ? (own === 1 ? "1 note" : `${own} notes`) : null,
+  ].filter(Boolean);
   const el = $("notesForUpdate");
-  el.style.display = used ? "" : "none";
-  el.textContent = used === 1 ? "Your note goes into your next plan update." : `Your ${used} notes go into your next plan update.`;
+  el.style.display = parts.length ? "" : "none";
+  el.textContent = `Your ${parts.join(" and ")} ${inUse.length === 1 ? "goes" : "go"} into your next plan update.`;
 }

@@ -12,6 +12,7 @@ import { connectIntervalsIcuViaOAuth } from "./intervals-oauth.js";
 import { bindMessages } from "./ui-messages.js";
 import { isStale } from "./plan-updates.js";
 import { initCheckinNotes } from "./checkin-notes.js";
+import { initCheckinQuestions, refreshCheckinQuestions } from "./checkin-questions.js";
 import { loadCurrentProgram } from "./current-program.js";
 import { planUpdateReadiness } from "./plan-update-readiness.js";
 
@@ -103,6 +104,7 @@ document.getElementById("hevyFile").addEventListener("change", async (e) => {
     setStatus("hevyStatus", data.newSessions > 0
       ? `Saved ${data.newSessions} new workout${plural}. Update your plan below when you're ready.`
       : "Saved. There are no workouts in it that weren't already imported.");
+    if (data.newSessions > 0) refreshCheckinQuestions();
   } catch (err) {
     setStatus("hevyStatus", "");
     showError(`Couldn't import that CSV: ${err.message || err}`);
@@ -174,6 +176,7 @@ document.getElementById("icuSyncBtn").addEventListener("click", (e) => {
     setStatus("icuStatus", newCount > 0 ? `Synced ${newCount} new ${newCount === 1 ? "activity" : "activities"}.` : "Synced. No new activities.");
     summary = await loadSummary();
     renderIcuState(summary);
+    if (newCount > 0) refreshCheckinQuestions();
   }).catch((err) => {
     setStatus("icuStatus", "");
     showError(`Sync failed: ${err.message || err}`);
@@ -205,6 +208,7 @@ let hevyImporting = false; // this page's Hevy import is being read or saved
 let icuSyncing = false; // this page's intervals.icu sync is in flight
 let plan = { key: null, loaded: false, current: null, athlete: null }; // the current plan and profile, once loaded
 let statusUnavailable = false; // the summary listener failed, so its state is unknown
+let pendingFeedback = 0; // notes and check-in answers waiting for the next update
 
 forceRegenCheck.addEventListener("change", () => renderGenerationStatus());
 
@@ -247,6 +251,7 @@ function renderGenerationStatus() {
       hevyImporting,
       icuSyncing,
       startNextPhase: forceRegenCheck.checked,
+      pendingFeedback,
     })
     : { ready: false, hint: "" };
   regenBtn.disabled = busy || !ready;
@@ -333,8 +338,21 @@ try {
   showError("Couldn't load your intervals.icu status — Hevy import and program updates below still work.");
 }
 
-// Without the summary it can't tell a group plan (no notes) from a personal one.
-if (summary) initCheckinNotes(user.uid, summary).catch((err) => console.error("[checkin] notes section failed to load", err));
+// Without the summary it can't tell a group plan (no notes or questions) from a personal one.
+if (summary) {
+  initCheckinNotes(user.uid, summary, {
+    onPendingChange: (count) => { pendingFeedback = count; renderGenerationStatus(); },
+  }).catch((err) => console.error("[checkin] notes section failed to load", err));
+  // With intervals.icu connected, the questions wait for the sync below.
+  initCheckinQuestions(summary, {
+    load: !summary.integrationsStatus?.intervalsIcu?.connected,
+    onImportNow: () => {
+      expandSection("hevySection");
+      document.getElementById("hevySection").scrollIntoView({ behavior: "smooth" });
+      document.getElementById("hevyFile").click();
+    },
+  });
+}
 
 // Fire-and-forget: runs in parallel with the user's own Hevy CSV export/
 // upload instead of adding latency later, at "Update my plan" time.
@@ -359,5 +377,6 @@ if (summary?.integrationsStatus?.intervalsIcu?.connected) {
     .finally(() => {
       icuSyncing = false;
       renderGenerationStatus();
+      if (summary) refreshCheckinQuestions();
     });
 }
