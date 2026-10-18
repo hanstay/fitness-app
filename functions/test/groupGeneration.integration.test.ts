@@ -298,5 +298,9 @@ describe("group generation", () => {
     await runGenerateProgram("a");
     const updated = await db.doc("groups/g9/members/a").get();
     expect(updated.data()).not.toHaveProperty("changeSummary");
+    // Each update is kept in the member's own check-in history, newest phase last.
+    const history = (await db.collection("users/a/planHistory").orderBy("createdAt").get()).docs.map((d) => d.data());
+    expect(history.map((h) => [h.source, h.mode, h.phase])).toEqual([["group", "full", "Base"], ["group", "advance", "Build"], ["group", "incremental", "Build"]]);
+    expect(history[1].changeSummary[0]).toContain("Base → Build");
   });
 });

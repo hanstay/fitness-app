@@ -219,6 +219,14 @@ fieldset.field-group legend{padding:0 6px; font-size:.72rem; font-weight:700; co
 .disclosure-hint{display:block; font-size:.8rem; color:var(--text-secondary)}
 .disclosure-body{padding:4px 0 14px}
 
+/* An update's answer to a check-in note (Program page's What changed, the
+   Trainer's advice check-in history; js/plan-history.js) */
+.fb-said-head{margin:14px 0 6px; font-size:.95rem}
+.fb-said{border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin:0 0 8px}
+.fb-said .you{font-size:.8rem; color:var(--text-secondary)}
+.fb-said .you b{color:var(--accent-dark); font-weight:600}
+.fb-said .did{font-size:.9rem; margin-top:2px}
+
 /* Content list card */
 .item-card{display:flex; gap:14px; padding:14px; background:var(--card); border:1px solid var(--border); border-radius:var(--radius); margin:0 0 12px; align-items:center; text-decoration:none}
 .item-card:hover{background:var(--bg-tint)}
