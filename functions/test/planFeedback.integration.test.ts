@@ -150,6 +150,13 @@ describe("check-in notes", () => {
     const changed = (await db.doc("users/n5/feedbackNotes/a").get()).data();
     expect(changed).toMatchObject({ status: "open", worse: true, lastFollowUp: "worse" });
     expect(changed).not.toHaveProperty("announced");
+    // Taking back "better" needs room in play, but not among waiting notes.
+    await call(followUpFeedbackNote, "n5", { noteId: "a", outcome: "better" });
+    for (let i = 0; i < MAX_PENDING_NOTES; i++) await db.collection("users/n5/feedbackNotes").add({ status: "pending" });
+    await call(followUpFeedbackNote, "n5", { noteId: "a", outcome: "still" });
+    await call(followUpFeedbackNote, "n5", { noteId: "a", outcome: "better" });
+    for (let i = 0; i < MAX_ACTIVE_NOTES - MAX_PENDING_NOTES; i++) await db.collection("users/n5/feedbackNotes").add({ status: "open" });
+    await expect(call(followUpFeedbackNote, "n5", { noteId: "a", outcome: "still" })).rejects.toMatchObject({ code: "resource-exhausted" });
     // Once the update has told it, it's settled.
     await db.doc("users/n5/feedbackNotes/b").set({ status: "resolved", announced: true });
     await expect(call(followUpFeedbackNote, "n5", { noteId: "b", outcome: "still" })).rejects.toMatchObject({ code: "failed-precondition" });

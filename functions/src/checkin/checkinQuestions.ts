@@ -85,24 +85,28 @@ async function loadQuestions(db: Firestore, uid: string, clock: AthleteClock): P
     ? await groupPlan(db, uid, summary.groupId) : await personalPlan(db, uid, summary);
   const planReadDate = localDate(current.readAt, clock);
 
-  // What was logged since then (a day early, for stored dates in another time zone).
+  // What was logged since then (a day early, for stored dates in another
+  // time zone), oldest first so a gap right after the update is seen, plus
+  // the newest of each.
   const from = planReadDate ? addDays(planReadDate, -1) : clock.today;
-  const sessions = db.collection(`users/${uid}/strengthSessions`);
-  const [workouts, newestWorkout, activities] = await Promise.all([
-    sessions.where("date", ">=", from).orderBy("date", "desc").limit(LOGGED_SINCE_MAX).get(),
+  const sessions = db.collection(`users/${uid}/strengthSessions`).select("date", "start_time");
+  const acts = db.collection(`users/${uid}/activities`).select("date");
+  const [workouts, newestWorkout, activities, newestActivity] = await Promise.all([
+    sessions.where("date", ">=", from).orderBy("date").limit(LOGGED_SINCE_MAX).get(),
     sessions.orderBy("date", "desc").limit(1).get(),
-    db.collection(`users/${uid}/activities`).where("date", ">=", from).orderBy("date", "desc").limit(LOGGED_SINCE_MAX).get(),
+    acts.where("date", ">=", from).orderBy("date").limit(LOGGED_SINCE_MAX).get(),
+    acts.orderBy("date", "desc").limit(1).get(),
   ]);
   const dateOf = (d: DocumentData) => storedSessionDate(d.start_time, d.date);
-  const workoutDates = workouts.docs.map((d) => dateOf(d.data())).filter((d): d is string => !!d);
-  const newest = [...workoutDates, ...newestWorkout.docs.map((d) => dateOf(d.data()))].filter((d): d is string => !!d).sort().pop() ?? null;
+  const workoutDates = [...workouts.docs, ...newestWorkout.docs].map((d) => dateOf(d.data())).filter((d): d is string => !!d);
+  const newest = workoutDates.slice().sort().pop() ?? null;
   const hevy = hevyStatus(summary.integrationsStatus?.hevy ?? {}, newest);
   const input: CheckinInput = {
     today: clock.today,
     planReadDate,
     planHasLifts: current.hasLifts,
     hevy,
-    trainedDates: [...workoutDates, ...activities.docs.map((d) => asDate(d.get("date"), "")).filter(Boolean),
+    trainedDates: [...workoutDates, ...[...activities.docs, ...newestActivity.docs].map((d) => asDate(d.get("date"), "")).filter(Boolean),
       ...(hevy.lastSessionDate ? [hevy.lastSessionDate] : [])],
   };
   const questions = buildCheckinQuestions(input);

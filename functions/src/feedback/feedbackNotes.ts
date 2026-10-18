@@ -13,10 +13,11 @@ import {
 const notesOf = (uid: string) => getFirestore().collection(`users/${uid}/feedbackNotes`);
 
 /**
- * Refuses `adding` more notes past either limit. Answers to check-in
+ * Refuses `adding` more notes past either limit (only the in-play one for a
+ * note coming back into play, which isn't waiting). Answers to check-in
  * questions have their own limit (checkin/checkinQuestions.ts).
  */
-async function checkRoom(uid: string, adding: number): Promise<void> {
+async function checkRoom(uid: string, adding: number, { activeOnly = false } = {}): Promise<void> {
   if (adding <= 0) return;
   const notes = notesOf(uid);
   const answers = notes.where("source", "==", "checkin_question");
@@ -28,7 +29,7 @@ async function checkRoom(uid: string, adding: number): Promise<void> {
   ]);
   const [pendingCount, activeCount] = [counts[0].data().count - counts[1].data().count, counts[2].data().count - counts[3].data().count];
   const more = adding === 1 ? "" : ` There's room for ${Math.max(0, Math.min(MAX_PENDING_NOTES - pendingCount, MAX_ACTIVE_NOTES - activeCount))} more.`;
-  if (pendingCount + adding > MAX_PENDING_NOTES) {
+  if (!activeOnly && pendingCount + adding > MAX_PENDING_NOTES) {
     throw new HttpsError("resource-exhausted", `You can have ${MAX_PENDING_NOTES} notes waiting. Update your plan first, then add more.${more}`);
   }
   if (activeCount + adding > MAX_ACTIVE_NOTES) {
@@ -156,7 +157,10 @@ export const followUpFeedbackNote = onCall(async (request) => {
   const uid = request.auth.uid;
   const ref = noteRef(uid, request.data?.noteId);
   // Taking back "better" puts the note back in play, so it needs room.
-  if (outcome !== "better" && (await ref.get()).get("status") === "resolved") await checkRoom(uid, 1);
+  const before = await ref.get();
+  if (outcome !== "better" && before.get("status") === "resolved" && before.get("announced") === false) {
+    await checkRoom(uid, 1, { activeOnly: true });
+  }
   await getFirestore().runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     const status = snap.get("status");
