@@ -22,6 +22,7 @@ import { applySessionLoads } from "../lib/sessionLoads";
 import { reconcileEvents } from "../lib/eventReconciliation";
 import { normalizeWeek } from "../lib/programMerge";
 import { commitProgramGeneration } from "./settleGeneration";
+import { planHistoryEntry } from "../lib/planHistory";
 import {
   GROUP_FEEDBACK_INSTRUCTIONS, feedbackResponsesSchema, formatFeedbackBlock, settleNotes, withFeedbackResponses,
 } from "../lib/planFeedback";
@@ -438,6 +439,13 @@ export async function runGenerateGroupProgram(
     } else {
       tx.delete(feedbackRef);
     }
+    tx.set(db.collection(`users/${uid}/planHistory`).doc(), {
+      ...planHistoryEntry({
+        source: "group", programId: groupProgramRef!.id, mode: decision.mode, roadmap: sharedProgram.roadmap,
+        phaseIndex: currentPhaseIndex, currentState: memberLayer.currentState, changeSummary, feedbackResponses: answeredFeedback,
+      }),
+      createdAt: FieldValue.serverTimestamp(),
+    });
     tx.set(db.doc(`groups/${groupId}/members/${uid}`), {
       ...memberLayer,
       ...(changeSummary ? { changeSummary } : {}),

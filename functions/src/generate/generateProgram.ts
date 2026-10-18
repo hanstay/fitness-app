@@ -21,6 +21,7 @@ import {
 } from "../lib/planFeedback";
 import { SwapRecord, formatSwapsBlock, settleSwapsForUpdate, swapsStillInWeek } from "../lib/exerciseSwap";
 import { loadActiveNotes, settleNotesInTransaction } from "../feedback/notesForUpdate";
+import { planHistoryEntry } from "../lib/planHistory";
 
 // The week-writing calls' output, plus the answers to any feedback notes
 // (asked for only when there are notes; see withFeedback below).
@@ -549,6 +550,7 @@ export async function runGenerateProgram(
   const { settlements, stored: answeredFeedback } = settleNotes(notes, feedbackResponses);
 
   const newRef = db.collection(`users/${uid}/programs`).doc();
+  const phaseIndex = decision.mode === "full" ? 0 : decision.targetPhaseIndex ?? 0;
   await commitProgramGeneration(uid, opts?.placeholder, async (tx) => {
     // Re-read in the transaction: an overlapping run may have committed since.
     const activeSnap = await tx.get(db.collection(`users/${uid}/programs`).where("status", "==", "active"));
@@ -561,6 +563,13 @@ export async function runGenerateProgram(
     }
     await settleNotesInTransaction(db, tx, uid, notes, settlements, newRef.id);
     activeSnap.forEach((d) => tx.update(d.ref, { status: "archived" }));
+    tx.set(db.collection(`users/${uid}/planHistory`).doc(), {
+      ...planHistoryEntry({
+        source: "personal", programId: newRef.id, mode: decision.mode, roadmap: mergedProgram.roadmap,
+        phaseIndex: phaseIndex, currentState: mergedProgram.currentState, changeSummary, feedbackResponses: answeredFeedback,
+      }),
+      createdAt: FieldValue.serverTimestamp(),
+    });
     tx.set(newRef, {
       createdAt: FieldValue.serverTimestamp(),
       status: "active",
@@ -574,7 +583,7 @@ export async function runGenerateProgram(
       // Where this program is in its periodization. A weekly update or rebuilt
       // week carries both forward unchanged (so the block's age isn't reset
       // every week); moving to a new phase or a redesign starts a new block today.
-      currentPhaseIndex: decision.mode === "full" ? 0 : decision.targetPhaseIndex ?? 0,
+      currentPhaseIndex: phaseIndex,
       blockStartedAt: (decision.mode === "incremental" || decision.mode === "rebuild") && blockStartedAtMs != null
         ? Timestamp.fromMillis(blockStartedAtMs)
         : FieldValue.serverTimestamp(),

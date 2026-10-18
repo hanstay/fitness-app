@@ -14,6 +14,7 @@ service cloud.firestore {
       match /state/groupFeedback { allow read: if isOwner(uid); allow write: if false; }  // Functions-only (generate/groupProgram.ts)
       match /targetHistory/{id}  { allow read: if isOwner(uid); allow write: if false; }
       match /programs/{id}       { allow read: if isOwner(uid); allow write: if false; }
+      match /planHistory/{id}    { allow read: if isOwner(uid); allow write: if false; }  // Functions-only (lib/planHistory.ts)
       match /mealPlans/{id}      { allow read: if isOwner(uid); allow write: if false; }
 
       match /bodyScans/{id} {

@@ -333,6 +333,11 @@ describe("feedback notes and exercise swaps in a weekly update", () => {
     expect(program.sessions.find((s: { day: string }) => s.day === "Tuesday").exercises[0].name).toBe("Old Squat");
     expect(program.feedbackResponses.map((r: { noteId: string; status: string }) => [r.noteId, r.status]))
       .toEqual([["open", "changed"], ["res", "no_change"], ["pend", "answered"]]);
+    // The check-in history keeps the update's summary and answers.
+    const history = (await db.collection("users/f1/planHistory").get()).docs.map((d) => d.data());
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({ source: "personal", programId: result.programId, mode: "incremental" });
+    expect(history[0].feedbackResponses.map((r: { noteId: string }) => r.noteId)).toEqual(["open", "res", "pend"]);
 
     const note = async (id: string) => (await db.doc(`users/f1/feedbackNotes/${id}`).get()).data()!;
     expect(await note("open")).toMatchObject({ status: "open", worse: false, handledProgramId: result.programId });

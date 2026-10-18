@@ -34,6 +34,7 @@
   .phase-badge{font-size:.6rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px;
     color:var(--accent-dark); background:var(--accent-soft); border:1px solid #f3cfd0; border-radius:999px; padding:2px 8px}
 
+  #historyMore[hidden]{display:none}
   .day-note{padding:10px 0; border-top:1px solid var(--border)}
   .day-note:first-child{border-top:0; padding-top:0}
   .day-note .day-h{margin:0 0 4px; font-family:var(--font-head); font-size:.95rem; font-weight:600}
@@ -77,6 +78,7 @@
   import { db } from "./js/firebase-init.js";
   import { requireOnboarded, revealPage } from "./js/auth-guard.js";
   import { loadCurrentProgram, dayKey, sessionsOn } from "./js/current-program.js";
+  import { planHistory, historyEntryHtml } from "./js/plan-history.js";
 
   const main = document.getElementById("mainContent");
   const tocLinks = document.getElementById("tocLinks");
@@ -210,6 +212,31 @@
     if (p.nutritionNote) notes.push(noteItem("Fueling", `<p>${esc(p.nutritionNote)}</p>`));
     if (notes.length) group("notes", "Notes & tips", notes.join(""), { open: true });
 
+    // ---- Check-in history: every update's What changed, newest first ----
+    const history = planHistory(user.uid);
+    const firstPage = await history.next().catch((err) => {
+      console.error("[advice] check-in history failed to load", err);
+      return null;
+    });
+    if (firstPage?.entries.length) {
+      group("history", "Check-in history", `<p class="muted small">What each plan update changed, and what it did about your notes.</p>
+        <div id="historyList">${firstPage.entries.map((e, i) => historyEntryHtml(e, { open: i === 0 })).join("")}</div>
+        <button class="btn secondary" id="historyMore" type="button"${firstPage.more ? "" : " hidden"}>Show older</button>`, { open: true });
+      const more = document.getElementById("historyMore");
+      more.addEventListener("click", async () => {
+        more.disabled = true;
+        try {
+          const page = await history.next();
+          document.getElementById("historyList").insertAdjacentHTML("beforeend", page.entries.map((e) => historyEntryHtml(e)).join(""));
+          more.hidden = !page.more;
+        } catch (err) {
+          console.error("[advice] older check-ins failed to load", err);
+        } finally {
+          more.disabled = false;
+        }
+      });
+    }
+
     document.getElementById("loading").remove();
     tocLinks.insertAdjacentHTML("beforeend", groups.map((g) => `<a href="#${g.id}">${esc(g.label)}</a>`).join(""));
 
@@ -217,12 +244,15 @@
     main.querySelectorAll("section.grp > .grp-head").forEach((h) => h.addEventListener("click", () => h.parentElement.classList.toggle("open")));
     // Inner items (phases, notes) behave as an accordion within their group:
     // opening one closes its siblings, so you see them one at a time.
-    main.querySelectorAll(".phase > .ph-head").forEach((h) => h.addEventListener("click", () => {
+    // Delegated, so older check-ins added later behave the same.
+    main.addEventListener("click", (e) => {
+      const h = e.target.closest(".phase > .ph-head");
+      if (!h) return;
       const item = h.parentElement;
       const willOpen = !item.classList.contains("open");
       item.parentElement.querySelectorAll(":scope > .phase").forEach((sib) => sib.classList.remove("open"));
       if (willOpen) item.classList.add("open");
-    }));
+    });
 
     // Mobile nav toggle + smooth-scroll (auto-opens the target group) + scrollspy.
     const toc = document.getElementById("toc"), tgl = document.getElementById("navtoggle");
@@ -253,6 +283,14 @@
       });
     }, { rootMargin: "-20% 0px -70% 0px" });
     document.querySelectorAll("main section").forEach((s) => obs.observe(s));
+
+    // A link to a section (the Program page's "See all your check-ins") lands
+    // there once it's drawn.
+    const linked = location.hash && document.getElementById(location.hash.slice(1));
+    if (linked?.classList.contains("grp")) {
+      linked.classList.add("open");
+      linked.scrollIntoView({ block: "start" });
+    }
   }
   } catch (err) {
     showLoadError(err);
