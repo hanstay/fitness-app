@@ -10,7 +10,7 @@ import { showToast } from "./ui-messages.js";
 import { loadCurrentProgram } from "./current-program.js";
 import { normalizeDay } from "./days.js";
 import {
-  MAX_PENDING_NOTES, FEEDBACK_TAGS, tagLabel, isQuestionOnly, PAIN_SAFETY, noteTitle, followUpChoices, followUpDone, errorText,
+  MAX_PENDING_NOTES, MAX_ACTIVE_NOTES, FEEDBACK_TAGS, tagLabel, isQuestionOnly, PAIN_SAFETY, noteTitle, followUpChoices, followUpDone, errorText,
 } from "./plan-feedback.js";
 
 const CHECKIN_ANSWER = "checkin_question"; // a note saved by answering a check-in question (checkin-questions.js)
@@ -41,6 +41,7 @@ export async function initCheckinNotes(uid, summary, { onPendingChange } = {}) {
       // have their own limit on the server.
       const ownPending = pending.filter((n) => n.source !== CHECKIN_ANSWER);
       pendingOwnCount = ownPending.length;
+      activeOwnCount = notes.filter((n) => (n.status === "pending" || n.status === "open") && n.source !== CHECKIN_ANSWER).length;
       renderPending(ownPending);
       renderUpdateLine(notes);
       onPendingChange?.(pending.length);
@@ -52,6 +53,7 @@ export async function initCheckinNotes(uid, summary, { onPendingChange } = {}) {
 /* ---------- the form ---------- */
 
 let pendingOwnCount = 0;
+let activeOwnCount = 0;
 
 function renderTagChips() {
   $("noteTags").innerHTML = FEEDBACK_TAGS.map(([tag, label]) =>
@@ -86,7 +88,7 @@ async function fillExercises(uid, summary) {
     const chips = [];
     for (const ex of s.exercises || []) {
       const key = `${day}|${ex.name}`;
-      if (!ex.name || seen.has(key) || /^rest(\s|$)/i.test(ex.name)) continue;
+      if (!ex.name?.trim() || seen.has(key) || /^rest(\s|$)/i.test(ex.name)) continue;
       seen.add(key);
       chips.push(`<label><input type="checkbox" name="noteExercise" value="${esc(key)}"><span>${esc(ex.name)}</span></label>`);
     }
@@ -120,11 +122,14 @@ function bindForm() {
     // One note per exercise, so each gets its own follow-up and can be
     // marked better on its own; with none picked, one general note.
     const targets = picked.length ? picked : [{ day: null, exercise: null }];
-    const room = MAX_PENDING_NOTES - pendingOwnCount;
+    // The server's limits, checked up front so a long pick doesn't half save.
+    const pendingRoom = MAX_PENDING_NOTES - pendingOwnCount;
+    const activeRoom = MAX_ACTIVE_NOTES - activeOwnCount;
+    if (activeRoom <= 0) return setNoteStatus(`Your plan is already working around ${MAX_ACTIVE_NOTES} notes. Mark some as better, then add more.`);
+    if (pendingRoom <= 0) return setNoteStatus(`You already have ${MAX_PENDING_NOTES} notes waiting. Update your plan first, then add more.`);
+    const room = Math.min(pendingRoom, activeRoom);
     if (targets.length > room) {
-      return setNoteStatus(room <= 0
-        ? `You already have ${MAX_PENDING_NOTES} notes waiting. Update your plan first, then add more.`
-        : `You can add ${room} more ${room === 1 ? "note" : "notes"} before your next update. Pick fewer exercises.`);
+      return setNoteStatus(`You can add ${room} more ${room === 1 ? "note" : "notes"} right now. Pick fewer exercises.`);
     }
     const duration = document.querySelector('input[name="noteDuration"]:checked')?.value ?? "week";
 
