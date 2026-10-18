@@ -219,9 +219,10 @@ regenBtn.addEventListener("click", async () => {
   try {
     const force = forceRegenCheck.checked;
     // Follow-up answers are only picked on the page until now.
-    const result = await httpsCallable(functions, "queueProgramGeneration")({ force, followUps: followUpsToSend() });
+    const followUps = followUpsToSend();
+    const result = await httpsCallable(functions, "queueProgramGeneration")({ force, followUps });
     followingId = result.data.programId;
-    clearFollowUpPicks();
+    clearFollowUpPicks(followUps);
   } catch (err) {
     const msg = String(err?.message || err);
     const isPrecondition = /first|required|Complete/i.test(msg);

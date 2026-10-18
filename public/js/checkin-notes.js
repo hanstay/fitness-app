@@ -303,16 +303,19 @@ function dropStalePicks() {
   if (picks.size !== before) savePicks();
 }
 
-const pickOf = (n) => picks.get(n.id)?.outcome;
+const pickOf = (n) => {
+  const pick = picks.get(n.id);
+  return pick?.since === handledMillis(n) ? pick.outcome : undefined;
+};
 
 /** The follow-up answers picked at this check-in, for the update request. */
 export function followUpsToSend() {
   return ongoing.filter(pickOf).map((n) => ({ noteId: n.id, outcome: pickOf(n) }));
 }
 
-/** Forgets the picks once the update has them. */
-export function clearFollowUpPicks() {
-  picks.clear();
+/** Forgets the picks the update was sent, keeping any changed since. */
+export function clearFollowUpPicks(sent) {
+  for (const { noteId, outcome } of sent) if (picks.get(noteId)?.outcome === outcome) picks.delete(noteId);
   savePicks();
   renderFollowUps();
   reportPendingChange();
