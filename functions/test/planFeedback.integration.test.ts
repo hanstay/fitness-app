@@ -59,7 +59,7 @@ describe("check-in notes", () => {
     expect(await noteDocs("n1")).toHaveLength(0);
   });
 
-  it("rejects a bad note, a group plan, and more than the pending limit", async () => {
+  it("rejects a bad note and more than the pending limit", async () => {
     await seedUser("n2");
     await expect(call(addFeedbackNote, "n2", { tags: [], text: "x" })).rejects.toMatchObject({ code: "invalid-argument" });
     for (let i = 0; i < MAX_PENDING_NOTES; i++) await db.collection("users/n2/feedbackNotes").add({ status: "pending" });
@@ -74,8 +74,10 @@ describe("check-in notes", () => {
     for (let i = 0; i < MAX_ACTIVE_NOTES; i++) await db.collection("users/n6/feedbackNotes").add({ status: "open" });
     await expect(call(addFeedbackNote, "n6", { tags: ["dislike"], text: "x" })).rejects.toMatchObject({ code: "resource-exhausted" });
 
+
+    // A group member's own update works around their notes (groupProgram.ts).
     await seedUser("n3", { activeProgramSource: "group", groupId: "g1" });
-    await expect(call(addFeedbackNote, "n3", { tags: ["dislike"], text: "x" })).rejects.toMatchObject({ code: "failed-precondition" });
+    await expect(call(addFeedbackNote, "n3", { tags: ["dislike"], text: "x" })).resolves.toHaveProperty("noteId");
   });
 
   it("won't take back a note an update has used", async () => {

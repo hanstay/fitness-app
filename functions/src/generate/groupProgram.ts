@@ -22,7 +22,15 @@ import { applySessionLoads } from "../lib/sessionLoads";
 import { reconcileEvents } from "../lib/eventReconciliation";
 import { normalizeWeek } from "../lib/programMerge";
 import { commitProgramGeneration } from "./settleGeneration";
+import {
+  GROUP_FEEDBACK_INSTRUCTIONS, feedbackResponsesSchema, formatFeedbackBlock, settleNotes, withFeedbackResponses,
+} from "../lib/planFeedback";
+import { loadActiveNotes, settleNotesInTransaction } from "../feedback/notesForUpdate";
 import type { GenerateProgramOptions } from "./generateProgram";
+
+// The member layer, plus the answers to any feedback notes (asked for only
+// when there are notes; see withFeedbackResponses).
+const memberLayerWithFeedbackSchema = memberLayerSchema.extend({ feedbackResponses: feedbackResponsesSchema.optional() });
 
 const GROUP_PREAMBLE = `You are an expert strength & conditioning coach writing ONE periodized, data-grounded
 training program shared by a small group of athletes who train together. They will do the same
@@ -383,22 +391,28 @@ export async function runGenerateGroupProgram(
     exercises: s.exercises.map((ex) => ({ name: ex.name, sets: ex.sets, reps: ex.reps, rir: ex.rir })),
   }));
 
-  const memberLayer = await extractStructuredJson({
-    system: MEMBER_LAYER_SYSTEM_PROMPT,
+  // What this athlete told us at check-in (notes and answers): their layer
+  // works around it with their loads and notes, and answers each one.
+  const notes = await loadActiveNotes(db, uid);
+  const feedbackText = formatFeedbackBlock(notes);
+
+  const { feedbackResponses, ...memberLayer } = await extractStructuredJson({
+    ...withFeedbackResponses(MEMBER_LAYER_SYSTEM_PROMPT, memberLayerJsonSchema, notes.length > 0, GROUP_FEEDBACK_INSTRUCTIONS),
     userText: [
       `Athlete profile:\n${memberProfileText}`,
       ``,
       `Group's current session skeleton (match days/exercise names exactly):`,
       JSON.stringify(skeletonForPrompt),
+      ...(feedbackText ? [``, feedbackText] : []),
       ``,
       `Generate this athlete's personal layer.`,
     ].join("\n"),
     toolName: "record_member_layer",
     toolDescription: "Record this athlete's personal layer within the group's shared program.",
-    inputSchema: memberLayerJsonSchema,
-    validator: memberLayerSchema,
-    maxTokens: 4000,
+    validator: memberLayerWithFeedbackSchema,
+    maxTokens: notes.length ? 6000 : 4000,
   });
+  const { settlements, stored: answeredFeedback } = settleNotes(notes, feedbackResponses);
 
   const changeSummary = decision.mode === "advance"
     ? [
@@ -409,14 +423,17 @@ export async function runGenerateGroupProgram(
       ? [REBUILD_CHANGE_NOTE, ...(memberLayer.currentState?.highlights ?? [])]
       : undefined;
 
-  // Stored on the member doc (program.html's "What changed" box reads it
-  // there); set() replaces the whole doc, so a later run without one clears it.
+  // Stored on the member doc (program.html's "What changed" box reads it and
+  // the feedback answers there); set() replaces the whole doc, so a later run
+  // without them clears them.
   // groupProgramId: the shared program this layer was written against, so the
   // summary isn't shown once another member's run has replaced that program.
   await commitProgramGeneration(uid, opts?.placeholder, async (tx) => {
+    await settleNotesInTransaction(db, tx, uid, notes, settlements, groupProgramRef!.id);
     tx.set(db.doc(`groups/${groupId}/members/${uid}`), {
       ...memberLayer,
       ...(changeSummary ? { changeSummary } : {}),
+      ...(answeredFeedback.length ? { feedbackResponses: answeredFeedback } : {}),
       groupProgramId: groupProgramRef!.id,
       profileSnapshot: athlete,
       inputsReadAt,

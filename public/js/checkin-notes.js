@@ -2,7 +2,7 @@
 // plan update, take one back before it's used, and answer the follow-up on
 // an ongoing one ("Still bothering you?"). Notes are written only by the
 // functions in functions/src/feedback/feedbackNotes.ts; this page listens to
-// them. Personal plans only: a group plan is written for the whole group.
+// them. On a group plan, the member's own layer works around them.
 import { collection, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
 import { db, functions } from "./firebase-init.js";
@@ -21,7 +21,6 @@ const $ = (id) => document.getElementById(id);
  * waiting for the next update, which counts as something new for it.
  */
 export async function initCheckinNotes(uid, summary, { onPendingChange } = {}) {
-  if (summary?.activeProgramSource === "group" && summary?.groupId) return;
   const section = $("feedbackSection");
   section.style.display = "";
 

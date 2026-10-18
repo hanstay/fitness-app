@@ -4,7 +4,6 @@
 // note for the next plan update; tapping another answer changes it, and
 // tapping the chosen one again takes it back. What the update did with each
 // answer shows in What changed on the Program page, not here.
-// Personal plans only, as with notes.
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
 import { functions } from "./firebase-init.js";
 import { PAIN_SAFETY, errorText } from "./plan-feedback.js";
@@ -26,26 +25,25 @@ const clock = () => {
 let questions = new Map(); // key → question, as last loaded
 let onImport = () => {};
 let loading = null;
-let personal = false; // initCheckinQuestions found a personal plan
+let started = false; // initCheckinQuestions has run
 
 /**
- * Show the section for a personal plan and load its questions. onImportNow
+ * Load the questions (the section shows once there are some). onImportNow
  * opens the Hevy import (the "Import now" answer).
  */
-export function initCheckinQuestions(summary, { onImportNow, load = true } = {}) {
-  if (summary?.activeProgramSource === "group" && summary?.groupId) return;
+export function initCheckinQuestions({ onImportNow, load = true } = {}) {
   onImport = onImportNow ?? onImport;
   $("weekMoreBtn").addEventListener("click", () => {
     $("weekMore").hidden = !$("weekMore").hidden;
     renderMoreButton();
   });
-  personal = true;
+  started = true;
   if (load) refreshCheckinQuestions();
 }
 
 /** Reload after new data comes in (a Hevy import or an intervals.icu sync). */
 export async function refreshCheckinQuestions() {
-  if (!personal) return;
+  if (!started) return;
   if (loading) return loading;
   loading = (async () => {
     try {

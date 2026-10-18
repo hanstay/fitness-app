@@ -124,8 +124,27 @@ describe("check-in questions", () => {
     await expect(call(answerCheckinQuestion, "q5", { key: q.key, answerId: "once", today: TODAY })).rejects.toThrow(/plenty/);
   });
 
-  it("isn't available on a group plan", async () => {
-    await seed("q6", { activeProgramSource: "group", groupId: "g1" });
-    await expect(call(getCheckinQuestions, "q6", { today: TODAY })).rejects.toThrow(/group plans/);
+  it("compares a group member's logs with the group's sessions, read when their own layer was written", async () => {
+    const day = daysAgo(3);
+    await db.doc("users/q6").set({ uid: "q6", athlete: { goal: "Get stronger" } });
+    await db.doc("groups/g1").set({ memberUids: ["q6"], fixedSessions: [] });
+    await db.doc("groups/g1/programs/p1").set({
+      status: "active", createdAt: Timestamp.fromMillis(Date.now() - 20 * 86400000),
+      sessions: [{ day: weekdayOf(day), label: "Lower", focus_note: null, exercises: [ex("Squat (Barbell)")] }],
+    });
+    await db.doc("groups/g1/members/q6").set({ groupProgramId: "p1", inputsReadAt: Timestamp.fromMillis(Date.now() - 6 * 86400000) });
+    await db.doc("users/q6/state/summary").set({
+      activeProgramSource: "group", groupId: "g1",
+      integrationsStatus: { hevy: { csvUploaded: true, lastSessionDate: day } },
+    });
+    await db.doc("users/q6/strengthSessions/s1").set({
+      date: day, title: "Lower", start_time: `${day} 18:00`, end_time: `${day} 19:00`, source: "hevy",
+      exercises: [{ name: "Goblet Squat", sets: [0, 1, 2].map((index) => ({ index, type: "normal", weight_kg: 30, reps: 10, distance_km: null, duration_seconds: null, rpe: null })) }],
+    });
+
+    const [q] = (await call<Questions>(getCheckinQuestions, "q6", { today: TODAY })).week;
+    expect(q.text).toBe(`You did Goblet Squat instead of Squat (Barbell) on ${weekdayOf(day)}. Why?`);
+    const { noteId } = await call<{ noteId: string }>(answerCheckinQuestion, "q6", { key: q.key, answerId: "once", today: TODAY });
+    expect((await db.doc(`users/q6/feedbackNotes/${noteId}`).get()).get("status")).toBe("pending");
   });
 });

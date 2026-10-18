@@ -1,6 +1,7 @@
 // The Program page's "Not right?" on an exercise: swap it for an
 // AI-suggested alternative (a bottom sheet), undo a swap, or leave a note for
-// the next check-in. Swaps are made and undone by the functions in
+// the next check-in. A group member only gets the note: the group's
+// exercises are shared, so their own update works around it instead. Swaps are made and undone by the functions in
 // functions/src/feedback/exerciseSwap.ts, which edit the current program doc;
 // the page re-reads it afterwards (`onChanged`).
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
@@ -16,10 +17,13 @@ export function swapAt(program, si, ei) {
   return (program.swaps || []).find((s) => s.sessionIndex === si && s.exerciseIndex === ei && s.to?.name === ex.name) ?? null;
 }
 
-/** The card's extra lines: the swapped-from pill (with Undo) and the "Not right?" button and its menu. */
-export function exerciseActionsHtml(program, si, ei, day) {
+/**
+ * The card's extra lines: the swapped-from pill (with Undo) and the "Not
+ * right?" button and its menu. canSwap: false leaves only the note.
+ */
+export function exerciseActionsHtml(program, si, ei, day, { canSwap = true } = {}) {
   const ex = program.sessions[si].exercises[ei];
-  const swap = swapAt(program, si, ei);
+  const swap = canSwap ? swapAt(program, si, ei) : null;
   const note = `checkin.html?${new URLSearchParams({ exercise: ex.name, day })}#feedback`;
   return `
     ${swap ? `<div class="sub swapped"><span class="pill">Swapped from ${esc(swap.from.name)}${swap.scope === "this_week" ? " this week" : ""}
@@ -27,7 +31,7 @@ export function exerciseActionsHtml(program, si, ei, day) {
     <div class="ex-actions">
       <button class="link-btn" type="button" data-more aria-expanded="false">Not right? ▾</button>
       <div class="ex-menu" hidden>
-        <button class="btn secondary" type="button" data-swap="${si}:${ei}">Swap it</button>
+        ${canSwap ? `<button class="btn secondary" type="button" data-swap="${si}:${ei}">Swap it</button>` : ""}
         <a class="btn secondary" href="${esc(note)}">Note for check-in</a>
       </div>
     </div>`;

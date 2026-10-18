@@ -2,28 +2,19 @@
 // one for the next plan update, take back one that hasn't been used yet, and
 // answer the follow-up on an ongoing one. Notes live at
 // users/{uid}/feedbackNotes/{id}, readable by their owner and written only
-// here and by the plan update (generateProgram.ts).
+// here and by the plan update (generateProgram.ts, or groupProgram.ts for a
+// group member, whose own layer works around them).
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import {
   normalizeNoteInput, MAX_PENDING_NOTES, MAX_ACTIVE_NOTES, FOLLOW_UP_OUTCOMES, FollowUpOutcome, followUpChange,
 } from "../lib/planFeedback";
 
-// Group plans are written for the whole group, and a note can't change one
-// member's copy of it yet, so notes are for personal plans only.
-async function requirePersonalPlan(uid: string): Promise<void> {
-  const summary = (await getFirestore().doc(`users/${uid}/state/summary`).get()).data() ?? {};
-  if (summary.activeProgramSource === "group" && summary.groupId) {
-    throw new HttpsError("failed-precondition", "Notes aren't available on group plans yet.");
-  }
-}
-
 export const addFeedbackNote = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
   const uid = request.auth.uid;
   const normalized = normalizeNoteInput(request.data);
   if ("error" in normalized) throw new HttpsError("invalid-argument", normalized.error);
-  await requirePersonalPlan(uid);
 
   const db = getFirestore();
   const notes = db.collection(`users/${uid}/feedbackNotes`);

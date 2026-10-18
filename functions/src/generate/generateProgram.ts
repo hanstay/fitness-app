@@ -16,7 +16,7 @@ import { gatherGroundingData } from "./groundingData";
 import { runGenerateGroupProgram } from "./groupProgram";
 import { commitProgramGeneration } from "./settleGeneration";
 import {
-  FEEDBACK_INSTRUCTIONS, feedbackResponsesJsonSchema, feedbackResponsesSchema, formatFeedbackBlock, settleNotes,
+  feedbackResponsesSchema, formatFeedbackBlock, settleNotes, withFeedbackResponses,
   FeedbackResponses,
 } from "../lib/planFeedback";
 import { SwapRecord, formatSwapsBlock, settleSwapsForUpdate, swapsStillInWeek } from "../lib/exerciseSwap";
@@ -448,16 +448,8 @@ export async function runGenerateProgram(
     formatSwapsBlock(settledSwaps.kept.filter((s) => !(s.noteId && resolvedNotes.has(s.noteId)))),
   ].filter(Boolean).join("\n\n");
   // With notes, the call that writes the week also answers each one.
-  const withFeedback = (system: string, jsonSchema: Record<string, unknown>) => notes.length
-    ? {
-        system: `${system}\n\n${FEEDBACK_INSTRUCTIONS}`,
-        inputSchema: {
-          ...jsonSchema,
-          properties: { ...(jsonSchema.properties as object), feedbackResponses: feedbackResponsesJsonSchema },
-          required: [...(jsonSchema.required as string[]), "feedbackResponses"],
-        },
-      }
-    : { system, inputSchema: jsonSchema };
+  const withFeedback = (system: string, jsonSchema: Record<string, unknown>) =>
+    withFeedbackResponses(system, jsonSchema, notes.length > 0);
 
   let mergedProgram: ProgramOutput;
   let changeSummary: string[] | undefined;

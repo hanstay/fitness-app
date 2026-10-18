@@ -210,9 +210,11 @@
       if (ex.load_note) bits.push(esc(ex.load_note));
       return bits.length ? `<div class="load">${bits.join(" · ")}</div>` : "";
     };
-    // Swaps and notes are for the athlete's own current plan (a group plan is
-    // written for the whole group).
-    const canSwap = !(summary?.activeProgramSource === "group" && summary?.groupId) && planId === summary?.currentProgramId;
+    // Swaps are for the athlete's own current plan (a group plan's exercises
+    // are shared); a group member gets "Not right?" for a check-in note only.
+    const onGroupPlan = summary?.activeProgramSource === "group" && !!summary?.groupId;
+    const canSwap = !onGroupPlan && planId === summary?.currentProgramId;
+    const canNote = canSwap || onGroupPlan;
     const exHtml = ({ ex, si, ei, day }, i) => `<div class="ex-card">
       <div class="row">
         <span class="order">${i + 1}</span>
@@ -221,7 +223,7 @@
       <div class="sets">${ex.sets} × ${esc(ex.reps)}</div>
       ${loadLine(ex)}
       ${ex.substitution_note ? `<div class="sub"><span class="pill">Sub: ${esc(ex.substitution_note)}</span></div>` : ""}
-      ${canSwap ? exerciseActionsHtml(p, si, ei, day) : ""}
+      ${canNote ? exerciseActionsHtml(p, si, ei, day, { canSwap }) : ""}
     </div>`;
 
     // ---- What changed in the latest update, until closed ----
@@ -331,7 +333,7 @@
           ${exs.length
             ? `<div class="ex-grid">${exs.map(exHtml).join("")}</div>`
             : `<p class="muted small" style="margin-top:8px">Rest day — no exercises scheduled.</p>`}`;
-        if (canSwap) {
+        if (canNote) {
           bindExerciseActions(dayDetail, {
             programId: planId,
             program: p,

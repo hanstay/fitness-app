@@ -338,13 +338,13 @@ try {
   showError("Couldn't load your intervals.icu status — Hevy import and program updates below still work.");
 }
 
-// Without the summary it can't tell a group plan (no notes or questions) from a personal one.
+// Without the summary there's no plan to list exercises from or compare the logs with.
 if (summary) {
   initCheckinNotes(user.uid, summary, {
     onPendingChange: (count) => { pendingFeedback = count; renderGenerationStatus(); },
   }).catch((err) => console.error("[checkin] notes section failed to load", err));
   // With intervals.icu connected, the questions wait for the sync below.
-  initCheckinQuestions(summary, {
+  initCheckinQuestions({
     load: !summary.integrationsStatus?.intervalsIcu?.connected,
     onImportNow: () => {
       expandSection("hevySection");

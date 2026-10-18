@@ -1,15 +1,17 @@
 // The check-in's "Your week" questions (see lib/checkinQuestions.ts): load
 // the plan and the last few weeks of logs, build the questions, and save an
 // answer as a feedback note, which the next plan update reads like any other
-// (lib/planFeedback.ts) and answers in What changed. Personal plans only, as
-// with notes: a group plan is written for the whole group.
+// (lib/planFeedback.ts) and answers in What changed. On a group plan the
+// questions compare the member's logs with the group's sessions, and their
+// own layer acts on the answers (generate/groupProgram.ts).
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { getFirestore, FieldValue, Firestore } from "firebase-admin/firestore";
+import { getFirestore, FieldValue, Firestore, DocumentData } from "firebase-admin/firestore";
 import {
   buildCheckinQuestions, answerGuidance, CheckinQuestion, CheckinQuestions, LoggedActivity, CheckinPlan, MAX_SHOWN,
 } from "../lib/checkinQuestions";
 import { addDays, daysBetween } from "../lib/checkinFormat";
 import type { StrengthSession } from "../lib/hevyDerivedData";
+import { applySessionLoads } from "../lib/sessionLoads";
 import { FeedbackTag, NOTE_TEXT_MAX } from "../lib/planFeedback";
 
 /** How far back the logs are read: the detail week plus 4 weeks of patterns. */
@@ -52,23 +54,60 @@ interface Loaded {
   answered: Map<string, { noteId: string; status: string; answerId: string; followUpId: string | null }>;
 }
 
+/** The plan the questions compare the logs with, and when it read them. */
+interface PlanForQuestions {
+  plan: CheckinPlan | null;
+  /** When the plan last read the logs (see plan-update-readiness.js). */
+  readAt: { toMillis?: () => number } | null;
+  /** When its block started, for patterns. */
+  since: { toMillis?: () => number } | null;
+  fixedSessions: Array<{ day: string; activity: string }>;
+}
+
+async function personalPlan(db: Firestore, uid: string, summary: DocumentData): Promise<PlanForQuestions> {
+  const [programSnap, userSnap] = await Promise.all([
+    summary.currentProgramId ? db.doc(`users/${uid}/programs/${summary.currentProgramId}`).get() : Promise.resolve(null),
+    db.doc(`users/${uid}`).get(),
+  ]);
+  const program = programSnap?.exists ? programSnap.data() ?? null : null;
+  return {
+    plan: program as CheckinPlan | null,
+    // Older plans only have when they were saved.
+    readAt: program?.inputsReadAt ?? program?.createdAt ?? null,
+    since: program?.blockStartedAt ?? program?.createdAt ?? null,
+    fixedSessions: userSnap.data()?.athlete?.fixed_sessions ?? [],
+  };
+}
+
+/** The group's sessions with this member's loads, read when their own layer was last written. */
+async function groupPlan(db: Firestore, uid: string, groupId: string): Promise<PlanForQuestions> {
+  const [groupSnap, programSnap, memberSnap] = await Promise.all([
+    db.doc(`groups/${groupId}`).get(),
+    db.collection(`groups/${groupId}/programs`).where("status", "==", "active").limit(1).get(),
+    db.doc(`groups/${groupId}/members/${uid}`).get(),
+  ]);
+  const shared = programSnap.docs[0]?.data() ?? null;
+  const member = memberSnap.data() ?? null;
+  return {
+    plan: shared
+      ? { sessions: Array.isArray(member?.sessionLoads) ? applySessionLoads(shared.sessions, member.sessionLoads) : shared.sessions }
+      : null,
+    // A member's first update hasn't read their logs yet: the shared plan's start stands in.
+    readAt: member?.inputsReadAt ?? shared?.createdAt ?? null,
+    since: shared?.blockStartedAt ?? shared?.createdAt ?? null,
+    fixedSessions: groupSnap.data()?.fixedSessions ?? [],
+  };
+}
+
 async function loadQuestions(db: Firestore, uid: string, clock: AthleteClock): Promise<Loaded> {
   const { today } = clock;
   const summary = (await db.doc(`users/${uid}/state/summary`).get()).data() ?? {};
-  if (summary.activeProgramSource === "group" && summary.groupId) {
-    throw new HttpsError("failed-precondition", "Check-in questions aren't available on group plans yet.");
-  }
   const since = addDays(today, -HISTORY_DAYS);
-  const [programSnap, userSnap, strengthSnap, activitySnap] = await Promise.all([
-    summary.currentProgramId ? db.doc(`users/${uid}/programs/${summary.currentProgramId}`).get() : Promise.resolve(null),
-    db.doc(`users/${uid}`).get(),
+  const [current, strengthSnap, activitySnap] = await Promise.all([
+    summary.activeProgramSource === "group" && summary.groupId ? groupPlan(db, uid, summary.groupId) : personalPlan(db, uid, summary),
     db.collection(`users/${uid}/strengthSessions`).where("date", ">=", since).get(),
     db.collection(`users/${uid}/activities`).where("date", ">=", since).get(),
   ]);
-  const program = programSnap?.exists ? programSnap.data() ?? null : null;
-  // The time the plan read the logs (see plan-update-readiness.js); older
-  // plans only have when they were saved.
-  const planReadDate = localDate(program?.inputsReadAt ?? program?.createdAt, clock);
   const hevy = summary.integrationsStatus?.hevy ?? {};
   const strength = strengthSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as StrengthSession);
   const activities: LoggedActivity[] = activitySnap.docs.map((d) => {
@@ -81,10 +120,10 @@ async function loadQuestions(db: Firestore, uid: string, clock: AthleteClock): P
 
   const questions = buildCheckinQuestions({
     today,
-    planReadDate,
-    planSince: localDate(program?.blockStartedAt ?? program?.createdAt, clock),
-    plan: program as CheckinPlan | null,
-    fixedSessions: userSnap.data()?.athlete?.fixed_sessions ?? [],
+    planReadDate: localDate(current.readAt, clock),
+    planSince: localDate(current.since, clock),
+    plan: current.plan,
+    fixedSessions: current.fixedSessions,
     strength,
     activities,
     tsb: typeof summary.wellness?.tsb === "number" ? summary.wellness.tsb : null,
