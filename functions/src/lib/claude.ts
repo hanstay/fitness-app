@@ -23,6 +23,17 @@ function getClient(): Anthropic {
 // to change it here.
 export const MODEL = "claude-sonnet-5-5";
 
+// For small, narrow calls where speed and cost matter more than depth (the
+// Program page's exercise-swap suggestions).
+export const FAST_MODEL = "claude-haiku-5-5";
+
+// The lowest thinking setting each model accepts: Sonnet 5.5 turns thinking
+// off with "between_tools" (it rejects "disabled"), Haiku 5.5 with
+// "disabled". The SDK's types predate "between_tools", hence the cast.
+function lowestThinking(model: string): Anthropic.Messages.ThinkingConfigParam {
+  return (model.startsWith("claude-haiku") ? { type: "disabled" } : { type: "between_tools" }) as unknown as Anthropic.Messages.ThinkingConfigParam;
+}
+
 // Ceiling for the larger max_tokens a truncated call is retried with. Kept
 // under the non-streaming request limits the SDK enforces.
 const MAX_TOKENS_CEILING = 16000;
@@ -112,8 +123,7 @@ export async function extractStructuredJson<T>(params: ExtractJsonParams<T>): Pr
         tool_choice: { type: "auto" },
         // Lowest thinking setting: no extended thinking eating into
         // max_tokens, matching how these calls ran on the previous model.
-        // The SDK's types predate "between_tools", hence the cast.
-        thinking: { type: "between_tools" } as unknown as Anthropic.Messages.ThinkingConfigParam,
+        thinking: lowestThinking(params.model ?? MODEL),
         messages,
       },
       // SDK default is 2 retries — too thin once many users onboard at once

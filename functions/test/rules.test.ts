@@ -123,6 +123,7 @@ describe("Functions-only collections reject client writes, even for the owner", 
     ["activities/a1", { type: "Run" }],
     ["strengthSessions/s1", { date: "2026-08-10" }],
     ["checkins/c1", { summary: "..." }],
+    ["feedbackNotes/n1", { status: "pending" }],
   ])("owner cannot write users/{uid}/%s", async (subpath) => {
     const owner = testEnv.authenticatedContext(OWNER_UID);
     await assertFails(setDoc(doc(owner.firestore(), `users/${OWNER_UID}/${subpath}`), { x: 1 }));
@@ -136,6 +137,7 @@ describe("Functions-only collections reject client writes, even for the owner", 
     "activities/a1",
     "strengthSessions/s1",
     "checkins/c1",
+    "feedbackNotes/n1",
   ])("owner CAN read users/{uid}/%s once seeded", async (subpath) => {
     await seedAsAdmin(`users/${OWNER_UID}/${subpath}`, { x: 1 });
     const owner = testEnv.authenticatedContext(OWNER_UID);
