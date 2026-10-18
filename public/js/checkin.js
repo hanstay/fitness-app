@@ -11,7 +11,7 @@ import { requireOnboarded } from "./auth-guard.js";
 import { connectIntervalsIcuViaOAuth } from "./intervals-oauth.js";
 import { bindMessages } from "./ui-messages.js";
 import { isStale } from "./plan-updates.js";
-import { initCheckinNotes } from "./checkin-notes.js";
+import { initCheckinNotes, followUpsToSend, clearFollowUpPicks } from "./checkin-notes.js";
 import { initCheckinQuestions, refreshCheckinQuestions } from "./checkin-questions.js";
 import { loadCurrentProgram } from "./current-program.js";
 import { planUpdateReadiness } from "./plan-update-readiness.js";
@@ -218,8 +218,10 @@ regenBtn.addEventListener("click", async () => {
   renderGenerationStatus();
   try {
     const force = forceRegenCheck.checked;
-    const result = await httpsCallable(functions, "queueProgramGeneration")({ force });
+    // Follow-up answers are only picked on the page until now.
+    const result = await httpsCallable(functions, "queueProgramGeneration")({ force, followUps: followUpsToSend() });
     followingId = result.data.programId;
+    clearFollowUpPicks();
   } catch (err) {
     const msg = String(err?.message || err);
     const isPrecondition = /first|required|Complete/i.test(msg);
