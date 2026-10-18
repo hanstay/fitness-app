@@ -6,7 +6,7 @@
 // (generate/groupProgram.ts).
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { getFirestore, FieldValue, Firestore, DocumentData } from "firebase-admin/firestore";
-import { buildCheckinQuestions, answerGuidance, planHasLifts, CheckinQuestion, CheckinInput } from "../lib/checkinQuestions";
+import { buildCheckinQuestions, answerGuidance, planHasLifts, questionKindOf, CheckinQuestion, CheckinInput } from "../lib/checkinQuestions";
 import { daysBetween } from "../lib/checkinFormat";
 import { storedSessionDate } from "../lib/hevyAnalyzer";
 import { NOTE_TEXT_MAX } from "../lib/planFeedback";
@@ -81,17 +81,22 @@ async function groupPlan(db: Firestore, uid: string, groupId: string): Promise<P
 
 async function loadQuestions(db: Firestore, uid: string, clock: AthleteClock): Promise<Loaded> {
   const summary = (await db.doc(`users/${uid}/state/summary`).get()).data() ?? {};
-  const [current, recent] = await Promise.all([
+  const [current, recent, activity] = await Promise.all([
     summary.activeProgramSource === "group" && summary.groupId ? groupPlan(db, uid, summary.groupId) : personalPlan(db, uid, summary),
     db.collection(`users/${uid}/strengthSessions`).orderBy("date", "desc").limit(RECENT_WORKOUTS).get(),
+    db.collection(`users/${uid}/activities`).orderBy("date", "desc").limit(1).get(),
   ]);
   const newest = recent.docs.map((d) => storedSessionDate(d.get("start_time"), d.get("date"))).sort().pop() ?? null;
+  const newestActivity = asDate(activity.docs[0]?.get("date"), "") || null;
+  const hevy = hevyStatus(summary.integrationsStatus?.hevy ?? {}, newest);
   const questions = buildCheckinQuestions({
     today: clock.today,
     planReadDate: localDate(current.readAt, clock),
     planHasLifts: current.hasLifts,
-    hevy: hevyStatus(summary.integrationsStatus?.hevy ?? {}, newest),
+    hevy,
+    lastTrainedDate: [hevy.lastSessionDate, newestActivity].filter((d): d is string => d != null).sort().pop() ?? null,
   });
+  await dropStaleAnswers(db, uid, questions);
 
   const answered: Loaded["answered"] = new Map();
   const keys = questions.map((q) => q.key);
@@ -105,6 +110,22 @@ async function loadQuestions(db: Firestore, uid: string, clock: AthleteClock): P
     }
   }
   return { questions, answered };
+}
+
+/**
+ * Takes back waiting answers to a question that's no longer asked (Welcome
+ * back, once workouts from the gap are imported), so a premise the logs
+ * have since disproved doesn't reach the next update.
+ */
+async function dropStaleAnswers(db: Firestore, uid: string, questions: CheckinQuestion[]): Promise<void> {
+  const asked = new Set(questions.map((q) => q.kind as string));
+  const waiting = await db.collection(`users/${uid}/feedbackNotes`)
+    .where("source", "==", "checkin_question").where("status", "==", "pending").get();
+  const stale = waiting.docs.filter((d) => typeof d.get("questionKey") === "string" && !asked.has(questionKindOf(d.get("questionKey"))));
+  if (!stale.length) return;
+  const batch = db.batch();
+  stale.forEach((d) => batch.delete(d.ref));
+  await batch.commit();
 }
 
 /**

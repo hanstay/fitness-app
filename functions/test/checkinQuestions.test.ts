@@ -11,6 +11,7 @@ const input = (o: Partial<CheckinInput> = {}): CheckinInput => ({
   planReadDate: READ,
   planHasLifts: true,
   hevy: { used: true, lastSessionDate: "2026-10-16" },
+  lastTrainedDate: null,
   ...o,
 });
 
@@ -51,6 +52,11 @@ describe("buildCheckinQuestions", () => {
     expect(q.answers.find((a) => a.id === "injured")?.details).toBe(true);
     expect(answerGuidance(q, "holiday")).toBe("Back after 4 weeks away on holiday: ease them back in with a lighter first week.");
     expect(answerGuidance(q, "made-up")).toBeNull();
+  });
+
+  it("doesn't welcome back when training was logged since the plan last read the logs", () => {
+    expect(buildCheckinQuestions(input({ planReadDate: "2026-09-20", lastTrainedDate: "2026-10-02" }))).toEqual([]);
+    expect(kinds(buildCheckinQuestions(input({ planReadDate: "2026-09-20", lastTrainedDate: "2026-09-20" })))).toEqual(["long_gap"]);
   });
 
   it("asks about missing Hevy data once a few days have passed with nothing new", () => {

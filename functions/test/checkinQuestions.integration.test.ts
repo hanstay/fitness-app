@@ -25,15 +25,15 @@ const ago = (days: number) => Timestamp.fromMillis(Date.now() - days * 86400000)
 
 const lower = { day: "Monday", label: "Lower", focus_note: null, exercises: [{ name: "Squat (Barbell)", sets: 3, reps: "6-8", rir: "2" }] };
 
-/** A plan read `readDaysAgo` days ago, with Hevy last imported `hevyDaysAgo` days ago. */
-async function seed(uid: string, readDaysAgo: number, hevyDaysAgo: number) {
+/** A plan read `readDaysAgo` days ago, with Hevy last imported `hevyDaysAgo` days ago (null: Hevy not used). */
+async function seed(uid: string, readDaysAgo: number, hevyDaysAgo: number | null) {
   await db.doc(`users/${uid}`).set({ uid, athlete: { goal: "Get stronger" } });
   const program = db.collection(`users/${uid}/programs`).doc();
   await program.set({ status: "active", inputsReadAt: ago(readDaysAgo), sessions: [lower] });
   await db.doc(`users/${uid}/state/summary`).set({
     activeProgramSource: "personal",
     currentProgramId: program.id,
-    integrationsStatus: { hevy: { csvUploaded: true, lastSessionDate: daysAgo(hevyDaysAgo) } },
+    integrationsStatus: { hevy: hevyDaysAgo == null ? {} : { csvUploaded: true, lastSessionDate: daysAgo(hevyDaysAgo) } },
   });
 }
 
@@ -43,7 +43,7 @@ beforeEach(async () => {
 
 describe("check-in questions", () => {
   it("asks Welcome back, saves the answer as a note for the update, and lets it be changed or taken back", async () => {
-    await seed("q1", 30, 1);
+    await seed("q1", 30, null);
     const first = await call<Questions>(getCheckinQuestions, "q1", { today: TODAY });
     expect(first.questions.map((q) => q.kind)).toEqual(["long_gap"]);
     const q = first.questions[0];
@@ -71,7 +71,7 @@ describe("check-in questions", () => {
   });
 
   it("drops a question answered in an earlier check-in", async () => {
-    await seed("q3", 30, 1);
+    await seed("q3", 30, null);
     const [q] = (await call<Questions>(getCheckinQuestions, "q3", { today: TODAY })).questions;
     const { noteId } = await call<{ noteId: string }>(answerCheckinQuestion, "q3", { key: q.key, answerId: "busy", today: TODAY });
     await db.doc(`users/q3/feedbackNotes/${noteId}`).update({ status: "done" }); // an update used it
@@ -81,7 +81,7 @@ describe("check-in questions", () => {
   });
 
   it("only takes the question's own answers, for questions the app asked", async () => {
-    await seed("q4", 30, 1);
+    await seed("q4", 30, null);
     const [q] = (await call<Questions>(getCheckinQuestions, "q4", { today: TODAY })).questions;
     await expect(call(answerCheckinQuestion, "q4", { key: q.key, answerId: "made-up", today: TODAY })).rejects.toThrow(/Unknown answer/);
     await expect(call(answerCheckinQuestion, "q4", { key: q.key, answerId: "import", today: TODAY })).rejects.toThrow(/Unknown answer/);
@@ -99,11 +99,26 @@ describe("check-in questions", () => {
     expect((await call<Questions>(getCheckinQuestions, "q5", { today: TODAY })).questions).toEqual([]);
   });
 
+  it("doesn't welcome back after a gap with training logged, and takes back an answer the logs disprove", async () => {
+    await seed("q8", 30, null);
+    const [q] = (await call<Questions>(getCheckinQuestions, "q8", { today: TODAY })).questions;
+    expect(q.kind).toBe("long_gap");
+    await call(answerCheckinQuestion, "q8", { key: q.key, answerId: "unlogged", today: TODAY });
+    // The intervals.icu sync brings in a run from the gap.
+    await db.doc("users/q8/activities/a1").set({ date: daysAgo(3), type: "Run" });
+    expect((await call<Questions>(getCheckinQuestions, "q8", { today: TODAY })).questions).toEqual([]);
+    expect((await db.collection("users/q8/feedbackNotes").get()).size).toBe(0);
+
+    // The same for a Hevy import from the gap.
+    await seed("q9", 30, 2);
+    expect((await call<Questions>(getCheckinQuestions, "q9", { today: TODAY })).questions).toEqual([]);
+  });
+
   it("limits answers waiting for one update", async () => {
-    await seed("q6", 30, 1);
+    await seed("q6", 30, null);
     const [q] = (await call<Questions>(getCheckinQuestions, "q6", { today: TODAY })).questions;
     for (let i = 0; i < MAX_PENDING_ANSWERS; i++) {
-      await db.collection("users/q6/feedbackNotes").add({ status: "pending", source: "checkin_question", tags: ["checkin"], questionKey: `other|${i}` });
+      await db.collection("users/q6/feedbackNotes").add({ status: "pending", source: "checkin_question", tags: ["checkin"], questionKey: `long_gap|2020-01-${10 + i}` });
     }
     await expect(call(answerCheckinQuestion, "q6", { key: q.key, answerId: "busy", today: TODAY })).rejects.toThrow(/plenty/);
   });
@@ -114,7 +129,7 @@ describe("check-in questions", () => {
     await db.doc("groups/g7/programs/p1").set({ status: "active", createdAt: ago(56), sessions: [lower] });
     await db.doc("users/q7/state/summary").set({
       activeProgramSource: "group", groupId: "g7",
-      integrationsStatus: { hevy: { csvUploaded: true, lastSessionDate: daysAgo(1) } },
+      integrationsStatus: {},
     });
     // Written by a backend from before inputsReadAt.
     await db.doc("groups/g7/members/q7").set({ groupProgramId: "p1", updatedAt: ago(6) });

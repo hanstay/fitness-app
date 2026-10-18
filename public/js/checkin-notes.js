@@ -7,11 +7,10 @@
 import { collection, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
 import { db, functions } from "./firebase-init.js";
-import { showToast } from "./ui-messages.js";
 import { loadCurrentProgram } from "./current-program.js";
 import { normalizeDay } from "./days.js";
 import {
-  MAX_PENDING_NOTES, MAX_ACTIVE_NOTES, FEEDBACK_TAGS, tagLabel, isQuestionOnly, PAIN_SAFETY, noteTitle, followUpChoices, followUpDone, errorText,
+  MAX_PENDING_NOTES, MAX_ACTIVE_NOTES, FEEDBACK_TAGS, tagLabel, isQuestionOnly, PAIN_SAFETY, noteTitle, followUpChoices, followUpQuestion, followUpDone, errorText,
 } from "./plan-feedback.js";
 
 const CHECKIN_ANSWER = "checkin_question"; // a note saved by answering a check-in question (checkin-questions.js)
@@ -252,52 +251,47 @@ function renderPending(notes) {
   }));
 }
 
-/* ---------- "Still bothering you?" ---------- */
+/* ---------- "How does it feel now?" ---------- */
 
-// A note answered since the update last used it shows the answer instead of
-// asking again; the next update will act on it.
-const answered = (n) => n.status === "resolved" ||
-  (n.lastFollowUp && (n.followedUpAt?.toMillis?.() ?? 0) > (n.handledAt?.toMillis?.() ?? 0));
-
-let followUpNotes = new Map();
+// The answer given since the update last used the note, which the next
+// update will act on; until then it can be changed.
+function followUpAnswer(n) {
+  if (n.status === "resolved") return "better";
+  const since = (n.followedUpAt?.toMillis?.() ?? 0) > (n.handledAt?.toMillis?.() ?? 0);
+  return since ? n.lastFollowUp ?? null : null;
+}
 
 function renderFollowUps(notes) {
   const el = $("followUps");
   if (!notes.length) { el.innerHTML = ""; return; }
-  // One collapsed line, so a few long-running notes don't crowd the page;
-  // answered ones drop out of the list until the next update asks again.
-  const toCheck = notes.filter((n) => !answered(n));
-  followUpNotes = new Map(notes.map((n) => [n.id, n]));
-  const wasOpen = el.querySelector("details")?.open ?? false;
-  const things = notes.length === 1 ? "1 thing" : `${notes.length} things`;
-  const summary = toCheck.length
-    ? `${toCheck.length === 1 ? "1 to check" : `${toCheck.length} to check`}`
-    : "all checked for this week";
-  el.innerHTML = `<details class="disclosure fb-followups"${wasOpen ? " open" : ""}>
-    <summary><span><span class="disclosure-title">Your plan is working around ${things}</span>
-      <span class="disclosure-hint">${esc(summary)}</span></span></summary>
-    <div class="disclosure-body">${toCheck.map((n) => {
-      const pain = (n.tags || []).includes("pain");
-      return `<div class="fb-row fb-compact">
-        <div>
-          <div class="fb-title">${esc(noteTitle(n))}</div>
-          <div class="fb-meta">${esc((n.tags || []).map(tagLabel).join(", "))}</div>
-        </div>
+  // Every note stays on the list with its answer showing, so an answer can
+  // be changed until the plan is updated.
+  el.innerHTML = `<div class="fb-followups">
+    <p class="fb-list-head">Your plan is working around ${notes.length === 1 ? "this" : "these"}</p>
+    ${notes.map((n) => {
+      const chosen = followUpAnswer(n);
+      const title = noteTitle(n);
+      return `<div class="fb-compact" role="group" aria-label="${esc(title)}">
+        <div class="fb-title">${esc(title)}</div>
+        <div class="fb-meta">${esc((n.tags || []).map(tagLabel).join(", "))}</div>
+        ${n.response?.text ? `<p class="fb-text muted">Your last update: ${esc(n.response.text)}</p>` : ""}
+        <p class="fb-question">${esc(followUpQuestion(n))}</p>
         <div class="fb-answers">${followUpChoices(n).map(([outcome, label]) =>
-          `<button class="btn secondary" type="button" data-note="${esc(n.id)}" data-outcome="${outcome}">${esc(label)}</button>`).join("")}
-          ${pain ? `<button class="link-btn" type="button" data-note="${esc(n.id)}" data-outcome="worse">Worse?</button>` : ""}</div>
+          `<button class="btn${outcome === chosen ? "" : " secondary"}" type="button" aria-pressed="${outcome === chosen}"
+            data-note="${esc(n.id)}" data-outcome="${outcome}">${esc(label)}</button>`).join("")}</div>
+        ${chosen ? `<p class="fb-done small">${esc(followUpDone(n, chosen))} You can change this until you update your plan.</p>` : ""}
       </div>`;
-    }).join("") || `<p class="muted small" style="margin:0">Thanks. Your next update will use your answers.</p>`}</div>
-  </details>`;
+    }).join("")}
+  </div>`;
   el.querySelectorAll("[data-outcome]").forEach((btn) => btn.addEventListener("click", async () => {
-    const card = btn.closest(".fb-row");
-    card.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+    if (btn.getAttribute("aria-pressed") === "true") return;
+    const row = btn.closest(".fb-compact");
+    row.querySelectorAll("button").forEach((b) => { b.disabled = true; });
     try {
+      // The listener redraws the row with the answer chosen.
       await httpsCallable(functions, "followUpFeedbackNote")({ noteId: btn.dataset.note, outcome: btn.dataset.outcome });
-      const note = followUpNotes.get(btn.dataset.note);
-      if (note) showToast(followUpDone(note, btn.dataset.outcome), { durationMs: 6000 });
     } catch (err) {
-      card.querySelectorAll("button").forEach((b) => { b.disabled = false; });
+      row.querySelectorAll("button").forEach((b) => { b.disabled = false; });
       setNoteStatus(errorText(err));
     }
   }));

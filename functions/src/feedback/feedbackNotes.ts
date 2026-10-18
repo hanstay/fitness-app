@@ -144,7 +144,11 @@ export const updateFeedbackNoteGroup = onCall(async (request) => {
   return { ok: true };
 });
 
-/** The check-in follow-up on an ongoing note: still a problem, better, or worse. */
+/**
+ * The check-in follow-up on an ongoing note: still a problem, better, or
+ * worse. Until the next update uses it, the answer can be changed, which
+ * includes taking back "better" (a resolved note the update hasn't told).
+ */
 export const followUpFeedbackNote = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
   const outcome = request.data?.outcome as FollowUpOutcome;
@@ -152,10 +156,16 @@ export const followUpFeedbackNote = onCall(async (request) => {
   const ref = noteRef(request.auth.uid, request.data?.noteId);
   await getFirestore().runTransaction(async (tx) => {
     const snap = await tx.get(ref);
-    if (!snap.exists || snap.get("status") !== "open") {
+    const status = snap.get("status");
+    if (!snap.exists || !(status === "open" || (status === "resolved" && snap.get("announced") === false))) {
       throw new HttpsError("failed-precondition", "That note isn't waiting for a follow-up.");
     }
-    tx.update(ref, { ...followUpChange(outcome), lastFollowUp: outcome, followedUpAt: FieldValue.serverTimestamp() });
+    tx.update(ref, {
+      announced: FieldValue.delete(), // set again by "better"
+      ...followUpChange(outcome),
+      lastFollowUp: outcome,
+      followedUpAt: FieldValue.serverTimestamp(),
+    });
   });
   return { ok: true };
 });

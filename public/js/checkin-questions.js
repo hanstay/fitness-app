@@ -21,6 +21,7 @@ const clock = () => {
 let questions = []; // as last loaded
 let onImport = () => {};
 let loading = null;
+let reloadAfter = false; // refreshCheckinQuestions was called during a load
 let started = false; // initCheckinQuestions has run
 const expanded = new Set(); // answered questions opened again with "Change"
 
@@ -37,15 +38,19 @@ export function initCheckinQuestions({ onImportNow } = {}) {
   refreshCheckinQuestions();
 }
 
-/** Reload after new data comes in (a Hevy import). */
+/** Reload after new data comes in (a Hevy import or an intervals.icu sync). */
 export async function refreshCheckinQuestions() {
   if (!started) return;
-  if (loading) return loading;
+  // Data that lands mid-load needs a fresh read, so load once more after.
+  if (loading) { reloadAfter = true; return loading; }
   loading = (async () => {
     try {
-      const { data } = await httpsCallable(functions, "getCheckinQuestions")(clock());
-      questions = data.questions;
-      render();
+      do {
+        reloadAfter = false;
+        const { data } = await httpsCallable(functions, "getCheckinQuestions")(clock());
+        questions = data.questions;
+        render();
+      } while (reloadAfter);
     } catch (err) {
       console.error("[checkin] questions failed to load", err);
     } finally {

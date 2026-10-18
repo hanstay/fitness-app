@@ -145,7 +145,16 @@ describe("check-in notes", () => {
     await db.doc("users/n5/feedbackNotes/a").set({ status: "open", worse: false });
     await call(followUpFeedbackNote, "n5", { noteId: "a", outcome: "better" });
     expect((await db.doc("users/n5/feedbackNotes/a").get()).data()).toMatchObject({ status: "resolved", announced: false });
-    await expect(call(followUpFeedbackNote, "n5", { noteId: "a", outcome: "worse" })).rejects.toMatchObject({ code: "failed-precondition" });
+    // Changed before the next update: "better" taken back.
+    await call(followUpFeedbackNote, "n5", { noteId: "a", outcome: "worse" });
+    const changed = (await db.doc("users/n5/feedbackNotes/a").get()).data();
+    expect(changed).toMatchObject({ status: "open", worse: true, lastFollowUp: "worse" });
+    expect(changed).not.toHaveProperty("announced");
+    // Once the update has told it, it's settled.
+    await db.doc("users/n5/feedbackNotes/b").set({ status: "resolved", announced: true });
+    await expect(call(followUpFeedbackNote, "n5", { noteId: "b", outcome: "still" })).rejects.toMatchObject({ code: "failed-precondition" });
+    await db.doc("users/n5/feedbackNotes/c").set({ status: "done" });
+    await expect(call(followUpFeedbackNote, "n5", { noteId: "c", outcome: "still" })).rejects.toMatchObject({ code: "failed-precondition" });
   });
 });
 

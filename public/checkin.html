@@ -41,9 +41,12 @@
   .fb-row{display:flex; align-items:flex-start; gap:10px}
   .fb-row > div{flex:1; min-width:0}
   .link-btn{background:none; border:0; padding:6px 0; color:var(--accent-dark); font:inherit; font-size:.84rem; font-weight:600; cursor:pointer}
-  .fb-followups{border:1px solid var(--border); border-radius:10px; padding:0 14px; margin:0 0 14px}
-  .fb-compact{flex-direction:column; gap:6px; padding:10px 0; border-top:1px solid var(--border)}
-  .fb-compact:first-child{border-top:0; padding-top:0}
+  .fb-followups{margin:0 0 18px}
+  .fb-followups .fb-list-head{margin-top:0}
+  .fb-compact{border:1px solid var(--border); border-radius:10px; padding:12px 14px; background:var(--card); margin:0 0 10px}
+  .fb-compact .fb-text{font-size:.84rem; margin:6px 0 0}
+  .fb-question{font-size:.88rem; font-weight:600; margin:10px 0 6px}
+  .fb-done{color:var(--text-secondary); margin:8px 0 0}
   .fb-answers{display:flex; align-items:center; gap:6px; flex-wrap:wrap}
   .fb-answers .btn{padding:7px 12px; font-size:.82rem}
   .cq-card{border:1px solid var(--border); border-radius:10px; padding:12px 14px; background:var(--card); margin:0 0 10px; display:flex; flex-direction:column; gap:10px}

@@ -18,6 +18,8 @@ export interface CheckinInput {
   planHasLifts: boolean;
   /** used: Hevy is the athlete's strength log. lastSessionDate: the newest workout imported. */
   hevy: { used: boolean; lastSessionDate: string | null };
+  /** The newest training logged anywhere (a Hevy workout or an intervals.icu activity), YYYY-MM-DD. */
+  lastTrainedDate: string | null;
 }
 
 export const QUESTION_KINDS = ["long_gap", "no_new_data"] as const;
@@ -98,14 +100,20 @@ function question(kind: QuestionKind, key: string, source: string, text: string,
   return { key, kind, source, text, answers: answersFor(kind), params };
 }
 
+/** Which question an answer's key belongs to ("long_gap|2026-09-20" is a long_gap). */
+export const questionKindOf = (key: string): string => key.split("|")[0];
+
 /** The questions for this check-in, welcome back first. */
 export function buildCheckinQuestions(input: CheckinInput): CheckinQuestion[] {
   const { today, planReadDate } = input;
   if (!planReadDate) return [];
   const out: CheckinQuestion[] = [];
 
+  // Training logged since the plan read the logs means they weren't away:
+  // the update reads it, so there's nothing to ask.
   const gapDays = daysBetween(planReadDate, today);
-  if (gapDays >= LONG_GAP_DAYS) {
+  const trainedSince = input.lastTrainedDate != null && input.lastTrainedDate > planReadDate;
+  if (gapDays >= LONG_GAP_DAYS && !trainedSince) {
     const weeks = plural(Math.round(gapDays / 7), "week");
     out.push(question("long_gap", `long_gap|${planReadDate}`, "Welcome back",
       `It's been ${weeks} since your plan was last updated. What happened?`, { weeks }));
