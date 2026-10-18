@@ -315,7 +315,7 @@ function renderFollowUps() {
         <div class="fb-answers">${followUpChoices(n).map(([outcome, label]) =>
           `<button class="btn${outcome === chosen ? "" : " secondary"}" type="button" aria-pressed="${outcome === chosen}"
             data-note="${esc(n.id)}" data-outcome="${outcome}">${esc(label)}</button>`).join("")}</div>
-        ${chosen ? `<p class="fb-done small">${esc(followUpDone(n, chosen))} Sent when you update your plan.</p>` : ""}
+        ${chosen ? `<p class="fb-done small">${esc(followUpDone(n, chosen))} ${picks.has(n.id) ? "Sent when you update your plan." : "Saved for your plan update."}</p>` : ""}
       </div>`;
     }).join("")}
   </div>`;

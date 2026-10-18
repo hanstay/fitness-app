@@ -14,6 +14,7 @@ import { runGenerateProgram } from "../src/generate/generateProgram";
 import { queueProgramGeneration } from "../src/generate/queueProgramGeneration";
 import { onProgramGenerationRequested } from "../src/generate/onProgramGenerationRequested";
 import { sweepStaleGenerations } from "../src/generate/sweepStaleGenerations";
+import { MAX_ACTIVE_NOTES } from "../src/lib/planFeedback";
 
 vi.mock("../src/lib/claude", () => ({
   extractStructuredJson: vi.fn(defaultFixtureResponse),
@@ -116,6 +117,16 @@ describe("queued program generation", () => {
     // A malformed answer queues nothing.
     await expect(queue("u9", { followUps: [{ noteId: "a", outcome: "maybe" }] })).rejects.toMatchObject({ code: "invalid-argument" });
     expect(await programDocs("u9", "generating")).toBe(1);
+  });
+
+  it("lets follow-ups bring back a note when the same answers mark another better", async () => {
+    await seedUser("u10");
+    await db.doc("users/u10/feedbackNotes/a").set({ status: "resolved", announced: false });
+    for (let i = 0; i < MAX_ACTIVE_NOTES; i++) await db.doc(`users/u10/feedbackNotes/o${i}`).set({ status: "open", worse: false });
+    await expect(queue("u10", { followUps: [{ noteId: "a", outcome: "still" }] })).rejects.toMatchObject({ code: "resource-exhausted" });
+    await queue("u10", { followUps: [{ noteId: "a", outcome: "still" }, { noteId: "o0", outcome: "better" }] });
+    expect((await db.doc("users/u10/feedbackNotes/a").get()).get("status")).toBe("open");
+    expect((await db.doc("users/u10/feedbackNotes/o0").get()).get("status")).toBe("resolved");
   });
 
   it("lets a group member without their own days/week queue an update", async () => {

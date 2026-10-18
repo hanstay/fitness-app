@@ -153,9 +153,10 @@ const followable = (status: unknown, announced: unknown) => status === "open" ||
  * worse. The check-in sends them with Update plan (queueProgramGeneration),
  * so they're in place before the update reads the notes. A note that's no
  * longer waiting for one (taken back, or already settled) is passed over.
+ * Returns how many were recorded.
  */
-export async function recordFollowUps(uid: string, raw: unknown): Promise<void> {
-  if (raw === undefined || raw === null) return;
+export async function recordFollowUps(uid: string, raw: unknown): Promise<number> {
+  if (raw === undefined || raw === null) return 0;
   if (!Array.isArray(raw) || raw.length > MAX_ACTIVE_NOTES) throw new HttpsError("invalid-argument", "Unknown answer.");
   const answers = new Map<string, FollowUpOutcome>();
   for (const a of raw as Array<{ noteId?: unknown; outcome?: unknown }>) {
@@ -164,16 +165,26 @@ export async function recordFollowUps(uid: string, raw: unknown): Promise<void> 
     }
     answers.set(a.noteId, a.outcome as FollowUpOutcome);
   }
-  if (!answers.size) return;
+  if (!answers.size) return 0;
   const refs = [...answers.keys()].map((id) => notesOf(uid).doc(id));
-  // Taking back "better" puts a note back in play, so it needs room.
-  const reopening = (await getFirestore().getAll(...refs))
-    .filter((d) => d.get("status") === "resolved" && d.get("announced") === false && answers.get(d.id) !== "better").length;
-  await checkRoom(uid, reopening, { activeOnly: true });
-  await getFirestore().runTransaction(async (tx) => {
+  // Taking back "better" puts a note back in play, so it needs room, less
+  // the notes these same answers mark better.
+  const before = await getFirestore().getAll(...refs);
+  const reopening = before.filter((d) => d.get("status") === "resolved" && d.get("announced") === false && answers.get(d.id) !== "better").length;
+  const settling = before.filter((d) => d.get("status") === "open" && answers.get(d.id) === "better").length;
+  try {
+    await checkRoom(uid, reopening - settling, { activeOnly: true });
+  } catch (err) {
+    throw err instanceof HttpsError && err.code === "resource-exhausted"
+      ? new HttpsError("resource-exhausted", `Your plan can work around ${MAX_ACTIVE_NOTES} notes at once, so it can't bring back one you'd said feels better. Leave that one as better, or mark another as better.`)
+      : err;
+  }
+  return getFirestore().runTransaction(async (tx) => {
     const snaps = await tx.getAll(...refs);
+    let recorded = 0;
     for (const snap of snaps) {
       if (!snap.exists || !followable(snap.get("status"), snap.get("announced"))) continue;
+      recorded++;
       const outcome = answers.get(snap.id)!;
       tx.update(snap.ref, {
         announced: FieldValue.delete(), // set again by "better"
@@ -182,6 +193,7 @@ export async function recordFollowUps(uid: string, raw: unknown): Promise<void> 
         followedUpAt: FieldValue.serverTimestamp(),
       });
     }
+    return recorded;
   });
 }
 
@@ -191,10 +203,8 @@ export const followUpFeedbackNote = onCall(async (request) => {
   const ref = noteRef(request.auth.uid, request.data?.noteId);
   const outcome = request.data?.outcome;
   if (!FOLLOW_UP_OUTCOMES.includes(outcome)) throw new HttpsError("invalid-argument", "Unknown answer.");
-  const snap = await ref.get();
-  if (!snap.exists || !followable(snap.get("status"), snap.get("announced"))) {
+  if (!(await recordFollowUps(request.auth.uid, [{ noteId: ref.id, outcome }]))) {
     throw new HttpsError("failed-precondition", "That note isn't waiting for a follow-up.");
   }
-  await recordFollowUps(request.auth.uid, [{ noteId: ref.id, outcome }]);
   return { ok: true };
 });
