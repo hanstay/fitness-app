@@ -29,6 +29,7 @@ service cloud.firestore {
       match /workouts/{id}       { allow read, create, update, delete: if isOwner(uid); }
       match /nutritionDays/{d}   { allow read, create, update, delete: if isOwner(uid); }
       match /checkins/{id}       { allow read: if isOwner(uid); allow write: if false; }
+      match /feedbackNotes/{id}  { allow read: if isOwner(uid); allow write: if false; }  // Functions-only (feedback/feedbackNotes.ts)
     }
 
     match /groups/{groupId} {

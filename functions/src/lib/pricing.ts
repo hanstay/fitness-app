@@ -2,6 +2,7 @@
 // Update this table when Anthropic's pricing changes — nothing else needs to.
 export const MODEL_PRICING_PER_MTOK: Record<string, { input: number; output: number }> = {
   "claude-sonnet-5-5": { input: 2, output: 10 },
+  "claude-haiku-5-5": { input: 0.1, output: 0.5 },
   "claude-sonnet-4-5-20250929": { input: 3, output: 15 },
 };
 

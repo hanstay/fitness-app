@@ -1,11 +1,12 @@
 // Offline cache for the training plan PWA.
 // Bump CACHE when you republish updated pages so phones fetch the new version.
-const CACHE = 'trainer-2026-10-15-update-button-gating';
+const CACHE = 'trainer-2026-10-18-log-checkin';
 const ASSETS = [
   './', 'login.html', 'onboarding.html', 'dashboard.html', 'program.html', 'meals.html', 'profile.html',
   'styles/theme.css',
   'js/firebase-init.js', 'js/auth-guard.js', 'js/onboarding-wizard.js',
   'js/tab-bar.js', 'js/current-program.js', 'js/days.js', 'js/plan-updates.js',
+  'js/plan-feedback.js', 'js/exercise-swap.js', 'js/ui-messages.js',
   'update.js',
   'manifest.webmanifest', 'icon-180.png', 'icon-512.png', 'icon-meals-180.png', 'icon-meals-512.png'
 ];
