@@ -338,6 +338,11 @@ export async function runGenerateGroupProgram(
     // so the member's loads) uses the names new plans are written with.
     sharedProgram = { ...activeGroupProgram, ...existingWeek } as ProgramSharedOutput;
   }
+  // When the leader last moved a day on the week the loads below are written
+  // for; a week Stage A just wrote hasn't been moved.
+  const sharedWeekEditedAtMs: number | undefined = decision.mode === "incremental"
+    ? activeGroupProgram?.weekEditedAt?.toMillis?.()
+    : undefined;
   const currentPhaseIndex = decision.mode === "advance" ? decision.targetPhaseIndex! : decision.mode === "full" ? 0 : decision.fromPhaseIndex ?? 0;
 
   // Stage B: this member's own layer, grounded in their own data, against
@@ -432,6 +437,13 @@ export async function runGenerateGroupProgram(
   // groupProgramId: the shared program this layer was written against, so the
   // summary isn't shown once another member's run has replaced that program.
   await commitProgramGeneration(uid, opts?.placeholder, async (tx) => {
+    // The leader moving a day while this ran (see feedback/moveDay.ts) would
+    // leave these loads on the old days. A queued run's member is refused a
+    // move while it runs; a direct run isn't, so it checks here.
+    const shared = await tx.get(groupProgramRef!);
+    if (shared.get("weekEditedAt")?.toMillis?.() !== sharedWeekEditedAtMs) {
+      throw new HttpsError("aborted", "Your group's plan changed while it was being updated. Please update it again.");
+    }
     await settleNotesInTransaction(db, tx, uid, notes, settlements, groupProgramRef!.id);
     const feedbackRef = db.doc(`users/${uid}/state/groupFeedback`);
     if (answeredFeedback.length) {

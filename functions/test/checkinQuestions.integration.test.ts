@@ -48,7 +48,7 @@ describe("check-in questions", () => {
     expect(first.questions.map((q) => q.kind)).toEqual(["long_gap"]);
     const q = first.questions[0];
 
-    const { noteId } = await call<{ noteId: string }>(answerCheckinQuestion, "q1", { key: q.key, answerId: "injured", text: "Sprained ankle", today: TODAY, tzOffset: -480 });
+    const { noteId } = await call<{ noteId: string }>(answerCheckinQuestion, "q1", { key: q.key, answerId: "injured", text: "Sprained ankle", today: TODAY });
     expect((await db.doc(`users/q1/feedbackNotes/${noteId}`).get()).data()).toMatchObject({
       status: "pending", source: "checkin_question", tags: ["checkin"], questionKey: q.key, answerId: "injured",
       text: "Sprained ankle", exercise: null, day: null, duration: "week",
