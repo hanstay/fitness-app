@@ -1,6 +1,7 @@
 name: CI
 
-# Runs the functions build + test suites on every PR and on pushes to main.
+# Runs the functions build + test suites on every PR and on pushes to main,
+# then deploys main to production (the deploy job at the bottom).
 # The web app (public/**) is static; its one generated file is checked below.
 on:
   pull_request:
@@ -84,3 +85,58 @@ jobs:
 
       - name: Load the module
         run: node -e "const m = require('./index.js'); if (typeof m.seedNewUser !== 'function') throw new Error('seedNewUser not exported')"
+
+  # Ships main to production once both test jobs above pass. Off until the
+  # repository variable AUTO_DEPLOY is "true" (delete it to switch back to
+  # manual deploys). Google trusts only this repo's main branch, through
+  # Workload Identity Federation, so no key is stored in GitHub. One-time
+  # setup: docs/auto-deploy.md.
+  deploy:
+    name: deploy to production
+    needs: [functions, functions-auth]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AUTO_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    # One deploy at a time, never cancelled halfway. GitHub keeps only the
+    # newest waiting run, so merges that land during a deploy are covered by
+    # the next one (which ships the latest main) rather than each deploying.
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write # lets the job ask GitHub for the OIDC token Google checks
+    env:
+      FIREBASE_PROJECT: fitness-app-47a06
+      FUNCTIONS_DISCOVERY_TIMEOUT: "60"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            functions/package-lock.json
+            functions-auth/package-lock.json
+
+      # The CLI loads both codebases to discover their functions, so both
+      # need their dependencies. Same peer-deps caveat as the functions job.
+      - name: Install dependencies
+        run: |
+          npm --prefix functions ci --legacy-peer-deps
+          npm --prefix functions-auth ci
+
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: fitness-app-47a06
+          workload_identity_provider: projects/39106506907/locations/global/workloadIdentityPools/github/providers/fitness-app
+          service_account: github-deployer@fitness-app-47a06.iam.gserviceaccount.com
+
+      # Auth codebase first, then the rest (see firebase.json). No --force:
+      # a deploy that would delete a function stops here with a red check
+      # instead of removing it unattended.
+      - name: Deploy the auth codebase
+        run: npx --yes firebase-tools@15 deploy --project "$FIREBASE_PROJECT" --only functions:auth --non-interactive
+
+      - name: Deploy functions, hosting and rules
+        run: npx --yes firebase-tools@15 deploy --project "$FIREBASE_PROJECT" --only functions:default,hosting,firestore,storage --non-interactive

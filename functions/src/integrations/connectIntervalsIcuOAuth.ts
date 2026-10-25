@@ -13,7 +13,11 @@ interface TokenResponse {
   athlete: { id: string; name?: string };
 }
 
-export const connectIntervalsIcuOAuth = onCall<Input>(async (request) => {
+// The client secret comes from Secret Manager; the client ID and redirect URI
+// are public (they're also in public/js/intervals-oauth.js) and live in
+// functions/.env.fitness-app-47a06, so a deploy from any clone or from CI
+// carries them.
+export const connectIntervalsIcuOAuth = onCall<Input>({ secrets: ["INTERVALS_ICU_CLIENT_SECRET"] }, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
   const uid = request.auth.uid;
   const { code } = request.data;
