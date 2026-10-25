@@ -1,4 +1,4 @@
-// Emulator-backed: the Program page's "Move day" callable
+// Emulator-backed: the Program page's "Rearrange week" callable
 // (feedback/moveDay.ts) on a personal and a group plan. See
 // functions/test/README.md for how to run this.
 import { describe, it, expect, beforeEach } from "vitest";
@@ -56,13 +56,16 @@ beforeEach(async () => {
   await clearFirestoreEmulator();
 });
 
+// Monday's session dragged to Wednesday: Tuesday and Wednesday shift up a day.
+const mondayToWednesday = { Monday: "Wednesday", Tuesday: "Monday", Wednesday: "Tuesday" };
+
 describe("moveProgramDay on a personal plan", () => {
   it("moves the day's sessions, swaps and waiting notes", async () => {
     const ref = await seedPersonal("p1");
     const waiting = await db.collection("users/p1/feedbackNotes").add({ status: "pending", day: "Monday", exercise: "Squat (Barbell)" });
     const used = await db.collection("users/p1/feedbackNotes").add({ status: "open", day: "Monday", exercise: "Squat (Barbell)" });
 
-    await call("p1", { programId: ref.id, from: "Monday", to: "Wednesday" });
+    await call("p1", { programId: ref.id, moves: mondayToWednesday });
 
     const program = (await ref.get()).data()!;
     expect(days(program.sessions)).toEqual(["Wednesday", "Thursday"]);
@@ -73,6 +76,12 @@ describe("moveProgramDay on a personal plan", () => {
     expect((await used.get()).get("day")).toBe("Monday");
   });
 
+  it("still takes the older two-day swap from a cached page", async () => {
+    const ref = await seedPersonal("p6");
+    await call("p6", { programId: ref.id, from: "Monday", to: "Friday" });
+    expect(days((await ref.get()).get("sessions"))).toEqual(["Friday", "Thursday"]);
+  });
+
   it("refuses a plan that isn't current, one being updated, and a fixed session's day", async () => {
     const ref = await seedPersonal("p2", { summary: { currentProgramId: "other" } });
     await expect(call("p2", { programId: ref.id, from: "Monday", to: "Tuesday" })).rejects.toMatchObject({ code: "failed-precondition" });
@@ -81,7 +90,7 @@ describe("moveProgramDay on a personal plan", () => {
     await expect(call("p3", { programId: updating.id, from: "Monday", to: "Tuesday" })).rejects.toMatchObject({ code: "failed-precondition" });
 
     const fixed = await seedPersonal("p4", { athlete: { fixed_sessions: [{ day: "Tuesday", activity: "Spin class" }] } });
-    await expect(call("p4", { programId: fixed.id, from: "Monday", to: "Tuesday" })).rejects.toMatchObject({
+    await expect(call("p4", { programId: fixed.id, moves: mondayToWednesday })).rejects.toMatchObject({
       code: "failed-precondition", message: expect.stringContaining("Spin class"),
     });
     expect(days((await fixed.get()).get("sessions"))).toEqual(["Monday", "Thursday"]);
@@ -89,6 +98,8 @@ describe("moveProgramDay on a personal plan", () => {
 
   it("rejects bad days", async () => {
     const ref = await seedPersonal("p5");
+    await expect(call("p5", { programId: ref.id, moves: { Monday: "Wednesday" } })).rejects.toMatchObject({ code: "invalid-argument" });
+    await expect(call("p5", { programId: ref.id, moves: { Monday: "Monday" } })).rejects.toMatchObject({ code: "invalid-argument" });
     await expect(call("p5", { programId: ref.id, from: "Monday", to: "Monday" })).rejects.toMatchObject({ code: "invalid-argument" });
     await expect(call("p5", { programId: ref.id, from: "Mon", to: "Friday" })).rejects.toMatchObject({ code: "invalid-argument" });
     await expect(moveProgramDay.run({ data: { programId: ref.id, from: "Monday", to: "Friday" } } as never)).rejects.toMatchObject({ code: "unauthenticated" });
@@ -100,12 +111,13 @@ describe("moveProgramDay on a group plan", () => {
     const ref = await seedGroup();
     const note = await db.collection("users/mem/feedbackNotes").add({ status: "pending", day: "Thursday", exercise: "Bench Press (Barbell)" });
 
-    await call("lead", { programId: ref.id, from: "Thursday", to: "Friday" });
+    // Thursday's session to Friday, and Monday's to Thursday, in one save.
+    await call("lead", { programId: ref.id, moves: { Monday: "Thursday", Thursday: "Friday", Friday: "Monday" } });
 
-    expect(days((await ref.get()).get("sessions"))).toEqual(["Monday", "Friday"]);
+    expect(days((await ref.get()).get("sessions"))).toEqual(["Thursday", "Friday"]);
     for (const uid of ["lead", "mem"]) {
       const loads = (await db.doc(`groups/g1/members/${uid}`).get()).get("sessionLoads");
-      expect(loads.map((l: { day: string }) => l.day)).toEqual(["Monday", "Friday"]);
+      expect(loads.map((l: { day: string }) => l.day)).toEqual(["Thursday", "Friday"]);
     }
     expect((await note.get()).get("day")).toBe("Friday");
   });
@@ -113,7 +125,7 @@ describe("moveProgramDay on a group plan", () => {
   it("refuses a member who isn't the leader, a fixed session's day, and a member's running update", async () => {
     const ref = await seedGroup();
     await expect(call("mem", { programId: ref.id, from: "Monday", to: "Tuesday" })).rejects.toMatchObject({ code: "permission-denied" });
-    await expect(call("lead", { programId: ref.id, from: "Monday", to: "Saturday" })).rejects.toMatchObject({
+    await expect(call("lead", { programId: ref.id, moves: { Monday: "Saturday", Saturday: "Sunday", Sunday: "Monday" } })).rejects.toMatchObject({
       code: "failed-precondition", message: expect.stringContaining("Hyrox class"),
     });
     await db.doc("users/mem/state/summary").set({ programGenerationStatus: "generating", programGenerationStartedAt: Timestamp.now() }, { merge: true });

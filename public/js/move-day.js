@@ -1,15 +1,19 @@
-// The Program page's "Move day": swaps the selected day of the week with
-// another, in a bottom sheet, through functions/src/feedback/moveDay.ts
-// (no model call). On a group plan only the leader gets it, and it moves the
-// day for the whole group. The page re-reads the plan afterwards (`onMoved`).
+// The Program page's "Rearrange week": a bottom sheet listing the seven days
+// of the current week, where a session is dragged by its handle to another
+// day and the days in between shift along. Fixed sessions (a class the
+// athlete or group has committed to) are locked to their day. Nothing is
+// saved until "Save new order", which sends the whole new order in one call
+// to functions/src/feedback/moveDay.ts (no model call). On a group plan only
+// the leader gets it, and it rearranges the week for the whole group.
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-functions.js";
 import { functions } from "./firebase-init.js";
-import { normalizeDay } from "./days.js";
+import { WEEKDAYS, normalizeDay } from "./days.js";
 import { errorText } from "./plan-feedback.js";
+import { dropOn, movesOf } from "./week-order.js";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-/** True when every day of `days` (the week strip's entries) names a weekday, so the week can be moved. */
+/** True when every day of `days` (the week strip's entries) names a weekday, so the week can be rearranged. */
 export const canMoveWeek = (days) => days.length > 1 && days.every((d) => normalizeDay(d.day));
 
 let sheet = null;
@@ -18,65 +22,157 @@ function sheetElement() {
   if (sheet) return sheet;
   sheet = document.createElement("dialog");
   sheet.className = "sheet";
-  sheet.setAttribute("aria-labelledby", "moveDayTitle");
+  sheet.setAttribute("aria-labelledby", "rearrangeTitle");
   document.body.appendChild(sheet);
-  // A tap on the backdrop (outside the sheet's box) closes it.
+  // A tap on the backdrop (outside the sheet's box) closes it, without saving.
   sheet.addEventListener("click", (e) => { if (e.target === sheet) sheet.close(); });
   return sheet;
 }
 
+const GRIP = `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>`;
+const LOCK = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Fixed"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`;
+
 /**
- * Opens the sheet for moving `day` (an entry of `days`, the week strip's
- * { day, focus } entries). `onMoved(toWeekday)` runs once the move is saved.
+ * Opens the sheet on `program`'s week (its weeklyStructure and sessions).
+ * `fixedSessions` are the athlete's or group's { day, activity } fixed
+ * sessions. `onSaved(moves)` runs once the new order is saved.
  */
-export function openMoveDaySheet({ programId, days, day, isGroup, report, onMoved }) {
-  const from = normalizeDay(day.day);
-  const others = days.filter((d) => normalizeDay(d.day) !== from);
+export function openRearrangeSheet({ programId, program, fixedSessions, isGroup, report, onSaved }) {
+  const structure = new Map((program.weeklyStructure || []).map((d) => [normalizeDay(d.day), d]));
+  const fixed = new Map((fixedSessions || []).map((s) => [normalizeDay(s.day), s.activity]).filter(([day]) => day));
+  // What each day of the week holds now, by its weekday.
+  const days = Object.fromEntries(WEEKDAYS.map((day) => {
+    const exercises = (program.sessions || []).filter((s) => normalizeDay(s.day) === day)
+      .reduce((n, s) => n + (s.exercises || []).length, 0);
+    const focus = structure.get(day)?.focus;
+    const rest = !exercises && (!focus || /^rest\b/i.test(focus));
+    return [day, {
+      name: fixed.get(day) ?? (rest ? "Rest" : focus || "Training"),
+      sub: fixed.has(day) ? `Fixed in ${isGroup ? "your group's settings" : "your profile"}`
+        : rest ? "Rest day" : `${exercises} exercise${exercises === 1 ? "" : "s"}`,
+      rest,
+    }];
+  }));
+  const locked = WEEKDAYS.map((day) => fixed.has(day));
+  const start = WEEKDAYS.slice();
+  let order = start.slice();
+  let dragging = null; // the day being dragged, while a drag is on
+
   const el = sheetElement();
   el.innerHTML = `
     <div class="sheet-head">
-      <h3 id="moveDayTitle">Move ${esc(from)}</h3>
-      <button class="sheet-close" type="button" aria-label="Close">✕</button>
+      <h3 id="rearrangeTitle">Rearrange your week</h3>
+      <button class="sheet-close" type="button" aria-label="Close without saving">✕</button>
     </div>
-    <p class="muted small" style="margin:0 0 12px">${esc(day.focus)} swaps places with the day you pick${
-      isGroup ? ". This moves it for everyone in your group." : "."}</p>
-    <div role="radiogroup" aria-labelledby="moveDayTitle">
-      ${others.map((d) => `<label class="swap-option">
-        <input type="radio" name="moveDayTo" value="${esc(normalizeDay(d.day))}">
-        <span><b>${esc(normalizeDay(d.day))}</b><span class="muted small">${esc(d.focus)}</span></span>
-      </label>`).join("")}
+    <p class="muted small" style="margin:0 0 12px">Drag a session by its handle to another day. The days in between shift along.${
+      isGroup ? " This changes the week for everyone in your group." : ""}</p>
+    <div class="rw-list" id="rearrangeList"></div>
+    <p class="muted small rw-summary" id="rearrangeSummary" role="status"></p>
+    <div class="rw-actions">
+      <button class="btn secondary" id="rearrangeReset" type="button">Reset</button>
+      <button class="btn" id="rearrangeSave" type="button">Save new order</button>
     </div>
-    <button class="btn full" id="moveDayApply" type="button" disabled>Swap days</button>
-    <p class="status-line" id="moveDayStatus" role="status"></p>`;
+    <p class="status-line" id="rearrangeStatus" role="status"></p>`;
 
   const $ = (sel) => el.querySelector(sel);
-  const to = () => el.querySelector('input[name="moveDayTo"]:checked')?.value;
-  const label = () => `Swap ${from} and ${to()}`;
+  const list = $("#rearrangeList");
+
+  const render = () => {
+    list.innerHTML = WEEKDAYS.map((weekday, i) => {
+      const d = days[order[i]];
+      return `<div class="rw-row" data-slot="${i}">
+        <span class="rw-day">${esc(weekday.slice(0, 3))}</span>
+        <div class="rw-card${locked[i] ? " locked" : ""}${dragging === i ? " dragging" : ""}">
+          ${locked[i]
+            ? `<span class="rw-icon">${LOCK}</span>`
+            : `<button class="rw-handle" type="button" data-slot="${i}" aria-label="Move ${esc(d.name)} (${esc(weekday)}). Drag, or use the up and down arrow keys.">${GRIP}</button>`}
+          <span class="rw-text"><b class="${d.rest ? "rest" : ""}">${esc(d.name)}</b><span class="muted small">${esc(d.sub)}</span></span>
+        </div>
+      </div>`;
+    }).join("");
+    const changed = order.filter((day, i) => day !== start[i]).length;
+    $("#rearrangeSummary").textContent = changed
+      ? `${changed} days change. Nothing is saved until you tap Save.`
+      : "No changes yet.";
+    $("#rearrangeReset").disabled = $("#rearrangeSave").disabled = !changed;
+  };
+
+  // Dragging: the list holds the pointer, since its rows are redrawn as the
+  // session passes over each day.
+  const slotAt = (y) => {
+    let best = null, dist = Infinity;
+    list.querySelectorAll(".rw-row").forEach((row) => {
+      const slot = Number(row.dataset.slot);
+      if (locked[slot]) return;
+      const r = row.getBoundingClientRect();
+      const d = Math.abs(y - (r.top + r.height / 2));
+      if (d < dist) { dist = d; best = slot; }
+    });
+    return best;
+  };
+  list.addEventListener("pointerdown", (e) => {
+    const handle = e.target.closest(".rw-handle");
+    if (!handle || e.button > 0) return;
+    e.preventDefault();
+    dragging = Number(handle.dataset.slot);
+    list.setPointerCapture(e.pointerId);
+    render();
+  });
+  list.addEventListener("pointermove", (e) => {
+    if (dragging === null) return;
+    const to = slotAt(e.clientY);
+    if (to === null || to === dragging) return;
+    order = dropOn(order, locked, dragging, to);
+    dragging = to;
+    render();
+  });
+  const endDrag = () => {
+    if (dragging === null) return;
+    dragging = null;
+    render();
+  };
+  list.addEventListener("pointerup", endDrag);
+  list.addEventListener("pointercancel", endDrag);
+  list.addEventListener("lostpointercapture", endDrag);
+
+  // From the keyboard: the arrow keys move the focused session a day.
+  list.addEventListener("keydown", (e) => {
+    const handle = e.target.closest(".rw-handle");
+    if (!handle || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+    e.preventDefault();
+    const from = Number(handle.dataset.slot);
+    const open = WEEKDAYS.map((_, i) => i).filter((i) => !locked[i]);
+    const to = open[open.indexOf(from) + (e.key === "ArrowUp" ? -1 : 1)];
+    if (to === undefined) return;
+    order = dropOn(order, locked, from, to);
+    render();
+    list.querySelector(`.rw-handle[data-slot="${to}"]`)?.focus();
+  });
 
   $(".sheet-close").addEventListener("click", () => el.close());
-  el.querySelectorAll('input[name="moveDayTo"]').forEach((input) => input.addEventListener("change", () => {
-    $("#moveDayApply").disabled = false;
-    $("#moveDayApply").textContent = label();
-  }));
-
-  $("#moveDayApply").addEventListener("click", async () => {
-    const target = to();
-    if (!target) return;
-    const btn = $("#moveDayApply");
-    btn.disabled = true;
-    btn.innerHTML = `<span class="spinner"></span> Moving…`;
-    $("#moveDayStatus").textContent = "";
+  $("#rearrangeReset").addEventListener("click", () => {
+    order = start.slice();
+    render();
+  });
+  $("#rearrangeSave").addEventListener("click", async () => {
+    const moves = movesOf(order);
+    if (!Object.keys(moves).length) return;
+    const btn = $("#rearrangeSave");
+    btn.disabled = $("#rearrangeReset").disabled = true;
+    btn.innerHTML = `<span class="spinner"></span> Saving…`;
+    $("#rearrangeStatus").textContent = "";
     try {
-      await httpsCallable(functions, "moveProgramDay")({ programId, from, to: target });
+      await httpsCallable(functions, "moveProgramDay")({ programId, moves });
       el.close();
-      report(`Swapped ${from} and ${target}.`);
-      await onMoved(target);
+      report(isGroup ? "Saved your group's new week." : "Saved your new week.");
+      await onSaved(moves);
     } catch (err) {
-      btn.disabled = false;
-      btn.textContent = label();
-      $("#moveDayStatus").textContent = errorText(err);
+      btn.textContent = "Save new order";
+      render();
+      $("#rearrangeStatus").textContent = errorText(err);
     }
   });
 
+  render();
   el.showModal();
 }
