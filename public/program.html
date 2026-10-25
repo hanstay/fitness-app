@@ -89,6 +89,20 @@
   .sheet-head{display:flex; align-items:flex-start; justify-content:space-between; gap:12px}
   .sheet-head h3{margin:0; font-size:1.05rem}
   .sheet-close{width:44px; height:44px; margin:-10px -8px 0 0; background:none; border:0; font-size:.95rem; color:var(--text-secondary); cursor:pointer}
+  .rw-list{display:flex; flex-direction:column; gap:6px; touch-action:pan-y}
+  .rw-row{display:grid; grid-template-columns:40px minmax(0, 1fr); align-items:center; gap:8px}
+  .rw-day{font-size:.75rem; font-weight:700; letter-spacing:.4px; color:var(--text-secondary); text-transform:uppercase}
+  .rw-card{display:flex; align-items:center; gap:6px; min-height:56px; padding:4px 12px 4px 0; border:1px solid var(--border); border-radius:10px; background:var(--card)}
+  .rw-card.locked{background:var(--bg-tint); padding-left:12px}
+  .rw-card.dragging{border-color:var(--accent); box-shadow:0 6px 18px rgba(23,24,26,.18)}
+  .rw-handle{flex-shrink:0; width:44px; height:48px; display:flex; align-items:center; justify-content:center; background:none; border:0; color:var(--text-secondary); cursor:grab; touch-action:none}
+  .rw-card.dragging .rw-handle{cursor:grabbing; color:var(--accent-dark)}
+  .rw-icon{display:flex; color:var(--text-secondary); margin-right:4px}
+  .rw-text{display:flex; flex-direction:column; gap:1px; min-width:0}
+  .rw-text b{font-size:.95rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .rw-text b.rest{color:var(--text-secondary)}
+  .rw-summary{margin:12px 0 10px; font-weight:600}
+  .rw-actions{display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 2fr); gap:10px}
   .swap-option{display:flex; gap:10px; align-items:flex-start; border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin:0 0 8px; cursor:pointer}
   .swap-option > span{display:flex; flex-direction:column; gap:2px; min-width:0}
   .swap-option input{margin-top:4px; accent-color:var(--accent)}
@@ -149,13 +163,13 @@
   import { db } from "./js/firebase-init.js";
   import { requireOnboarded } from "./js/auth-guard.js";
   import { loadCurrentProgram, dayKey, sessionsOn, weeksOut } from "./js/current-program.js";
-  import { canMoveWeek, openMoveDaySheet } from "./js/move-day.js";
+  import { canMoveWeek, openRearrangeSheet } from "./js/move-day.js";
   import { normalizeDay, todayWeekday } from "./js/days.js";
   import { groupPlan, markPlanSeen, changesDismissed, dismissChanges } from "./js/plan-updates.js";
 
   const session = await requireOnboarded();
   if (!session) throw new Error("redirecting");
-  const { user } = session;
+  const { user, profile } = session;
 
   const main = document.getElementById("mainContent");
   const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
@@ -298,15 +312,18 @@
         .filter((s, i, all) => all.findIndex((o) => dayKey(o.day) === dayKey(s.day)) === i) // one cell per day
         .map((s) => ({ day: s.day, focus: s.label }));
     let days = weekDays();
-    // Move day swaps two days of the current plan: the athlete's own, or on a
-    // group plan the shared week, which only the group's leader can move.
-    const isLeader = onGroupPlan && (await getDoc(doc(db, "groups", summary.groupId)).catch(() => null))?.data()?.leaderUid === user.uid;
+    // Rearrange week reorders the days of the current plan: the athlete's own,
+    // or on a group plan the shared week, which only the group's leader can
+    // rearrange. Fixed sessions stay on their day.
+    const group = onGroupPlan ? (await getDoc(doc(db, "groups", summary.groupId)).catch(() => null))?.data() : null;
+    const isLeader = group?.leaderUid === user.uid;
     const canMove = (onGroupPlan ? isLeader : planId === summary?.currentProgramId) && (p.weeklyStructure || []).length > 0;
 
     if (days.length) {
       main.insertAdjacentHTML("beforeend", section("week", "This week", `
         <div class="week-strip" id="weekStrip"></div>
-        ${canMove && canMoveWeek(days) ? `<button class="link-btn" id="moveDay" type="button">⇄ Move day</button>` : ""}
+        ${canMove && canMoveWeek(days) ? `<button class="link-btn" id="rearrangeWeek" type="button">⇄ Rearrange week</button>`
+          : onGroupPlan && !isLeader && canMoveWeek(days) ? `<p class="muted small" style="margin:6px 0 0">Your group's leader sets the order of the week.</p>` : ""}
         <div id="dayDetail" style="margin-top:8px"></div>`));
 
       const weekStrip = document.getElementById("weekStrip");
@@ -324,8 +341,6 @@
             <span class="d">${esc((d.day || "").slice(0, 3).toUpperCase())}</span>
             <span class="f">${esc(d.focus)}</span>
           </div>`).join("");
-        const moveBtn = document.getElementById("moveDay");
-        if (moveBtn) moveBtn.textContent = `⇄ Move ${normalizeDay(days[selected].day)}`;
         weekStrip.querySelectorAll(".day-cell").forEach((el) => el.addEventListener("click", () => {
           selected = Number(el.dataset.i);
           renderStrip();
@@ -362,15 +377,20 @@
         }
       };
 
-      document.getElementById("moveDay")?.addEventListener("click", () => openMoveDaySheet({
+      document.getElementById("rearrangeWeek")?.addEventListener("click", () => openRearrangeSheet({
         programId: p.programDocId,
-        days,
-        day: days[selected],
+        program: p,
+        fixedSessions: onGroupPlan ? group?.fixedSessions : profile?.athlete?.fixed_sessions,
         isGroup: onGroupPlan,
         report: (message) => showToast(message, { type: "info" }),
-        // A move edits the plan in place: re-read it, and follow the day to where it went.
-        onMoved: async (to) => {
-          p = (await loadCurrentProgram(user.uid, summary)) ?? p;
+        // A save edits the plan in place: re-read it, and follow the selected
+        // day's session to where it went.
+        onSaved: async (moves) => {
+          const from = normalizeDay(days[selected].day);
+          const to = moves[from] ?? from;
+          const fresh = await loadCurrentProgram(user.uid, summary).catch(() => null);
+          if (!fresh) return location.reload(); // saved, but the new week couldn't be read here
+          p = fresh;
           days = weekDays();
           todayIndex = days.findIndex((d) => normalizeDay(d.day) === todayWeekday());
           selected = Math.max(0, days.findIndex((d) => normalizeDay(d.day) === to));
