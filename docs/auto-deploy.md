@@ -35,9 +35,11 @@ npx firebase-tools functions:secrets:set INTERVALS_ICU_CLIENT_SECRET --project f
 ```
 
 Paste the value of `INTERVALS_ICU_CLIENT_SECRET` from your local
-`functions/.env` at the prompt. Then delete the three `INTERVALS_ICU_*` lines
-from `functions/.env` on every machine you deploy from: Firebase refuses a
-deploy where the same name is both a secret and a plain variable.
+`functions/.env` at the prompt. Then, on every machine you deploy from, move
+the `INTERVALS_ICU_CLIENT_SECRET` line out of `functions/.env` into
+`functions/.secret.local` (gitignored; the emulator reads secrets from it).
+Firebase refuses a deploy where the same name is both a secret and a plain
+variable. The client ID and redirect URI lines can stay.
 
 Also set the container-image cleanup policy once (the CLI otherwise stops a
 non-interactive deploy to ask about it):
