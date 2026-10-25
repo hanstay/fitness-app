@@ -323,7 +323,7 @@
       main.insertAdjacentHTML("beforeend", section("week", "This week", `
         <div class="week-strip" id="weekStrip"></div>
         ${canMove && canMoveWeek(days) ? `<button class="link-btn" id="rearrangeWeek" type="button">⇄ Rearrange week</button>`
-          : onGroupPlan && !isLeader ? `<p class="muted small" style="margin:6px 0 0">Your group's leader sets the order of the week.</p>` : ""}
+          : onGroupPlan && !isLeader && canMoveWeek(days) ? `<p class="muted small" style="margin:6px 0 0">Your group's leader sets the order of the week.</p>` : ""}
         <div id="dayDetail" style="margin-top:8px"></div>`));
 
       const weekStrip = document.getElementById("weekStrip");
@@ -388,7 +388,9 @@
         onSaved: async (moves) => {
           const from = normalizeDay(days[selected].day);
           const to = moves[from] ?? from;
-          p = (await loadCurrentProgram(user.uid, summary)) ?? p;
+          const fresh = await loadCurrentProgram(user.uid, summary).catch(() => null);
+          if (!fresh) return location.reload(); // saved, but the new week couldn't be read here
+          p = fresh;
           days = weekDays();
           todayIndex = days.findIndex((d) => normalizeDay(d.day) === todayWeekday());
           selected = Math.max(0, days.findIndex((d) => normalizeDay(d.day) === to));

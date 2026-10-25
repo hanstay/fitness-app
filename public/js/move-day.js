@@ -77,19 +77,31 @@ export function openRearrangeSheet({ programId, program, fixedSessions, isGroup,
   const $ = (sel) => el.querySelector(sel);
   const list = $("#rearrangeList");
 
+  // The rows are drawn once and then updated in place, so the handle under
+  // a finger stays in the page for the whole drag (Safari stops sending a
+  // touch's events once its element is removed).
+  list.innerHTML = WEEKDAYS.map((weekday, i) => `<div class="rw-row" data-slot="${i}">
+      <span class="rw-day">${esc(weekday.slice(0, 3))}</span>
+      <div class="rw-card${locked[i] ? " locked" : ""}">
+        ${locked[i]
+          ? `<span class="rw-icon">${LOCK}</span>`
+          : `<button class="rw-handle" type="button" data-slot="${i}">${GRIP}</button>`}
+        <span class="rw-text"><b></b><span class="muted small"></span></span>
+      </div>
+    </div>`).join("");
+  const rows = [...list.querySelectorAll(".rw-row")];
+
   const render = () => {
-    list.innerHTML = WEEKDAYS.map((weekday, i) => {
+    rows.forEach((row, i) => {
       const d = days[order[i]];
-      return `<div class="rw-row" data-slot="${i}">
-        <span class="rw-day">${esc(weekday.slice(0, 3))}</span>
-        <div class="rw-card${locked[i] ? " locked" : ""}${dragging === i ? " dragging" : ""}">
-          ${locked[i]
-            ? `<span class="rw-icon">${LOCK}</span>`
-            : `<button class="rw-handle" type="button" data-slot="${i}" aria-label="Move ${esc(d.name)} (${esc(weekday)}). Drag, or use the up and down arrow keys.">${GRIP}</button>`}
-          <span class="rw-text"><b class="${d.rest ? "rest" : ""}">${esc(d.name)}</b><span class="muted small">${esc(d.sub)}</span></span>
-        </div>
-      </div>`;
-    }).join("");
+      row.querySelector(".rw-card").classList.toggle("dragging", dragging === i);
+      row.querySelector(".rw-handle")?.setAttribute("aria-label",
+        `Move ${d.name} (${WEEKDAYS[i]}). Drag, or use the up and down arrow keys.`);
+      const name = row.querySelector(".rw-text b");
+      name.textContent = d.name;
+      name.classList.toggle("rest", d.rest);
+      row.querySelector(".rw-text span").textContent = d.sub;
+    });
     const changed = order.filter((day, i) => day !== start[i]).length;
     $("#rearrangeSummary").textContent = changed
       ? `${changed} days change. Nothing is saved until you tap Save.`
@@ -97,12 +109,12 @@ export function openRearrangeSheet({ programId, program, fixedSessions, isGroup,
     $("#rearrangeReset").disabled = $("#rearrangeSave").disabled = !changed;
   };
 
-  // Dragging: the list holds the pointer, since its rows are redrawn as the
-  // session passes over each day.
+  // Dragging: the list holds the pointer, as the session passes from row to
+  // row. One finger at a time; near the sheet's top or bottom edge it scrolls.
+  let pointer = null;
   const slotAt = (y) => {
     let best = null, dist = Infinity;
-    list.querySelectorAll(".rw-row").forEach((row) => {
-      const slot = Number(row.dataset.slot);
+    rows.forEach((row, slot) => {
       if (locked[slot]) return;
       const r = row.getBoundingClientRect();
       const d = Math.abs(y - (r.top + r.height / 2));
@@ -112,23 +124,27 @@ export function openRearrangeSheet({ programId, program, fixedSessions, isGroup,
   };
   list.addEventListener("pointerdown", (e) => {
     const handle = e.target.closest(".rw-handle");
-    if (!handle || e.button > 0) return;
+    if (!handle || e.button > 0 || dragging !== null) return;
     e.preventDefault();
     dragging = Number(handle.dataset.slot);
+    pointer = e.pointerId;
     list.setPointerCapture(e.pointerId);
     render();
   });
   list.addEventListener("pointermove", (e) => {
-    if (dragging === null) return;
+    if (dragging === null || e.pointerId !== pointer) return;
+    const box = el.getBoundingClientRect();
+    if (e.clientY < box.top + 48) el.scrollTop -= 12;
+    else if (e.clientY > box.bottom - 48) el.scrollTop += 12;
     const to = slotAt(e.clientY);
     if (to === null || to === dragging) return;
     order = dropOn(order, locked, dragging, to);
     dragging = to;
     render();
   });
-  const endDrag = () => {
-    if (dragging === null) return;
-    dragging = null;
+  const endDrag = (e) => {
+    if (dragging === null || e.pointerId !== pointer) return;
+    dragging = pointer = null;
     render();
   };
   list.addEventListener("pointerup", endDrag);
@@ -163,14 +179,15 @@ export function openRearrangeSheet({ programId, program, fixedSessions, isGroup,
     $("#rearrangeStatus").textContent = "";
     try {
       await httpsCallable(functions, "moveProgramDay")({ programId, moves });
-      el.close();
-      report(isGroup ? "Saved your group's new week." : "Saved your new week.");
-      await onSaved(moves);
     } catch (err) {
       btn.textContent = "Save new order";
       render();
       $("#rearrangeStatus").textContent = errorText(err);
+      return;
     }
+    el.close();
+    report(isGroup ? "Saved your group's new week." : "Saved your new week.");
+    await onSaved(moves);
   });
 
   render();
