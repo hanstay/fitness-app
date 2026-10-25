@@ -7,8 +7,9 @@ import { functions } from "./firebase-init.js";
 
 const AUTHORIZE_URL = "https://intervals.icu/oauth/authorize";
 const CLIENT_ID = "723";
-// Must match INTERVALS_ICU_REDIRECT_URI in functions/.env exactly, and must
-// match what's registered with intervals.icu. Update both together.
+// Must match INTERVALS_ICU_REDIRECT_URI in functions/.env.fitness-app-47a06
+// exactly, and must match what's registered with intervals.icu. Update both
+// together.
 const REDIRECT_URI = "https://fitness-app-47a06.web.app/oauth/intervals-callback";
 const SCOPE = "ACTIVITY:READ,WELLNESS:READ";
 

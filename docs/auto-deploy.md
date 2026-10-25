@@ -22,6 +22,33 @@ Firestore data.
 
 ## One-time setup
 
+### 1. Move the intervals.icu client secret into Secret Manager (on your PC)
+
+CI has no `functions/.env` (it's gitignored), so the intervals.icu client
+secret now lives in Secret Manager, like the Anthropic key. The client ID and
+redirect URI aren't secret and are committed in
+`functions/.env.fitness-app-47a06`. Do this **before merging**, because every
+deploy, manual or automatic, now expects the secret to exist:
+
+```powershell
+npx firebase-tools functions:secrets:set INTERVALS_ICU_CLIENT_SECRET --project fitness-app-47a06
+```
+
+Paste the value of `INTERVALS_ICU_CLIENT_SECRET` from your local
+`functions/.env` at the prompt. Then delete the three `INTERVALS_ICU_*` lines
+from `functions/.env` on every machine you deploy from: Firebase refuses a
+deploy where the same name is both a secret and a plain variable.
+
+Also set the container-image cleanup policy once (the CLI otherwise stops a
+non-interactive deploy to ask about it):
+
+```powershell
+npx firebase-tools functions:artifacts:setpolicy --project fitness-app-47a06 --location us-central1 --force
+npx firebase-tools functions:artifacts:setpolicy --project fitness-app-47a06 --location asia-southeast1 --force
+```
+
+### 2. Let GitHub deploy (Cloud Shell)
+
 Run this in [Cloud Shell](https://console.cloud.google.com/?cloudshell=true&project=fitness-app-47a06)
 (it has `gcloud` installed and is already signed in as you). It's safe to
 paste in one go.
@@ -74,10 +101,20 @@ for SA in $PROJECT_NUMBER-compute@developer.gserviceaccount.com $PROJECT_ID@apps
   gcloud iam service-accounts add-iam-policy-binding $SA \
     --member="serviceAccount:$DEPLOYER" --role=roles/iam.serviceAccountUser --quiet >/dev/null
 done
+
+# The functions read these secrets at runtime. Granting it here up front means
+# the deployer only has to check the binding, not change it.
+for SECRET in ANTHROPIC_API_KEY INTERVALS_ICU_CLIENT_SECRET; do
+  gcloud secrets add-iam-policy-binding $SECRET \
+    --member="serviceAccount:$PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
+    --role=roles/secretmanager.secretAccessor --quiet >/dev/null
+done
 echo "Done."
 ```
 
-Then switch it on in GitHub: **Settings → Secrets and variables → Actions →
+### 3. Switch it on
+
+In GitHub: **Settings → Secrets and variables → Actions →
 Variables → New repository variable**, name `AUTO_DEPLOY`, value `true`.
 
 To check it works without waiting for a PR, open the latest CI run on `main`
@@ -89,13 +126,18 @@ under the Actions tab and click **Re-run all jobs**.
   names the missing permission. Grant the role that holds it to
   `github-deployer` with the same `add-iam-policy-binding` command, then
   re-run the job.
+- **New secret**: when a function starts using a new secret, set it with
+  `functions:secrets:set` and grant the compute account access with the
+  `gcloud secrets add-iam-policy-binding` line above, before merging.
 - **Would delete a function**: the deploy refuses on purpose rather than
   delete a function unattended. Run that one deploy yourself
   (`npx firebase-tools deploy --project fitness-app-47a06`), then later merges
   deploy normally.
 - **Bad change reached production**: revert the PR on GitHub; merging the
   revert deploys the previous code. Hosting alone can also be rolled back in
-  the Firebase console (Hosting → release history).
+  the Firebase console (Hosting → release history). Don't use **Re-run** on
+  an old CI run to roll back: it redeploys that run's code, including its
+  functions and rules, which is easy to do by accident.
 
 ## Switching it off
 

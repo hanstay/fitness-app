@@ -96,8 +96,9 @@ jobs:
     needs: [functions, functions-auth]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AUTO_DEPLOY == 'true'
     runs-on: ubuntu-latest
-    # One deploy at a time, in merge order; a queued one waits rather than
-    # cancelling a deploy halfway through.
+    # One deploy at a time, never cancelled halfway. GitHub keeps only the
+    # newest waiting run, so merges that land during a deploy are covered by
+    # the next one (which ships the latest main) rather than each deploying.
     concurrency:
       group: production-deploy
       cancel-in-progress: false
